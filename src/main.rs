@@ -730,17 +730,18 @@ impl App {
         let font = &self.font;
         let glyphs = &mut self.glyphs;
         let term = &self.term;
+        let history_len = term.scrollback.len();
+        let screen_start = history_len.saturating_sub(term.scroll_offset);
 
         for row in 0..term.rows {
-            let history_len = term.scrollback.len();
-            let screen_start = history_len.saturating_sub(term.scroll_offset);
-            for col in 0..term.cols {
-                let absolute_row = screen_start + row;
-                let cell = if absolute_row < history_len {
-                    term.scrollback[absolute_row][col]
-                } else {
-                    term.cells[(absolute_row - history_len) * term.cols + col]
-                };
+            let absolute_row = screen_start + row;
+            let row_cells = if absolute_row < history_len {
+                &term.scrollback[absolute_row]
+            } else {
+                let start = (absolute_row - history_len) * term.cols;
+                &term.cells[start..start + term.cols]
+            };
+            for (col, &cell) in row_cells.iter().enumerate() {
                 let is_cursor = term.cursor_visible
                     && term.scroll_offset == 0
                     && row == term.cy
@@ -795,11 +796,14 @@ fn fill_rect(
     rh: usize,
     color: u32,
 ) {
-    for yy in y..(y + rh).min(h) {
-        let row = yy * w;
-        for xx in x..(x + rw).min(w) {
-            px[row + xx] = color;
-        }
+    let x_end = x.saturating_add(rw).min(w);
+    if x >= x_end {
+        return;
+    }
+    for yy in y..y.saturating_add(rh).min(h) {
+        let row_start = yy * w + x;
+        let row_end = yy * w + x_end;
+        px[row_start..row_end].fill(color);
     }
 }
 

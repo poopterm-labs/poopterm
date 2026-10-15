@@ -10,3 +10,10 @@ portable-pty = "0.8"
 vte = "0.13"
 fontdue = "0.9"
 
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+
