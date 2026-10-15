@@ -38,19 +38,22 @@ brew install poopterm-labs/poopterm/poopterm
 ```
 
 On macOS, Homebrew builds both the `poopterm` command and a `Poopterm.app`
-bundle containing the `.icns` app icon. Open the installed app with:
+bundle containing the `.icns` app icon. The bundle lives in Homebrew's managed
+prefix. Open it directly with:
 
 ```sh
 open "$(brew --prefix)/opt/poopterm/Poopterm.app"
 ```
 
-The command remains available for launching Poopterm from a terminal. The app
-bundle lives in Homebrew's managed prefix, so Homebrew upgrades and uninstalls
-keep it in sync with the command.
+To make the app appear in your user Applications folder, create a symlink:
 
-The AUR package recipe and its generated `.SRCINFO` are in `packaging/aur/`.
-After the package is published, install it with your preferred AUR helper, for
-example `yay -S poopterm`.
+```sh
+mkdir -p ~/Applications
+ln -sfn "$(brew --prefix)/opt/poopterm/Poopterm.app" ~/Applications/Poopterm.app
+```
+
+The link follows Homebrew upgrades. The `poopterm` command also remains
+available for launching the app from a terminal.
 
 ### Build dependencies
 
