@@ -2,7 +2,7 @@ class Poopterm < Formula
   desc "Small, poop-colored terminal emulator"
   homepage "https://github.com/poopterm-labs/poopterm"
   url "https://github.com/poopterm-labs/poopterm/archive/09af1ab3be3f74a33adb4389f5451a08ec96bd8b.tar.gz"
-  version "0.1.0"
+  version "0.2.0"
   sha256 "fee81af7c140aa011d06483233aaf59ed8daf42df45f270970fe7ae74bbb5d7a"
   license "MIT"
 
@@ -10,9 +10,10 @@ class Poopterm < Formula
 
   def install
     system "cargo", "build", "--release", "--locked"
-    bin.install "target/release/poopterm"
-
-    return unless OS.mac?
+    unless OS.mac?
+      bin.install "target/release/poopterm"
+      return
+    end
 
     app = prefix/"Poopterm.app"
     macos = app/"Contents/MacOS"
@@ -40,6 +41,7 @@ class Poopterm < Formula
       </plist>
     PLIST
     chmod 0755, macos/"Poopterm"
+    bin.install "target/release/poopterm"
   end
 
   test do

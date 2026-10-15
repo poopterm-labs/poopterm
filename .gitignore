@@ -56,3 +56,6 @@ rust-project.json
 
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,rust,rust-analyzer
+
+# Defer AUR packaging until Linux support is ready
+/packaging/aur/
