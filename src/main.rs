@@ -2,8 +2,10 @@ use std::{
     collections::{HashMap, VecDeque},
     env,
     error::Error,
+    fs,
     io::{Read, Write},
     num::NonZeroU32,
+    path::PathBuf,
     sync::Arc,
     thread,
 };
@@ -41,20 +43,54 @@ const PALETTE: [u32; 8] = [
 
 #[derive(Clone, Copy)]
 struct Theme {
+    kind: ThemeKind,
     fg: u32,
     bg: u32,
     border: u32,
     palette: [u32; 8],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ThemeKind {
+    MacOs,
+    Catppuccin,
+    RosePine,
+    Poop,
+}
+
+impl ThemeKind {
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim().trim_matches('"').to_ascii_lowercase().as_str() {
+            "macos" | "mac" => Some(Self::MacOs),
+            "catppuccin" | "catppuccin-mocha" => Some(Self::Catppuccin),
+            "rosepine" | "rose-pine" => Some(Self::RosePine),
+            "poop" => Some(Self::Poop),
+            _ => None,
+        }
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Self::MacOs => "macos",
+            Self::Catppuccin => "catppuccin",
+            Self::RosePine => "rosepine",
+            Self::Poop => "poop",
+        }
+    }
+    fn next(self) -> Self {
+        match self {
+            Self::MacOs => Self::Catppuccin,
+            Self::Catppuccin => Self::RosePine,
+            Self::RosePine => Self::Poop,
+            Self::Poop => Self::MacOs,
+        }
+    }
+}
+
 impl Theme {
-    fn from_env() -> Self {
-        match env::var("POOPTERM_THEME")
-            .unwrap_or_default()
-            .to_lowercase()
-            .as_str()
-        {
-            "macos" | "mac" => Self {
+    fn from_kind(kind: ThemeKind) -> Self {
+        match kind {
+            ThemeKind::MacOs => Self {
+                kind,
                 fg: 0xE6E6E6,
                 bg: 0x1E1E1E,
                 border: 0x3A3A3C,
@@ -62,7 +98,8 @@ impl Theme {
                     0x000000, 0xC23621, 0x25BC26, 0xADAD27, 0x492EE1, 0xD338D3, 0x33BBC8, 0xBBBBBB,
                 ],
             },
-            "catppuccin" | "catppuccin-mocha" => Self {
+            ThemeKind::Catppuccin => Self {
+                kind,
                 fg: 0xCDD6F4,
                 bg: 0x1E1E2E,
                 border: 0x45475A,
@@ -70,7 +107,8 @@ impl Theme {
                     0x45475A, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xF5C2E7, 0x94E2D5, 0xBAC2DE,
                 ],
             },
-            "rosepine" | "rose-pine" => Self {
+            ThemeKind::RosePine => Self {
+                kind,
                 fg: 0xE0DEF4,
                 bg: 0x191724,
                 border: 0x26233A,
@@ -78,7 +116,8 @@ impl Theme {
                     0x26233A, 0xEB6F92, 0x31748F, 0xF6C177, 0x9CCFD8, 0xC4A7E7, 0x9CCFD8, 0xE0DEF4,
                 ],
             },
-            _ => Self {
+            ThemeKind::Poop => Self {
+                kind,
                 fg: DEFAULT_FG,
                 bg: DEFAULT_BG,
                 border: BORDER_COL,
@@ -86,6 +125,54 @@ impl Theme {
             },
         }
     }
+
+    fn load() -> Self {
+        let kind = env::var("POOPTERM_THEME")
+            .ok()
+            .and_then(|s| ThemeKind::parse(&s))
+            .or_else(|| read_config_theme())
+            .unwrap_or(ThemeKind::Poop);
+        Self::from_kind(kind)
+    }
+}
+
+fn config_path() -> PathBuf {
+    if let Some(path) = env::var_os("POOPTERM_CONFIG") {
+        return PathBuf::from(path);
+    }
+    if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
+        return PathBuf::from(xdg).join("poopterm/config.toml");
+    }
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/poopterm/config.toml")
+    } else {
+        home.join(".config/poopterm/config.toml")
+    }
+}
+
+fn read_config_theme() -> Option<ThemeKind> {
+    let text = fs::read_to_string(config_path()).ok()?;
+    text.lines().find_map(|line| {
+        let line = line.split('#').next()?.trim();
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == "theme")
+            .then(|| ThemeKind::parse(value))
+            .flatten()
+    })
+}
+
+fn save_config_theme(kind: ThemeKind) -> std::io::Result<()> {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        path,
+        format!("# Poopterm configuration\ntheme = \"{}\"\n", kind.name()),
+    )
 }
 
 fn bright_color(index: usize) -> u32 {
@@ -137,6 +224,42 @@ struct Term {
 }
 
 impl Term {
+    fn set_theme(&mut self, theme: Theme) {
+        let (old_fg, old_bg) = (self.default_fg, self.default_bg);
+        let recolor = |cells: &mut [Cell]| {
+            for cell in cells {
+                if cell.fg == old_fg {
+                    cell.fg = theme.fg;
+                }
+                if cell.bg == old_bg {
+                    cell.bg = theme.bg;
+                }
+            }
+        };
+        recolor(&mut self.cells);
+        for line in &mut self.scrollback {
+            recolor(line);
+        }
+        if let Some((cells, _, _, fg, bg)) = &mut self.primary_screen {
+            recolor(cells);
+            if *fg == old_fg {
+                *fg = theme.fg;
+            }
+            if *bg == old_bg {
+                *bg = theme.bg;
+            }
+        }
+        self.default_fg = theme.fg;
+        self.default_bg = theme.bg;
+        self.palette = theme.palette;
+        if self.fg == old_fg {
+            self.fg = theme.fg;
+        }
+        if self.bg == old_bg {
+            self.bg = theme.bg;
+        }
+    }
+
     fn blank(&self) -> Cell {
         Cell {
             ch: ' ',
@@ -481,9 +604,21 @@ struct App {
     width: u32,
     height: u32,
     ctrl: bool,
+    shift: bool,
 }
 
 impl App {
+    fn cycle_theme(&mut self) {
+        self.theme = Theme::from_kind(self.theme.kind.next());
+        self.term.set_theme(self.theme);
+        if let Err(error) = save_config_theme(self.theme.kind) {
+            eprintln!("poopterm: could not save theme config: {error}");
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
     fn resize(&mut self, w: u32, h: u32) {
         self.width = w.max(1);
         self.height = h.max(1);
@@ -739,7 +874,10 @@ impl ApplicationHandler<UserEvent> for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::ModifiersChanged(m) => self.ctrl = m.state().control_key(),
+            WindowEvent::ModifiersChanged(m) => {
+                self.ctrl = m.state().control_key();
+                self.shift = m.state().shift_key();
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let lines = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y.round() as isize,
@@ -751,6 +889,13 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                if self.ctrl
+                    && self.shift
+                    && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("t"))
+                {
+                    self.cycle_theme();
+                    return;
+                }
                 if let Some(bytes) = self.key_bytes(&event.logical_key) {
                     let _ = self.writer.write_all(&bytes);
                     let _ = self.writer.flush();
@@ -809,6 +954,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
     let mut cmd = CommandBuilder::new(shell);
     cmd.env("TERM", "xterm-256color");
+    #[cfg(target_os = "macos")]
+    cmd.arg("-l");
     let _child = pair.slave.spawn_command(cmd)?;
     // The slave must be closed in the parent for EOF to arrive.
     drop(pair.slave);
@@ -836,7 +983,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let theme = Theme::from_env();
+    let theme = Theme::load();
     let mut app = App {
         theme,
         font,
@@ -858,6 +1005,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         width: 0,
         height: 0,
         ctrl: false,
+        shift: false,
     };
 
     event_loop.run_app(&mut app)?;

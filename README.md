@@ -30,13 +30,23 @@ To build without launching the app, run `cargo build --release`.
 
 ## Package managers
 
-The repository includes a Homebrew formula in `Formula/poopterm.rb`. To install
-it from this repository, add the project as a tap and install the formula:
+The Homebrew formula is available from the Poopterm tap. Install it with:
 
 ```sh
 brew tap poopterm-labs/poopterm https://github.com/poopterm-labs/poopterm.git
 brew install poopterm-labs/poopterm/poopterm
 ```
+
+On macOS, Homebrew builds both the `poopterm` command and a `Poopterm.app`
+bundle containing the `.icns` app icon. Open the installed app with:
+
+```sh
+open "$(brew --prefix)/opt/poopterm/Poopterm.app"
+```
+
+The command remains available for launching Poopterm from a terminal. The app
+bundle lives in Homebrew's managed prefix, so Homebrew upgrades and uninstalls
+keep it in sync with the command.
 
 The AUR package recipe and its generated `.SRCINFO` are in `packaging/aur/`.
 After the package is published, install it with your preferred AUR helper, for
@@ -76,24 +86,28 @@ pkg install rust pkgconf xorg libX11 libxkbcommon wayland
 
 ## Themes
 
-Set `POOPTERM_THEME` when launching Poopterm. Available values are `macos`,
-`catppuccin`, `rosepine`, and `poop` (the default). For example:
+Poopterm includes macOS, Catppuccin Mocha, Rosé Pine, and signature Poop themes.
+Press **Ctrl+Shift+T** to cycle through them. The selected theme is saved to a
+config file and restored the next time you launch Poopterm.
+
+The default config path is `~/Library/Application Support/poopterm/config.toml`
+on macOS and `~/.config/poopterm/config.toml` on Linux and FreeBSD (or
+`$XDG_CONFIG_HOME/poopterm/config.toml` when `XDG_CONFIG_HOME` is set). Create
+the file and set `theme` to one of `macos`, `catppuccin`, `rosepine`, or `poop`:
+
+```toml
+theme = "catppuccin"
+```
+
+Set `POOPTERM_CONFIG` to use a config file at another path. `POOPTERM_THEME`
+can override the saved setting for a single launch, for example:
 
 ```sh
 POOPTERM_THEME=catppuccin cargo run --release
 ```
 
-For an installed executable, use the same pattern:
-
 ```sh
 POOPTERM_THEME=rosepine poopterm
-```
-
-To use a theme every time you open a shell, add an export to your shell startup
-file, such as `~/.zshrc`:
-
-```sh
-export POOPTERM_THEME=macos
 ```
 
 ## Install on Linux or FreeBSD
@@ -120,9 +134,16 @@ PREFIX="$HOME/.local" make uninstall
 
 ## macOS app bundle
 
-`cargo run` launches the executable directly. To make a macOS `.app` that has
-the Poopterm Dock icon, package `target/release/poopterm`, `assets/poopterm.icns`,
-and an `Info.plist` in an app bundle.
+`cargo run` launches the executable directly. App launches use a login shell,
+so zsh loads both `~/.zprofile` and `~/.zshrc`. Put Homebrew's `shellenv` setup in
+`~/.zprofile` so GUI-launched shells inherit its PATH. For Apple Silicon:
+
+```sh
+eval "$(/opt/homebrew/bin/brew shellenv)"
+```
+
+For Intel Macs, use `/usr/local/bin/brew` instead. Commands such as `hyfetch`
+must be installed and available on the PATH in that login shell.
 
 ## Compatibility notes
 
