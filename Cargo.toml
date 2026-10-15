@@ -1,0 +1,12 @@
+[package]
+name = "poopterm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+[dependencies]
+winit = "0.30"
+softbuffer = "0.4"
+portable-pty = "0.8"
+vte = "0.13"
+fontdue = "0.9"
+

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=poopterm
+GenericName=Terminal Emulator
+Comment=A tiny, poop-colored terminal
+Exec=poopterm
+Icon=poopterm
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=terminal;shell;console;poop;
