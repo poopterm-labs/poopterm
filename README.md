@@ -1,83 +1,132 @@
 # poopterm 💩
 
-A tiny, fully slopcoded terminal emulator, written in Rust. (this is the worst terminal of all time, i love it.)
+Poopterm is a small, poop-colored terminal emulator written in Rust. It opens
+your default shell in a native window, with a caramel frame and four built-in
+color themes. It is a lightweight project and an intentionally incomplete
+terminal emulator, so some command-line apps may not behave as expected.
 
-![poopterm icon](assets/icon.png)
+![Poopterm app icon](assets/icon.png)
 
 ## Features
 
-- PTY-backed shell (`$SHELL`, falls back to `/bin/sh`)
-- 16-color SGR support and basic cursor movement
-- Caramel rim window with macOS traffic lights (transparent title bar)
-- Resizes the shell PTY with the window
-- Desktop launcher and icon for Linux and FreeBSD
-
-## Requirements
-
-- Rust (stable), installed via [rustup](https://rustup.rs)
-- macOS, Linux, or FreeBSD with X11 (Wayland works on Linux)
-
-### Linux (Debian/Ubuntu)
-
-```bash
-sudo apt install build-essential pkg-config libx11-dev libxkbcommon-dev libwayland-dev
-```
-
-Fedora: `sudo dnf install gcc pkgconf-pkg-config libX11-devel libxkbcommon-devel wayland-devel`
-
-Arch: `sudo pacman -S base-devel libx11 libxkbcommon wayland`
-
-### FreeBSD
-
-```sh
-pkg install rust pkgconf
-```
-
-Plus `xorg` or `libX11`, and `libxkbcommon` and `wayland` for Wayland.
+- Starts the shell in `$SHELL`, falling back to `/bin/sh`.
+- Supports basic cursor movement, 16-color, 256-color, and truecolor SGR,
+  alternate-screen switching, and common editing and function keys.
+- Keeps up to 5,000 lines of scrollback. Use the mouse wheel to browse it.
+- Resizes the shell along with the window.
+- Includes macOS, Catppuccin Mocha, Rosé Pine, and signature Poop themes.
+- Includes a desktop launcher and icon for Linux and FreeBSD.
 
 ## Build and run
 
-From the project root:
+Install stable Rust with [rustup](https://rustup.rs), then build from the
+project directory:
 
-```bash
+```sh
 cargo run --release
 ```
 
-## Install
+To build without launching the app, run `cargo build --release`.
 
-System-wide (Linux or FreeBSD, needs root):
+### Build dependencies
 
-```bash
-make
+On Debian or Ubuntu:
+
+```sh
+sudo apt install build-essential pkg-config libx11-dev libxkbcommon-dev libwayland-dev
+```
+
+On Fedora:
+
+```sh
+sudo dnf install gcc pkgconf-pkg-config libX11-devel libxkbcommon-devel wayland-devel
+```
+
+On Arch Linux:
+
+```sh
+sudo pacman -S base-devel libx11 libxkbcommon wayland
+```
+
+On macOS, install the Xcode Command Line Tools if they are not already present:
+
+```sh
+xcode-select --install
+```
+
+On FreeBSD, install Rust, pkgconf, and the display-system libraries you use:
+
+```sh
+pkg install rust pkgconf xorg libX11 libxkbcommon wayland
+```
+
+## Themes
+
+Set `POOPTERM_THEME` when launching Poopterm. Available values are `macos`,
+`catppuccin`, `rosepine`, and `poop` (the default). For example:
+
+```sh
+POOPTERM_THEME=catppuccin cargo run --release
+```
+
+For an installed executable, use the same pattern:
+
+```sh
+POOPTERM_THEME=rosepine poopterm
+```
+
+To use a theme every time you open a shell, add an export to your shell startup
+file, such as `~/.zshrc`:
+
+```sh
+export POOPTERM_THEME=macos
+```
+
+## Install on Linux or FreeBSD
+
+Install system-wide (requires administrator access):
+
+```sh
 sudo make install
 ```
 
-On FreeBSD, use `su -m root -c 'make install'` or `doas make install`.
+Install for your user on Linux:
 
-Per-user, no root (Linux):
-
-```bash
-PREFIX=$HOME/.local make install
+```sh
+PREFIX="$HOME/.local" make install
 ```
 
-Make sure `~/.local/bin` is in your `PATH`. To remove it, run `make uninstall` with the same `PREFIX`.
+For a user install, make sure `~/.local/bin` is in your `PATH`. To uninstall,
+run `sudo make uninstall` for a system install, or use the same `PREFIX` as the
+user install:
+
+```sh
+PREFIX="$HOME/.local" make uninstall
+```
 
 ## macOS app bundle
 
-`cargo run` launches a bare binary, so macOS shows a generic Dock icon. To get the real icon, build a `.app` bundle from the release binary, the `.icns` file in `assets/`, and an `Info.plist`, then open `poopterm.app`.
+`cargo run` launches the executable directly. To make a macOS `.app` that has
+the Poopterm Dock icon, package `target/release/poopterm`, `assets/poopterm.icns`,
+and an `Info.plist` in an app bundle.
 
-## Font
+## Compatibility notes
 
-Uses DejaVu Sans Mono for Powerline, bundled as `assets/font.ttf`. DejaVu fonts are distributed under the Bitstream Vera license with public domain changes. See https://dejavu-fonts.github.io/License.html.
+Poopterm has basic support for full-screen programs such as `nano` and `htop`,
+including alternate-screen use and common navigation keys. It is not a complete
+xterm implementation yet. Text selection, copy and paste, mouse reporting,
+scroll regions, and some terminal control sequences are not implemented, so
+applications that depend on those features may display or behave incorrectly.
+The bundled font may not contain every symbol, and wide characters such as
+emoji and some CJK characters do not yet occupy two terminal cells.
 
-## Known limitations
+The shell is currently told that the terminal is `xterm-256color`; apps may
+therefore try features Poopterm does not support yet.
 
-- No scrollback yet
-- No alternate screen, so `vim` and `htop` render roughly
-- Some symbols show as boxes because the font lacks them
-- Wide characters (emoji, some CJK) take one column, so layout can drift
-- No text selection or copy/paste yet
+## Font and license
 
-## License
+Poopterm bundles DejaVu Sans Mono for Powerline as `assets/font.ttf`. The font is
+distributed under the Bitstream Vera license, with public-domain changes. See
+the [DejaVu font license](https://dejavu-fonts.github.io/License.html).
 
-MIT, see [LICENSE](LICENSE). The bundled font has its own license.
+Poopterm is MIT licensed; see [LICENSE](LICENSE).
