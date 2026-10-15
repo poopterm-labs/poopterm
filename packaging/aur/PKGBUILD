@@ -1,0 +1,33 @@
+# Maintainer: poopterm-labs
+pkgname=poopterm
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='A small, poop-colored terminal emulator written in Rust'
+arch=('x86_64' 'aarch64')
+url='https://github.com/poopterm-labs/poopterm'
+license=('MIT')
+depends=('libx11' 'libxkbcommon' 'wayland')
+makedepends=('rust' 'pkgconf')
+_commit='09af1ab3be3f74a33adb4389f5451a08ec96bd8b'
+source=("$pkgname-$pkgver.tar.gz::https://github.com/poopterm-labs/poopterm/archive/$_commit.tar.gz")
+sha256sums=('fee81af7c140aa011d06483233aaf59ed8daf42df45f270970fe7ae74bbb5d7a')
+
+prepare() {
+  cd "$srcdir/$pkgname-$_commit"
+  export CARGO_HOME="$srcdir/cargo-home"
+  cargo fetch --locked
+}
+
+build() {
+  cd "$srcdir/$pkgname-$_commit"
+  export CARGO_HOME="$srcdir/cargo-home"
+  cargo build --release --locked --offline
+}
+
+package() {
+  cd "$srcdir/$pkgname-$_commit"
+  install -Dm755 target/release/poopterm "$pkgdir/usr/bin/poopterm"
+  install -Dm644 assets/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/poopterm.png"
+  install -Dm644 packaging/poopterm.desktop "$pkgdir/usr/share/applications/poopterm.desktop"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

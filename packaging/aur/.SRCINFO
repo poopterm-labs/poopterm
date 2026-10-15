@@ -1,0 +1,17 @@
+pkgbase = poopterm
+	pkgdesc = A small, poop-colored terminal emulator written in Rust
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/poopterm-labs/poopterm
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = rust
+	makedepends = pkgconf
+	depends = libx11
+	depends = libxkbcommon
+	depends = wayland
+	source = poopterm-0.1.0.tar.gz::https://github.com/poopterm-labs/poopterm/archive/09af1ab3be3f74a33adb4389f5451a08ec96bd8b.tar.gz
+	sha256sums = fee81af7c140aa011d06483233aaf59ed8daf42df45f270970fe7ae74bbb5d7a
+
+pkgname = poopterm

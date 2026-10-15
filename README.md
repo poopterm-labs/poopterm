@@ -28,6 +28,20 @@ cargo run --release
 
 To build without launching the app, run `cargo build --release`.
 
+## Package managers
+
+The repository includes a Homebrew formula in `Formula/poopterm.rb`. To install
+it from this repository, add the project as a tap and install the formula:
+
+```sh
+brew tap poopterm-labs/poopterm https://github.com/poopterm-labs/poopterm.git
+brew install poopterm-labs/poopterm/poopterm
+```
+
+The AUR package recipe and its generated `.SRCINFO` are in `packaging/aur/`.
+After the package is published, install it with your preferred AUR helper, for
+example `yay -S poopterm`.
+
 ### Build dependencies
 
 On Debian or Ubuntu:
