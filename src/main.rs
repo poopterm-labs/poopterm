@@ -6,18 +6,20 @@ use std::{
     io::{Read, Write},
     num::NonZeroU32,
     path::PathBuf,
+    process::{Command, Stdio},
     sync::Arc,
     thread,
 };
 
 use fontdue::{Font, FontSettings, Metrics};
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use unicode_width::UnicodeWidthChar;
 use vte::{Params, Parser, Perform};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalSize},
     event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, EventLoop},
+    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
@@ -52,36 +54,48 @@ struct Theme {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ThemeKind {
-    MacOs,
-    Catppuccin,
-    RosePine,
+    MacOsDark,
+    MacOsLight,
+    CatppuccinLatte,
+    CatppuccinFrappe,
+    CatppuccinMacchiato,
+    CatppuccinMocha,
     Poop,
 }
 
 impl ThemeKind {
     fn parse(value: &str) -> Option<Self> {
         match value.trim().trim_matches('"').to_ascii_lowercase().as_str() {
-            "macos" | "mac" => Some(Self::MacOs),
-            "catppuccin" | "catppuccin-mocha" => Some(Self::Catppuccin),
-            "rosepine" | "rose-pine" => Some(Self::RosePine),
+            "macos" | "mac" | "macos-dark" => Some(Self::MacOsDark),
+            "macos-light" | "light" => Some(Self::MacOsLight),
+            "catppuccin" | "catppuccin-mocha" => Some(Self::CatppuccinMocha),
+            "catppuccin-latte" => Some(Self::CatppuccinLatte),
+            "catppuccin-frappe" => Some(Self::CatppuccinFrappe),
+            "catppuccin-macchiato" => Some(Self::CatppuccinMacchiato),
             "poop" => Some(Self::Poop),
             _ => None,
         }
     }
     fn name(self) -> &'static str {
         match self {
-            Self::MacOs => "macos",
-            Self::Catppuccin => "catppuccin",
-            Self::RosePine => "rosepine",
+            Self::MacOsDark => "macos-dark",
+            Self::MacOsLight => "macos-light",
+            Self::CatppuccinLatte => "catppuccin-latte",
+            Self::CatppuccinFrappe => "catppuccin-frappe",
+            Self::CatppuccinMacchiato => "catppuccin-macchiato",
+            Self::CatppuccinMocha => "catppuccin-mocha",
             Self::Poop => "poop",
         }
     }
     fn next(self) -> Self {
         match self {
-            Self::MacOs => Self::Catppuccin,
-            Self::Catppuccin => Self::RosePine,
-            Self::RosePine => Self::Poop,
-            Self::Poop => Self::MacOs,
+            Self::MacOsDark => Self::MacOsLight,
+            Self::MacOsLight => Self::CatppuccinLatte,
+            Self::CatppuccinLatte => Self::CatppuccinFrappe,
+            Self::CatppuccinFrappe => Self::CatppuccinMacchiato,
+            Self::CatppuccinMacchiato => Self::CatppuccinMocha,
+            Self::CatppuccinMocha => Self::Poop,
+            Self::Poop => Self::MacOsDark,
         }
     }
 }
@@ -89,7 +103,7 @@ impl ThemeKind {
 impl Theme {
     fn from_kind(kind: ThemeKind) -> Self {
         match kind {
-            ThemeKind::MacOs => Self {
+            ThemeKind::MacOsDark => Self {
                 kind,
                 fg: 0xE6E6E6,
                 bg: 0x1E1E1E,
@@ -98,22 +112,49 @@ impl Theme {
                     0x000000, 0xC23621, 0x25BC26, 0xADAD27, 0x492EE1, 0xD338D3, 0x33BBC8, 0xBBBBBB,
                 ],
             },
-            ThemeKind::Catppuccin => Self {
+            ThemeKind::MacOsLight => Self {
+                kind,
+                fg: 0x1D1D1F,
+                bg: 0xF5F5F7,
+                border: 0xD2D2D7,
+                palette: [
+                    0x6E6E73, 0xC41E3A, 0x248A3D, 0x9A6700, 0x0066CC, 0x8944AB, 0x007A82, 0x1D1D1F,
+                ],
+            },
+            ThemeKind::CatppuccinLatte => Self {
+                kind,
+                fg: 0x4C4F69,
+                bg: 0xEFF1F5,
+                border: 0xCCD0DA,
+                palette: [
+                    0x5C5F77, 0xD20F39, 0x40A02B, 0xDF8E1D, 0x1E66F5, 0xEA76CB, 0x179299, 0xACB0BE,
+                ],
+            },
+            ThemeKind::CatppuccinFrappe => Self {
+                kind,
+                fg: 0xC6D0F5,
+                bg: 0x303446,
+                border: 0x414559,
+                palette: [
+                    0x51576D, 0xE78284, 0xA6D189, 0xE5C890, 0x8CAAEE, 0xCA9EE6, 0x81C8BE, 0xB5BFE2,
+                ],
+            },
+            ThemeKind::CatppuccinMacchiato => Self {
+                kind,
+                fg: 0xCAD3F5,
+                bg: 0x24273A,
+                border: 0x363A4F,
+                palette: [
+                    0x494D64, 0xED8796, 0xA6DA95, 0xEED49F, 0x8AADF4, 0xF5BDE6, 0x8BD5CA, 0xB8C0E0,
+                ],
+            },
+            ThemeKind::CatppuccinMocha => Self {
                 kind,
                 fg: 0xCDD6F4,
                 bg: 0x1E1E2E,
                 border: 0x45475A,
                 palette: [
                     0x45475A, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xF5C2E7, 0x94E2D5, 0xBAC2DE,
-                ],
-            },
-            ThemeKind::RosePine => Self {
-                kind,
-                fg: 0xE0DEF4,
-                bg: 0x191724,
-                border: 0x26233A,
-                palette: [
-                    0x26233A, 0xEB6F92, 0x31748F, 0xF6C177, 0x9CCFD8, 0xC4A7E7, 0x9CCFD8, 0xE0DEF4,
                 ],
             },
             ThemeKind::Poop => Self {
@@ -154,14 +195,18 @@ fn config_path() -> PathBuf {
 }
 
 fn read_config_theme() -> Option<ThemeKind> {
-    let text = fs::read_to_string(config_path()).ok()?;
-    text.lines().find_map(|line| {
-        let line = line.split('#').next()?.trim();
-        let (key, value) = line.split_once('=')?;
-        (key.trim() == "theme")
-            .then(|| ThemeKind::parse(value))
-            .flatten()
-    })
+    ThemeKind::parse(&read_config_value("theme")?)
+}
+
+fn read_config_value(key: &str) -> Option<String> {
+    fs::read_to_string(config_path())
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            let line = line.split('#').next()?.trim();
+            let (found, value) = line.split_once('=')?;
+            (found.trim() == key).then(|| value.trim().trim_matches('"').to_owned())
+        })
 }
 
 fn save_config_theme(kind: ThemeKind) -> std::io::Result<()> {
@@ -169,9 +214,21 @@ fn save_config_theme(kind: ThemeKind) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let previous = fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = previous
+        .lines()
+        .filter(|line| {
+            line.split('#')
+                .next()
+                .and_then(|s| s.split_once('='))
+                .is_none_or(|(key, _)| key.trim() != "theme")
+        })
+        .map(str::to_owned)
+        .collect();
+    lines.push(format!("theme = \"{}\"", kind.name()));
     fs::write(
         path,
-        format!("# Poopterm configuration\ntheme = \"{}\"\n", kind.name()),
+        format!("# Poopterm configuration\n{}\n", lines.join("\n")),
     )
 }
 
@@ -204,6 +261,7 @@ struct Cell {
     ch: char,
     fg: u32,
     bg: u32,
+    width: u8,
 }
 
 struct Term {
@@ -221,6 +279,19 @@ struct Term {
     cy: usize,
     fg: u32,
     bg: u32,
+    scroll_top: usize,
+    scroll_bottom: usize,
+    saved_cursor: (usize, usize),
+    bracketed_paste: bool,
+    mouse_tracking: u16,
+    mouse_sgr: bool,
+    application_cursor: bool,
+    origin_mode: bool,
+    auto_wrap: bool,
+    bold: bool,
+    reverse: bool,
+    responses: Vec<Vec<u8>>,
+    title: String,
 }
 
 impl Term {
@@ -265,6 +336,7 @@ impl Term {
             ch: ' ',
             fg: self.default_fg,
             bg: self.default_bg,
+            width: 1,
         }
     }
     fn new(cols: usize, rows: usize, theme: Theme) -> Self {
@@ -275,7 +347,8 @@ impl Term {
                 Cell {
                     ch: ' ',
                     fg: theme.fg,
-                    bg: theme.bg
+                    bg: theme.bg,
+                    width: 1,
                 };
                 cols * rows
             ],
@@ -290,6 +363,19 @@ impl Term {
             palette: theme.palette,
             fg: theme.fg,
             bg: theme.bg,
+            scroll_top: 0,
+            scroll_bottom: rows.saturating_sub(1),
+            saved_cursor: (0, 0),
+            bracketed_paste: false,
+            mouse_tracking: 0,
+            mouse_sgr: false,
+            application_cursor: false,
+            origin_mode: false,
+            auto_wrap: true,
+            bold: false,
+            reverse: false,
+            responses: Vec::new(),
+            title: "Shell".into(),
         }
     }
 
@@ -315,6 +401,8 @@ impl Term {
         }
         self.cols = cols;
         self.rows = rows;
+        self.scroll_top = 0;
+        self.scroll_bottom = rows.saturating_sub(1);
         if let Some((primary, cx, cy, ..)) = &mut self.primary_screen {
             let mut resized = vec![blank; cols * rows];
             for y in 0..rows.min(old_rows) {
@@ -383,11 +471,50 @@ impl Term {
     }
 
     fn linefeed(&mut self) {
-        if self.cy + 1 < self.rows {
+        if self.cy == self.scroll_bottom {
+            self.scroll_region_up(1);
+        } else if self.cy + 1 < self.rows {
             self.cy += 1;
         } else {
             self.scroll_up();
         }
+    }
+
+    fn scroll_region_up(&mut self, count: usize) {
+        let count = count.min(self.scroll_bottom - self.scroll_top + 1);
+        let start = self.scroll_top * self.cols;
+        let end = (self.scroll_bottom + 1) * self.cols;
+        let history = if self.scroll_top == 0
+            && self.scroll_bottom + 1 == self.rows
+            && self.primary_screen.is_none()
+        {
+            (0..count)
+                .map(|row| {
+                    let from = start + row * self.cols;
+                    self.cells[from..from + self.cols].to_vec()
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        self.cells
+            .copy_within(start + count * self.cols..end, start);
+        let blank = self.blank();
+        self.cells[end - count * self.cols..end].fill(blank);
+        self.scrollback.extend(history);
+        while self.scrollback.len() > 5000 {
+            self.scrollback.pop_front();
+        }
+    }
+
+    fn scroll_region_down(&mut self, count: usize) {
+        let count = count.min(self.scroll_bottom - self.scroll_top + 1);
+        let start = self.scroll_top * self.cols;
+        let end = (self.scroll_bottom + 1) * self.cols;
+        self.cells
+            .copy_within(start..end - count * self.cols, start + count * self.cols);
+        let blank = self.blank();
+        self.cells[start..start + count * self.cols].fill(blank);
     }
 
     fn clear_range(&mut self, from: usize, to: usize) {
@@ -396,6 +523,7 @@ impl Term {
                 ch: ' ',
                 fg: self.default_fg,
                 bg: self.default_bg,
+                width: 1,
             };
         }
     }
@@ -414,7 +542,13 @@ impl Term {
                 0 => {
                     self.fg = self.default_fg;
                     self.bg = self.default_bg;
+                    self.bold = false;
+                    self.reverse = false;
                 }
+                1 => self.bold = true,
+                22 => self.bold = false,
+                7 => self.reverse = true,
+                27 => self.reverse = false,
                 30..=37 => self.fg = self.palette[(code - 30) as usize],
                 39 => self.fg = self.default_fg,
                 40..=47 => self.bg = self.palette[(code - 40) as usize],
@@ -450,17 +584,44 @@ impl Term {
 
 impl Perform for Term {
     fn print(&mut self, c: char) {
-        if self.cx >= self.cols {
-            self.cx = 0;
-            self.linefeed();
+        let width = c.width().unwrap_or(0);
+        if width == 0 {
+            return;
+        }
+        if self.cx + width > self.cols {
+            if self.auto_wrap {
+                self.cx = 0;
+                self.linefeed();
+            } else {
+                self.cx = self.cols.saturating_sub(width);
+            }
         }
         let i = self.idx(self.cx, self.cy);
+        let mut fg = self.fg;
+        let mut bg = self.bg;
+        if self.bold {
+            if let Some(index) = self.palette.iter().position(|&color| color == fg) {
+                fg = bright_color(index);
+            }
+        }
+        if self.reverse {
+            std::mem::swap(&mut fg, &mut bg);
+        }
         self.cells[i] = Cell {
             ch: c,
-            fg: self.fg,
-            bg: self.bg,
+            fg,
+            bg,
+            width: width as u8,
         };
-        self.cx += 1;
+        if width == 2 && self.cx + 1 < self.cols {
+            self.cells[i + 1] = Cell {
+                ch: ' ',
+                fg,
+                bg,
+                width: 0,
+            };
+        }
+        self.cx += width;
     }
 
     fn execute(&mut self, byte: u8) {
@@ -493,8 +654,14 @@ impl Perform for Term {
             let enabled = action == 'h';
             for p in params.iter().filter_map(|s| s.first().copied()) {
                 match p {
+                    1 => self.application_cursor = enabled,
+                    6 => self.origin_mode = enabled,
+                    7 => self.auto_wrap = enabled,
                     25 => self.cursor_visible = enabled,
                     1049 | 47 | 1047 => self.alternate_screen(enabled),
+                    1000 | 1002 | 1003 => self.mouse_tracking = if enabled { p } else { 0 },
+                    1006 => self.mouse_sgr = enabled,
+                    2004 => self.bracketed_paste = enabled,
                     _ => {}
                 }
             }
@@ -502,20 +669,52 @@ impl Perform for Term {
         }
 
         match action {
-            'A' => self.cy = self.cy.saturating_sub(p(0, 1)),
-            'B' => self.cy = (self.cy + p(0, 1)).min(self.rows - 1),
+            'A' => {
+                let top = if self.origin_mode { self.scroll_top } else { 0 };
+                self.cy = self.cy.saturating_sub(p(0, 1)).max(top);
+            }
+            'B' => {
+                self.cy = (self.cy + p(0, 1)).min(if self.origin_mode {
+                    self.scroll_bottom
+                } else {
+                    self.rows - 1
+                })
+            }
             'C' => self.cx = (self.cx + p(0, 1)).min(self.cols - 1),
             'D' => self.cx = self.cx.saturating_sub(p(0, 1)),
             'G' => self.cx = (p(0, 1) - 1).min(self.cols - 1),
             'H' | 'f' => {
-                self.cy = (p(0, 1) - 1).min(self.rows - 1);
+                let row = p(0, 1) - 1 + if self.origin_mode { self.scroll_top } else { 0 };
+                self.cy = row.min(if self.origin_mode {
+                    self.scroll_bottom
+                } else {
+                    self.rows - 1
+                });
                 self.cx = (p(1, 1) - 1).min(self.cols - 1);
+            }
+            'r' => {
+                let top = (p(0, 1) - 1).min(self.rows - 1);
+                let bottom = (p(1, self.rows as u16) - 1).min(self.rows - 1);
+                if top < bottom {
+                    self.scroll_top = top;
+                    self.scroll_bottom = bottom;
+                    self.cx = 0;
+                    self.cy = top;
+                }
+            }
+            'S' => self.scroll_region_up(p(0, 1)),
+            'T' => self.scroll_region_down(p(0, 1)),
+            's' => self.saved_cursor = (self.cx, self.cy),
+            'u' => {
+                self.cx = self.saved_cursor.0.min(self.cols - 1);
+                self.cy = self.saved_cursor.1.min(self.rows - 1);
             }
             'J' => match raw0 {
                 0 => {
                     let from = self.idx(self.cx, self.cy);
                     self.clear_range(from, self.cells.len());
                 }
+                1 => self.clear_range(0, self.idx(self.cx + 1, self.cy)),
                 2 => self.clear_range(0, self.cells.len()),
                 3 => {
                     self.clear_range(0, self.cells.len());
@@ -529,6 +728,7 @@ impl Perform for Term {
                 let row_end = row_start + self.cols;
                 match raw0 {
                     0 => self.clear_range(self.idx(self.cx, self.cy), row_end),
+                    1 => self.clear_range(row_start, self.idx(self.cx + 1, self.cy)),
                     2 => self.clear_range(row_start, row_end),
                     _ => {}
                 }
@@ -552,9 +752,10 @@ impl Perform for Term {
                 self.clear_range(start, start + p(0, 1).min(self.cols - self.cx));
             }
             'L' | 'M' if self.cy < self.rows => {
-                let count = p(0, 1).min(self.rows - self.cy);
+                let bottom = self.scroll_bottom.max(self.cy).min(self.rows - 1);
+                let count = p(0, 1).min(bottom + 1 - self.cy);
                 let start = self.cy * self.cols;
-                let end = self.cells.len();
+                let end = (bottom + 1) * self.cols;
                 if action == 'L' {
                     self.cells
                         .copy_within(start..end - count * self.cols, start + count * self.cols);
@@ -566,7 +767,49 @@ impl Perform for Term {
                 }
             }
             'm' => self.sgr(params),
+            'n' => match raw0 {
+                5 => self.responses.push(b"\x1b[0n".to_vec()),
+                6 => self.responses.push(
+                    format!("\x1b[{};{}R", self.cy + 1, self.cx.min(self.cols - 1) + 1)
+                        .into_bytes(),
+                ),
+                _ => {}
+            },
+            'c' => self.responses.push(b"\x1b[?1;2c".to_vec()),
             _ => {}
+        }
+    }
+
+    fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
+        if ignore || !intermediates.is_empty() {
+            return;
+        }
+        match byte {
+            b'M' => {
+                if self.cy == self.scroll_top {
+                    self.scroll_region_down(1);
+                } else {
+                    self.cy = self.cy.saturating_sub(1);
+                }
+            }
+            b'D' => self.linefeed(),
+            b'E' => {
+                self.cx = 0;
+                self.linefeed();
+            }
+            b'7' => self.saved_cursor = (self.cx, self.cy),
+            b'8' => {
+                self.cx = self.saved_cursor.0.min(self.cols - 1);
+                self.cy = self.saved_cursor.1.min(self.rows - 1);
+            }
+            _ => {}
+        }
+    }
+
+    fn osc_dispatch(&mut self, params: &[&[u8]], _: bool) {
+        if params.len() >= 2 && matches!(params[0], b"0" | b"2") {
+            let title = String::from_utf8_lossy(params[1]);
+            self.title = title.chars().filter(|c| !c.is_control()).take(64).collect();
         }
     }
 }
@@ -575,8 +818,404 @@ impl Perform for Term {
 
 #[derive(Debug)]
 enum UserEvent {
-    Output(Vec<u8>),
-    Closed,
+    Output(u64, Vec<u8>),
+    Closed(u64),
+}
+
+struct Session {
+    id: u64,
+    term: Term,
+    parser: Parser,
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    _child: Box<dyn Child + Send + Sync>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct CellPoint {
+    row: usize,
+    col: usize,
+}
+
+#[derive(Clone, Copy)]
+struct Selection {
+    start: CellPoint,
+    end: CellPoint,
+}
+
+struct SettingsEditor {
+    text: Vec<char>,
+    cursor: usize,
+    scroll: usize,
+    status: String,
+}
+
+impl SettingsEditor {
+    fn load() -> Self {
+        let text = fs::read_to_string(config_path()).unwrap_or_else(|_| {
+            format!(
+                "# Poopterm configuration\ntheme = \"{}\"\n",
+                ThemeKind::Poop.name()
+            )
+        });
+        let cursor = text.chars().count();
+        Self {
+            text: text.chars().collect(),
+            cursor,
+            scroll: 0,
+            status: "Edit config.toml. Save to apply changes.".into(),
+        }
+    }
+
+    fn string(&self) -> String {
+        self.text.iter().collect()
+    }
+}
+
+impl Selection {
+    fn ordered(self) -> (CellPoint, CellPoint) {
+        if self.start <= self.end {
+            (self.start, self.end)
+        } else {
+            (self.end, self.start)
+        }
+    }
+}
+
+struct TabLayout {
+    start: usize,
+    width: usize,
+    gap: usize,
+    first_visible: usize,
+    visible_count: usize,
+    left_arrow_x: usize,
+    right_arrow_x: usize,
+    arrow_w: usize,
+    plus_x: usize,
+    plus_w: usize,
+    settings_x: usize,
+    settings_w: usize,
+    scale: usize,
+}
+
+fn tab_layout(
+    width: usize,
+    count: usize,
+    scale: usize,
+    left_reserve: usize,
+    scroll: usize,
+) -> TabLayout {
+    let scale = scale.max(1);
+    let arrow_w = 28 * scale;
+    let left_arrow_x = left_reserve + 8 * scale;
+    let start = left_arrow_x + arrow_w + 6 * scale;
+    let plus_w = 52 * scale;
+    let settings_w = 112 * scale;
+    let controls_gap = 8 * scale;
+    let right = 12 * scale;
+    let settings_x = width.saturating_sub(right + settings_w);
+    let plus_x = settings_x.saturating_sub(controls_gap + plus_w);
+    let right_arrow_x = plus_x.saturating_sub(controls_gap + arrow_w);
+    let viewport_end = right_arrow_x.saturating_sub(8 * scale);
+    let gap = 6 * scale;
+    let room = viewport_end.saturating_sub(start);
+    let slots = ((room + gap) / (170 * scale + gap)).max(1);
+    let tab_width = room
+        .saturating_sub(slots.saturating_sub(1) * gap)
+        .checked_div(slots)
+        .unwrap_or(0)
+        .min(220 * scale);
+    let visible_count = ((room + gap) / (tab_width.max(1) + gap)).max(1);
+    let first_visible = scroll.min(count.saturating_sub(visible_count));
+    TabLayout {
+        start,
+        width: tab_width,
+        gap,
+        first_visible,
+        visible_count,
+        left_arrow_x,
+        right_arrow_x,
+        arrow_w,
+        plus_x,
+        plus_w,
+        settings_x,
+        settings_w,
+        scale,
+    }
+}
+
+fn start_discord_presence() -> Option<std::sync::mpsc::Sender<String>> {
+    #[cfg(unix)]
+    {
+        let client_id = env::var("POOPTERM_DISCORD_CLIENT_ID")
+            .ok()
+            .or_else(|| read_config_value("discord_client_id"))?;
+        if client_id.trim().is_empty() {
+            return None;
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        thread::spawn(move || discord_presence_loop(client_id, rx));
+        Some(tx)
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
+#[cfg(unix)]
+fn discord_presence_loop(client_id: String, rx: std::sync::mpsc::Receiver<String>) {
+    use std::os::unix::net::UnixStream;
+    use std::time::Duration;
+
+    let mut stream: Option<UnixStream> = None;
+    let mut details = String::new();
+    let mut last_sent = String::new();
+    let mut nonce = 0u64;
+    loop {
+        match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(latest) => details = latest,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+        while let Ok(latest) = rx.try_recv() {
+            details = latest;
+        }
+        details = details
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(120)
+            .collect();
+        if details.is_empty() {
+            continue;
+        }
+        if stream.is_none() {
+            stream = discord_connect(&client_id);
+        }
+        if let Some(connection) = stream.as_mut() {
+            if details == last_sent {
+                continue;
+            }
+            nonce = nonce.wrapping_add(1);
+            let activity = format!(
+                "{{\"cmd\":\"SET_ACTIVITY\",\"args\":{{\"pid\":{},\"activity\":{{\"details\":\"{}\",\"state\":\"In Poopterm\"}}}},\"nonce\":\"poopterm-{}-{}\"}}",
+                std::process::id(), json_escape(&details), std::process::id(), nonce
+            );
+            if write_rpc_frame(connection, 1, activity.as_bytes()).is_ok() {
+                last_sent.clone_from(&details);
+            } else {
+                stream = None;
+                last_sent.clear();
+            }
+        }
+    }
+    if let Some(connection) = stream.as_mut() {
+        let clear = format!(
+            "{{\"cmd\":\"SET_ACTIVITY\",\"args\":{{\"pid\":{},\"activity\":null}},\"nonce\":\"poopterm-clear\"}}",
+            std::process::id()
+        );
+        let _ = write_rpc_frame(connection, 1, clear.as_bytes());
+    }
+}
+
+#[cfg(unix)]
+fn discord_connect(client_id: &str) -> Option<std::os::unix::net::UnixStream> {
+    use std::{os::unix::net::UnixStream, time::Duration};
+
+    let mut dirs = Vec::new();
+    for key in ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"] {
+        if let Some(path) = env::var_os(key) {
+            dirs.push(PathBuf::from(path));
+        }
+    }
+    dirs.push(env::temp_dir());
+    dirs.push(PathBuf::from("/tmp"));
+    for dir in dirs {
+        for index in 0..10 {
+            let path = dir.join(format!("discord-ipc-{index}"));
+            let Ok(mut stream) = UnixStream::connect(path) else {
+                continue;
+            };
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(400)));
+            let handshake = format!("{{\"v\":1,\"client_id\":\"{}\"}}", json_escape(client_id));
+            if write_rpc_frame(&mut stream, 0, handshake.as_bytes()).is_err() {
+                continue;
+            }
+            if read_rpc_frame(&mut stream).is_ok() {
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+                return Some(stream);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(unix)]
+fn write_rpc_frame(
+    stream: &mut std::os::unix::net::UnixStream,
+    opcode: u32,
+    payload: &[u8],
+) -> std::io::Result<()> {
+    stream.write_all(&opcode.to_le_bytes())?;
+    stream.write_all(&(payload.len() as u32).to_le_bytes())?;
+    stream.write_all(payload)
+}
+
+#[cfg(unix)]
+fn read_rpc_frame(stream: &mut std::os::unix::net::UnixStream) -> std::io::Result<(u32, Vec<u8>)> {
+    let mut header = [0u8; 8];
+    stream.read_exact(&mut header)?;
+    let opcode = u32::from_le_bytes(header[..4].try_into().unwrap());
+    let len = u32::from_le_bytes(header[4..].try_into().unwrap()).min(1024 * 1024) as usize;
+    let mut payload = vec![0; len];
+    stream.read_exact(&mut payload)?;
+    Ok((opcode, payload))
+}
+
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            c if c.is_control() => escaped.push(' '),
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+fn load_symbol_fallbacks() -> Vec<Font> {
+    let mut paths = Vec::new();
+    if let Some(path) = env::var_os("POOPTERM_SYMBOL_FONT")
+        .map(PathBuf::from)
+        .or_else(|| read_config_value("symbol_font").map(PathBuf::from))
+    {
+        paths.push(path);
+    }
+    let names = [
+        "SymbolsNerdFontMono-Regular.ttf",
+        "NotoSansMNerdFontMono-Regular.ttf",
+        "JetBrainsMonoNLNerdFontMono-Regular.ttf",
+        "HackNerdFontMono-Regular.ttf",
+    ];
+    let mut font_dirs = vec![
+        PathBuf::from("/Library/Fonts"),
+        PathBuf::from("/usr/share/fonts"),
+    ];
+    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+        font_dirs.extend([
+            home.join("Library/Fonts"),
+            home.join(".local/share/fonts"),
+            home.join(".fonts"),
+        ]);
+    }
+    for dir in font_dirs {
+        for name in &names {
+            paths.push(dir.join(name));
+        }
+    }
+    #[cfg(unix)]
+    for executable in [
+        "fc-match",
+        "/opt/homebrew/bin/fc-match",
+        "/usr/local/bin/fc-match",
+        "/usr/bin/fc-match",
+    ] {
+        for family in ["Symbols Nerd Font Mono", "Noto Sans Mono Nerd Font"] {
+            if let Ok(output) = Command::new(executable)
+                .args(["--format=%{file}", family])
+                .output()
+            {
+                if output.status.success() {
+                    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                    if !path.is_empty() {
+                        paths.push(PathBuf::from(path));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut fonts = Vec::new();
+    for path in paths {
+        if fonts.len() >= 2 || !path.is_file() {
+            continue;
+        }
+        let Ok(bytes) = fs::read(path) else { continue };
+        let Ok(font) = Font::from_bytes(bytes, FontSettings::default()) else {
+            continue;
+        };
+        if font.lookup_glyph_index('\u{e0a0}') != 0 {
+            fonts.push(font);
+            break;
+        }
+    }
+    fonts
+}
+
+fn glyph_font_index(primary: &Font, fallbacks: &[Font], ch: char) -> usize {
+    if primary.lookup_glyph_index(ch) != 0 {
+        return 0;
+    }
+    fallbacks
+        .iter()
+        .position(|font| font.lookup_glyph_index(ch) != 0)
+        .map_or(0, |index| index + 1)
+}
+
+fn spawn_session(
+    id: u64,
+    cols: usize,
+    rows: usize,
+    theme: Theme,
+    proxy: EventLoopProxy<UserEvent>,
+) -> Result<Session, Box<dyn Error>> {
+    let pty = native_pty_system();
+    let pair = pty.openpty(PtySize {
+        rows: rows as u16,
+        cols: cols as u16,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let mut cmd = CommandBuilder::new(shell);
+    cmd.env("TERM", "xterm-256color");
+    #[cfg(target_os = "macos")]
+    cmd.arg("-l");
+    let child = pair.slave.spawn_command(cmd)?;
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader()?;
+    let writer = pair.master.take_writer()?;
+    thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => {
+                    let _ = proxy.send_event(UserEvent::Closed(id));
+                    break;
+                }
+                Ok(n) => {
+                    if proxy
+                        .send_event(UserEvent::Output(id, buf[..n].to_vec()))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(Session {
+        id,
+        term: Term::new(cols, rows, theme),
+        parser: Parser::new(),
+        master: pair.master,
+        writer,
+        _child: child,
+    })
 }
 
 // ---- App ---------------------------------------------------------------------
@@ -584,33 +1223,836 @@ enum UserEvent {
 struct App {
     theme: Theme,
     font: Font,
-    glyphs: HashMap<char, (Metrics, Vec<u8>)>,
+    glyphs: HashMap<(char, usize), (Metrics, Vec<u8>)>,
+    fallback_fonts: Vec<Font>,
     px: f32,
     cw: usize,
     ch: usize,
     ascent: i32,
     margin: usize,
     top: usize,
+    titlebar_height: usize,
+    tab_height: usize,
     border: usize,
 
-    term: Term,
-    parser: Parser,
-    master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    sessions: Vec<Session>,
+    active: usize,
+    tab_scroll: usize,
+    next_session_id: u64,
+    proxy: EventLoopProxy<UserEvent>,
+    presence: Option<std::sync::mpsc::Sender<String>>,
 
     window: Option<Arc<Window>>,
+    reported_title: String,
     _context: Option<softbuffer::Context<Arc<Window>>>,
     surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
+    settings_window: Option<Arc<Window>>,
+    _settings_context: Option<softbuffer::Context<Arc<Window>>>,
+    settings_surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
+    settings_width: u32,
+    settings_height: u32,
+    settings_cursor_pos: (f64, f64),
+    settings_editor: SettingsEditor,
     width: u32,
     height: u32,
     ctrl: bool,
     shift: bool,
+    super_key: bool,
+    cursor_pos: (f64, f64),
+    mouse_button_down: bool,
+    selection: Option<Selection>,
+    selecting: bool,
 }
 
 impl App {
+    fn tab_left_reserve(&self) -> usize {
+        if cfg!(target_os = "macos") {
+            (80.0
+                * self
+                    .window
+                    .as_ref()
+                    .map_or(1.0, |window| window.scale_factor())) as usize
+        } else {
+            0
+        }
+    }
+
+    fn tab_y(&self) -> usize {
+        if cfg!(target_os = "macos") {
+            self.titlebar_height.saturating_sub(self.tab_height) / 2
+        } else {
+            self.top.saturating_sub(self.tab_height)
+        }
+    }
+
+    fn tab_layout(&self) -> TabLayout {
+        tab_layout(
+            self.width as usize,
+            self.sessions.len(),
+            (self.px / 18.0).round() as usize,
+            self.tab_left_reserve(),
+            self.tab_scroll,
+        )
+    }
+
+    fn ensure_active_tab_visible(&mut self) {
+        let layout = self.tab_layout();
+        let mut first = layout.first_visible;
+        if self.active < first {
+            first = self.active;
+        } else if self.active >= first + layout.visible_count {
+            first = self.active + 1 - layout.visible_count;
+        }
+        self.tab_scroll = first;
+    }
+
+    fn open_settings_window(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(window) = &self.settings_window {
+            window.focus_window();
+            return;
+        }
+        self.settings_editor = SettingsEditor::load();
+        let attributes = Window::default_attributes()
+            .with_title("Poopterm Settings")
+            .with_inner_size(LogicalSize::new(760.0, 560.0));
+        let window = Arc::new(
+            event_loop
+                .create_window(attributes)
+                .expect("failed to create settings window"),
+        );
+        let context = softbuffer::Context::new(window.clone()).expect("settings context");
+        let mut surface =
+            softbuffer::Surface::new(&context, window.clone()).expect("settings surface");
+        let size = window.inner_size();
+        if let (Some(width), Some(height)) = (
+            NonZeroU32::new(size.width.max(1)),
+            NonZeroU32::new(size.height.max(1)),
+        ) {
+            let _ = surface.resize(width, height);
+        }
+        self.settings_width = size.width;
+        self.settings_height = size.height;
+        self.settings_surface = Some(surface);
+        self._settings_context = Some(context);
+        self.settings_window = Some(window.clone());
+        window.request_redraw();
+    }
+
+    fn settings_cursor_line_col(&self) -> (usize, usize) {
+        let before = &self.settings_editor.text[..self.settings_editor.cursor];
+        let line = before.iter().filter(|&&ch| ch == '\n').count();
+        let col = before.iter().rev().take_while(|&&ch| ch != '\n').count();
+        (line, col)
+    }
+
+    fn keep_settings_cursor_visible(&mut self, visible_lines: usize) {
+        let (line, _) = self.settings_cursor_line_col();
+        if line < self.settings_editor.scroll {
+            self.settings_editor.scroll = line;
+        } else if line >= self.settings_editor.scroll + visible_lines {
+            self.settings_editor.scroll = line + 1 - visible_lines.max(1);
+        }
+    }
+
+    fn move_settings_cursor_vertical(&mut self, direction: isize) {
+        let (line, col) = self.settings_cursor_line_col();
+        let lines: Vec<Vec<char>> = self
+            .settings_editor
+            .text
+            .split(|&ch| ch == '\n')
+            .map(<[char]>::to_vec)
+            .collect();
+        let target_line =
+            (line as isize + direction).clamp(0, lines.len().saturating_sub(1) as isize) as usize;
+        let mut cursor = 0;
+        for prior in lines.iter().take(target_line) {
+            cursor += prior.len() + 1;
+        }
+        cursor += col.min(lines[target_line].len());
+        self.settings_editor.cursor = cursor.min(self.settings_editor.text.len());
+    }
+
+    fn save_settings_config(&mut self) {
+        let text = self.settings_editor.string();
+        let path = config_path();
+        let result = path
+            .parent()
+            .map(fs::create_dir_all)
+            .transpose()
+            .and_then(|_| fs::write(&path, text));
+        match result {
+            Ok(()) => {
+                if let Some(kind) = read_config_theme() {
+                    self.apply_theme(kind);
+                }
+                self.fallback_fonts = load_symbol_fallbacks();
+                self.glyphs.clear();
+                self.presence = start_discord_presence();
+                if let Some(presence) = &self.presence {
+                    let _ = presence.send(self.active_term().title.clone());
+                }
+                self.settings_editor = SettingsEditor::load();
+                self.settings_editor.status = "Saved. Changes are applied.".into();
+            }
+            Err(error) => {
+                self.settings_editor.status = format!("Could not save: {error}");
+            }
+        }
+        if let Some(window) = &self.settings_window {
+            window.request_redraw();
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    fn draw_settings(&mut self) {
+        let cursor_line_col = self.settings_cursor_line_col();
+        let scale = self
+            .settings_window
+            .as_ref()
+            .map_or(1, |window| window.scale_factor().round() as usize)
+            .max(1);
+        let Some(surface) = self.settings_surface.as_mut() else {
+            return;
+        };
+        let Ok(mut buffer) = surface.buffer_mut() else {
+            return;
+        };
+        let pixels: &mut [u32] = &mut buffer;
+        let (width, height) = (self.settings_width as usize, self.settings_height as usize);
+        pixels.fill(self.theme.border);
+        fill_rect(
+            pixels,
+            width,
+            height,
+            2 * scale,
+            2 * scale,
+            width.saturating_sub(4 * scale),
+            height.saturating_sub(4 * scale),
+            self.theme.bg,
+        );
+        let px = 18.0 * scale as f32;
+        let line_height = 25 * scale;
+        let ascent = self
+            .font
+            .horizontal_line_metrics(px)
+            .map_or(self.ascent, |metrics| metrics.ascent.round() as i32);
+        let cell_width = self.font.metrics('M', px).advance_width.ceil() as usize;
+        let editor_x = 20 * scale;
+        let editor_y = 100 * scale;
+        let editor_w = width.saturating_sub(40 * scale);
+        let save_y = height.saturating_sub(52 * scale);
+        let editor_h = save_y.saturating_sub(editor_y + 16 * scale);
+        fill_rect(
+            pixels,
+            width,
+            height,
+            editor_x,
+            editor_y,
+            editor_w,
+            editor_h,
+            self.theme.border,
+        );
+        fill_rect(
+            pixels,
+            width,
+            height,
+            editor_x + scale,
+            editor_y + scale,
+            editor_w.saturating_sub(2 * scale),
+            editor_h.saturating_sub(2 * scale),
+            self.theme.bg,
+        );
+        let font = &self.font;
+        let fallbacks = &self.fallback_fonts;
+        let glyphs = &mut self.glyphs;
+        draw_text(
+            pixels,
+            width,
+            height,
+            editor_x,
+            20 * scale,
+            "Poopterm Settings",
+            px,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        draw_text(
+            pixels,
+            width,
+            height,
+            editor_x,
+            55 * scale,
+            &format!("Config: {}", config_path().display()),
+            px * 0.75,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        draw_text(
+            pixels,
+            width,
+            height,
+            editor_x,
+            78 * scale,
+            "Edit any config keys here. Ctrl/Cmd+S saves; changes apply immediately where possible.",
+            px * 0.75,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+
+        let editor_line_height = line_height.max(self.ch + 2 * scale);
+        let visible_lines = (editor_h / editor_line_height).max(1);
+        let lines: Vec<String> = self
+            .settings_editor
+            .string()
+            .split('\n')
+            .map(str::to_owned)
+            .collect();
+        for (visible_row, line) in lines
+            .iter()
+            .skip(self.settings_editor.scroll)
+            .take(visible_lines)
+            .enumerate()
+        {
+            draw_text(
+                pixels,
+                width,
+                height,
+                editor_x + 10 * scale,
+                editor_y + 8 * scale + visible_row * editor_line_height,
+                line,
+                px,
+                ascent,
+                self.theme.fg,
+                font,
+                fallbacks,
+                glyphs,
+            );
+        }
+        let (cursor_line, cursor_col) = cursor_line_col;
+        if cursor_line >= self.settings_editor.scroll
+            && cursor_line < self.settings_editor.scroll + visible_lines
+        {
+            let x = editor_x + 10 * scale + cursor_col * cell_width;
+            let y = editor_y
+                + 7 * scale
+                + (cursor_line - self.settings_editor.scroll) * editor_line_height;
+            fill_rect(
+                pixels,
+                width,
+                height,
+                x,
+                y,
+                2 * scale,
+                self.ch,
+                self.theme.fg,
+            );
+        }
+        draw_text(
+            pixels,
+            width,
+            height,
+            editor_x,
+            save_y - 20 * scale,
+            &self.settings_editor.status,
+            px * 0.75,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        let save_x = width.saturating_sub(140 * scale);
+        let save_w = 120 * scale;
+        let save_h = 36 * scale;
+        let hovered = self.settings_cursor_pos.0 >= save_x as f64
+            && self.settings_cursor_pos.0 < (save_x + save_w) as f64
+            && self.settings_cursor_pos.1 >= save_y as f64
+            && self.settings_cursor_pos.1 < (save_y + save_h) as f64;
+        draw_kde_button(
+            pixels,
+            width,
+            height,
+            save_x,
+            save_y,
+            save_w,
+            save_h,
+            scale,
+            self.theme.bg,
+            self.theme.border,
+            self.theme.palette[4],
+            hovered,
+        );
+        draw_text(
+            pixels,
+            width,
+            height,
+            save_x + (save_w - 4 * cell_width) / 2,
+            save_y + (save_h.saturating_sub(self.ch)) / 2,
+            "Save",
+            px,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        let _ = buffer.present();
+    }
+
+    fn settings_window_event(&mut self, event: WindowEvent) {
+        match event {
+            WindowEvent::CloseRequested => {
+                self.settings_window = None;
+                self.settings_surface = None;
+                self._settings_context = None;
+            }
+            WindowEvent::Resized(size) => {
+                self.settings_width = size.width.max(1);
+                self.settings_height = size.height.max(1);
+                if let Some(surface) = self.settings_surface.as_mut() {
+                    if let (Some(width), Some(height)) = (
+                        NonZeroU32::new(self.settings_width),
+                        NonZeroU32::new(self.settings_height),
+                    ) {
+                        let _ = surface.resize(width, height);
+                    }
+                }
+                self.draw_settings();
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.ctrl = modifiers.state().control_key();
+                self.shift = modifiers.state().shift_key();
+                self.super_key = modifiers.state().super_key();
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.settings_cursor_pos = (position.x, position.y);
+                if let Some(window) = &self.settings_window {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let amount = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y.round() as isize,
+                    MouseScrollDelta::PixelDelta(p) => (p.y / 24.0).round() as isize,
+                };
+                if amount > 0 {
+                    self.settings_editor.scroll =
+                        self.settings_editor.scroll.saturating_sub(amount as usize);
+                } else if amount < 0 {
+                    self.settings_editor.scroll = self
+                        .settings_editor
+                        .scroll
+                        .saturating_add(amount.unsigned_abs());
+                }
+                if let Some(window) = &self.settings_window {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let scale = self
+                    .settings_window
+                    .as_ref()
+                    .map_or(1, |window| window.scale_factor().round() as usize)
+                    .max(1);
+                let (x, y) = self.settings_cursor_pos;
+                let save_y = (self.settings_height as usize).saturating_sub(52 * scale);
+                let save_x = (self.settings_width as usize).saturating_sub(140 * scale);
+                if x >= save_x as f64 && x < (save_x + 120 * scale) as f64 && y >= save_y as f64 {
+                    self.save_settings_config();
+                    return;
+                }
+                let editor_x = 20 * scale;
+                let editor_y = 100 * scale;
+                let line_height = (25 * scale).max(self.ch + 2 * scale);
+                if x >= editor_x as f64 && y >= editor_y as f64 && y < save_y as f64 {
+                    let line = self.settings_editor.scroll
+                        + (y as usize).saturating_sub(editor_y + 8 * scale) / line_height;
+                    let col = (x as usize).saturating_sub(editor_x + 10 * scale) / self.cw.max(1);
+                    let chars = &self.settings_editor.text;
+                    let mut index = 0;
+                    let mut current_line = 0;
+                    while current_line < line && index < chars.len() {
+                        if chars[index] == '\n' {
+                            current_line += 1;
+                        }
+                        index += 1;
+                    }
+                    let mut current_col = 0;
+                    while current_line == line && index < chars.len() && chars[index] != '\n' {
+                        if current_col >= col {
+                            break;
+                        }
+                        index += 1;
+                        current_col += 1;
+                    }
+                    self.settings_editor.cursor = index;
+                    if let Some(window) = &self.settings_window {
+                        window.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                let is_save = (self.ctrl || self.super_key)
+                    && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("s"));
+                if is_save {
+                    self.save_settings_config();
+                    return;
+                }
+                match &event.logical_key {
+                    Key::Named(NamedKey::Escape) => {
+                        self.settings_window = None;
+                        self.settings_surface = None;
+                        self._settings_context = None;
+                    }
+                    Key::Named(NamedKey::Enter) => {
+                        self.settings_editor
+                            .text
+                            .insert(self.settings_editor.cursor, '\n');
+                        self.settings_editor.cursor += 1;
+                    }
+                    Key::Named(NamedKey::Backspace) => {
+                        if self.settings_editor.cursor > 0 {
+                            self.settings_editor.cursor -= 1;
+                            self.settings_editor
+                                .text
+                                .remove(self.settings_editor.cursor);
+                        }
+                    }
+                    Key::Named(NamedKey::Delete) => {
+                        if self.settings_editor.cursor < self.settings_editor.text.len() {
+                            self.settings_editor
+                                .text
+                                .remove(self.settings_editor.cursor);
+                        }
+                    }
+                    Key::Named(NamedKey::ArrowLeft) => {
+                        self.settings_editor.cursor = self.settings_editor.cursor.saturating_sub(1);
+                    }
+                    Key::Named(NamedKey::ArrowRight) => {
+                        self.settings_editor.cursor =
+                            (self.settings_editor.cursor + 1).min(self.settings_editor.text.len());
+                    }
+                    Key::Named(NamedKey::ArrowUp) => self.move_settings_cursor_vertical(-1),
+                    Key::Named(NamedKey::ArrowDown) => self.move_settings_cursor_vertical(1),
+                    Key::Named(NamedKey::Home) => {
+                        self.settings_editor.cursor = self.settings_editor.text
+                            [..self.settings_editor.cursor]
+                            .iter()
+                            .rposition(|&ch| ch == '\n')
+                            .map_or(0, |index| index + 1);
+                    }
+                    Key::Named(NamedKey::End) => {
+                        if let Some(offset) = self.settings_editor.text
+                            [self.settings_editor.cursor..]
+                            .iter()
+                            .position(|&ch| ch == '\n')
+                        {
+                            self.settings_editor.cursor += offset;
+                        } else {
+                            self.settings_editor.cursor = self.settings_editor.text.len();
+                        }
+                    }
+                    Key::Named(NamedKey::PageUp) => {
+                        self.settings_editor.scroll =
+                            self.settings_editor.scroll.saturating_sub(10);
+                    }
+                    Key::Named(NamedKey::PageDown) => {
+                        self.settings_editor.scroll =
+                            self.settings_editor.scroll.saturating_add(10);
+                    }
+                    Key::Named(NamedKey::Tab) => {
+                        self.settings_editor
+                            .text
+                            .insert(self.settings_editor.cursor, '\t');
+                        self.settings_editor.cursor += 1;
+                    }
+                    Key::Character(value) if !self.ctrl && !self.super_key => {
+                        let text: Vec<char> = value.chars().filter(|ch| !ch.is_control()).collect();
+                        let count = text.len();
+                        self.settings_editor.text.splice(
+                            self.settings_editor.cursor..self.settings_editor.cursor,
+                            text,
+                        );
+                        self.settings_editor.cursor += count;
+                    }
+                    _ => {}
+                }
+                let scale = self
+                    .settings_window
+                    .as_ref()
+                    .map_or(1, |window| window.scale_factor().round() as usize)
+                    .max(1);
+                let save_y = (self.settings_height as usize).saturating_sub(52 * scale);
+                let editor_h = save_y.saturating_sub(100 * scale + 16 * scale);
+                let visible = (editor_h / (25 * scale).max(self.ch + 2 * scale)).max(1);
+                self.keep_settings_cursor_visible(visible);
+                if let Some(window) = &self.settings_window {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::RedrawRequested => self.draw_settings(),
+            _ => {}
+        }
+    }
+
+    fn active_term(&self) -> &Term {
+        &self.sessions[self.active].term
+    }
+
+    fn active_session_mut(&mut self) -> &mut Session {
+        &mut self.sessions[self.active]
+    }
+
+    fn add_tab(&mut self) {
+        let id = self.next_session_id;
+        self.next_session_id += 1;
+        let cols = self.active_term().cols;
+        let rows = self.active_term().rows;
+        match spawn_session(id, cols, rows, self.theme, self.proxy.clone()) {
+            Ok(session) => {
+                self.sessions.push(session);
+                self.active = self.sessions.len() - 1;
+                self.ensure_active_tab_visible();
+                self.selection = None;
+                self.update_window_title();
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            Err(error) => eprintln!("poopterm: could not open tab: {error}"),
+        }
+    }
+
+    fn switch_tab(&mut self, offset: isize) {
+        let count = self.sessions.len();
+        if count == 0 {
+            return;
+        }
+        self.active = (self.active as isize + offset).rem_euclid(count as isize) as usize;
+        self.ensure_active_tab_visible();
+        self.selection = None;
+        self.update_window_title();
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    fn close_active_tab(&mut self, event_loop: &ActiveEventLoop) {
+        self.close_tab(self.active, event_loop);
+    }
+
+    fn close_tab(&mut self, index: usize, event_loop: &ActiveEventLoop) {
+        if index >= self.sessions.len() {
+            return;
+        }
+        self.sessions.remove(index);
+        self.selection = None;
+        if self.sessions.is_empty() {
+            event_loop.exit();
+            return;
+        }
+        if index < self.active {
+            self.active -= 1;
+        } else if index == self.active {
+            self.active = self.active.min(self.sessions.len() - 1);
+        }
+        self.tab_scroll = self.tab_scroll.min(self.sessions.len().saturating_sub(1));
+        self.ensure_active_tab_visible();
+        self.update_window_title();
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    fn update_window_title(&mut self) {
+        let title = self.active_term().title.clone();
+        if self.reported_title == title {
+            return;
+        }
+        self.reported_title.clone_from(&title);
+        if let Some(presence) = &self.presence {
+            let _ = presence.send(title.clone());
+        }
+        if let Some(window) = &self.window {
+            window.set_title(&format!("{title} — poopterm"));
+        }
+    }
+
+    fn point_at(&self, x: f64, y: f64) -> Option<CellPoint> {
+        let term = self.active_term();
+        if x < self.margin as f64 || y < self.top as f64 {
+            return None;
+        }
+        let col = ((x as usize - self.margin) / self.cw.max(1)).min(term.cols - 1);
+        let row = ((y as usize - self.top) / self.ch.max(1)).min(term.rows - 1);
+        Some(CellPoint {
+            row: term.scrollback.len().saturating_sub(term.scroll_offset) + row,
+            col,
+        })
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        let selection = self.selection?;
+        let (start, end) = selection.ordered();
+        let term = self.active_term();
+        let history_len = term.scrollback.len();
+        let mut result = String::new();
+        for row in start.row..=end.row {
+            let cells = if row < history_len {
+                term.scrollback.get(row)?.as_slice()
+            } else {
+                let screen_row = row - history_len;
+                if screen_row >= term.rows {
+                    break;
+                }
+                let begin = screen_row * term.cols;
+                &term.cells[begin..begin + term.cols]
+            };
+            let from = if row == start.row { start.col } else { 0 };
+            let to = if row == end.row {
+                end.col
+            } else {
+                cells.len().saturating_sub(1)
+            };
+            for cell in cells.iter().take(to + 1).skip(from) {
+                if cell.width != 0 {
+                    result.push(cell.ch);
+                }
+            }
+            if row != end.row {
+                while result.ends_with(' ') {
+                    result.pop();
+                }
+                result.push('\n');
+            }
+        }
+        Some(result)
+    }
+
+    fn copy_selection(&self) {
+        if let Some(text) = self.selected_text() {
+            if let Err(error) = clipboard_write(&text) {
+                eprintln!("poopterm: clipboard copy failed: {error}");
+            }
+        }
+    }
+
+    fn paste_clipboard(&mut self) {
+        match clipboard_read() {
+            Ok(text) => {
+                let bracketed = self.active_term().bracketed_paste;
+                let mut bytes = Vec::with_capacity(text.len() + 24);
+                if bracketed {
+                    bytes.extend_from_slice(b"\x1b[200~");
+                }
+                bytes.extend_from_slice(text.as_bytes());
+                if bracketed {
+                    bytes.extend_from_slice(b"\x1b[201~");
+                }
+                let session = self.active_session_mut();
+                let _ = session.writer.write_all(&bytes);
+                let _ = session.writer.flush();
+            }
+            Err(error) => eprintln!("poopterm: clipboard paste failed: {error}"),
+        }
+    }
+
+    fn send_mouse_report(
+        &mut self,
+        button: u8,
+        x: f64,
+        y: f64,
+        release: bool,
+        motion: bool,
+    ) -> bool {
+        let Some(point) = self.point_at(x, y) else {
+            return false;
+        };
+        let term = self.active_term();
+        if term.mouse_tracking == 0 {
+            return false;
+        }
+        if motion && term.mouse_tracking != 1002 && term.mouse_tracking != 1003 {
+            return false;
+        }
+        let code = button + if motion { 32 } else { 0 };
+        let visible_start = term.scrollback.len().saturating_sub(term.scroll_offset);
+        let (col, row) = (point.col + 1, point.row.saturating_sub(visible_start) + 1);
+        let payload = if term.mouse_sgr {
+            format!(
+                "\x1b[<{};{};{}{}",
+                code,
+                col,
+                row,
+                if release { "m" } else { "M" }
+            )
+        } else if col <= 223 && row <= 223 {
+            format!(
+                "\x1b[M{}{}{}",
+                (if release { 3 } else { code }) + 32,
+                col + 32,
+                row + 32
+            )
+        } else {
+            return true;
+        };
+        let session = self.active_session_mut();
+        let _ = session.writer.write_all(payload.as_bytes());
+        let _ = session.writer.flush();
+        true
+    }
+
+    fn begin_selection(&mut self, x: f64, y: f64) {
+        if let Some(point) = self.point_at(x, y) {
+            self.selection = Some(Selection {
+                start: point,
+                end: point,
+            });
+            self.selecting = true;
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+    }
+
+    fn extend_selection(&mut self, x: f64, y: f64) {
+        if !self.selecting {
+            return;
+        }
+        if let Some(point) = self.point_at(x, y) {
+            if let Some(selection) = &mut self.selection {
+                selection.end = point;
+            }
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+    }
+
     fn cycle_theme(&mut self) {
-        self.theme = Theme::from_kind(self.theme.kind.next());
-        self.term.set_theme(self.theme);
+        self.apply_theme(self.theme.kind.next());
+    }
+
+    fn apply_theme(&mut self, kind: ThemeKind) {
+        self.theme = Theme::from_kind(kind);
+        for session in &mut self.sessions {
+            session.term.set_theme(self.theme);
+        }
         if let Err(error) = save_config_theme(self.theme.kind) {
             eprintln!("poopterm: could not save theme config: {error}");
         }
@@ -622,19 +2064,22 @@ impl App {
     fn resize(&mut self, w: u32, h: u32) {
         self.width = w.max(1);
         self.height = h.max(1);
+        self.ensure_active_tab_visible();
 
         let cols = ((self.width as usize).saturating_sub(2 * self.margin) / self.cw.max(1)).max(2);
         let rows =
             ((self.height as usize).saturating_sub(self.top + self.margin) / self.ch.max(1)).max(2);
 
-        if cols != self.term.cols || rows != self.term.rows {
-            self.term.resize(cols, rows);
-            let _ = self.master.resize(PtySize {
-                rows: rows as u16,
-                cols: cols as u16,
-                pixel_width: 0,
-                pixel_height: 0,
-            });
+        for session in &mut self.sessions {
+            if cols != session.term.cols || rows != session.term.rows {
+                session.term.resize(cols, rows);
+                let _ = session.master.resize(PtySize {
+                    rows: rows as u16,
+                    cols: cols as u16,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
         }
 
         if let Some(s) = self.surface.as_mut() {
@@ -657,10 +2102,26 @@ impl App {
                 NamedKey::Tab => Some(b"\t".to_vec()),
                 NamedKey::Escape => Some(vec![0x1b]),
                 NamedKey::Space => Some(b" ".to_vec()),
-                NamedKey::ArrowUp => Some(b"\x1b[A".to_vec()),
-                NamedKey::ArrowDown => Some(b"\x1b[B".to_vec()),
-                NamedKey::ArrowRight => Some(b"\x1b[C".to_vec()),
-                NamedKey::ArrowLeft => Some(b"\x1b[D".to_vec()),
+                NamedKey::ArrowUp => Some(if self.active_term().application_cursor {
+                    b"\x1bOA".to_vec()
+                } else {
+                    b"\x1b[A".to_vec()
+                }),
+                NamedKey::ArrowDown => Some(if self.active_term().application_cursor {
+                    b"\x1bOB".to_vec()
+                } else {
+                    b"\x1b[B".to_vec()
+                }),
+                NamedKey::ArrowRight => Some(if self.active_term().application_cursor {
+                    b"\x1bOC".to_vec()
+                } else {
+                    b"\x1b[C".to_vec()
+                }),
+                NamedKey::ArrowLeft => Some(if self.active_term().application_cursor {
+                    b"\x1bOD".to_vec()
+                } else {
+                    b"\x1b[D".to_vec()
+                }),
                 NamedKey::Home => Some(b"\x1b[H".to_vec()),
                 NamedKey::End => Some(b"\x1b[F".to_vec()),
                 NamedKey::PageUp => Some(b"\x1b[5~".to_vec()),
@@ -697,6 +2158,11 @@ impl App {
     }
 
     fn draw(&mut self) {
+        let tab_y = self.tab_y();
+        let scale = (self.px / 18.0).round() as usize;
+        let left_reserve = self.tab_left_reserve();
+        let session_count = self.sessions.len();
+        let tab_scroll = self.tab_scroll;
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -728,8 +2194,207 @@ impl App {
             self.ascent,
         );
         let font = &self.font;
+        let fallback_fonts = &self.fallback_fonts;
         let glyphs = &mut self.glyphs;
-        let term = &self.term;
+        let term = &self.sessions[self.active].term;
+        let selected = self.selection.map(Selection::ordered);
+        let layout = tab_layout(w, session_count, scale, left_reserve, tab_scroll);
+        let accent = self.theme.palette[4];
+        fill_rect(pixels, w, h, 0, tab_y, w, self.tab_height, self.theme.bg);
+        for index in
+            layout.first_visible..session_count.min(layout.first_visible + layout.visible_count)
+        {
+            let session = &self.sessions[index];
+            let local_index = index - layout.first_visible;
+            let x = layout.start + local_index * (layout.width + layout.gap);
+            let active = index == self.active;
+            let hovered = self.cursor_pos.0 >= x as f64
+                && self.cursor_pos.0 < (x + layout.width) as f64
+                && self.cursor_pos.1 >= tab_y as f64
+                && self.cursor_pos.1 < top as f64;
+            if active || hovered {
+                let color = if active {
+                    blend(self.theme.bg, self.theme.border, 70)
+                } else {
+                    blend(self.theme.bg, self.theme.border, 38)
+                };
+                fill_round_rect(
+                    pixels,
+                    w,
+                    h,
+                    x,
+                    tab_y + 4 * scale,
+                    layout.width,
+                    self.tab_height.saturating_sub(6 * scale),
+                    5 * scale,
+                    color,
+                );
+            }
+            if active {
+                fill_round_rect(
+                    pixels,
+                    w,
+                    h,
+                    x + 8 * scale,
+                    top.saturating_sub(4 * scale),
+                    layout.width.saturating_sub(16 * scale),
+                    3 * scale,
+                    scale,
+                    accent,
+                );
+            }
+            let title_chars = layout.width.saturating_sub(42 * scale) / self.cw.max(1);
+            let mut label: String = session
+                .term
+                .title
+                .chars()
+                .take(title_chars.max(1))
+                .collect();
+            if session.term.title.chars().count() > title_chars.max(1) && title_chars > 1 {
+                label.pop();
+                label.push('…');
+            }
+            draw_text(
+                pixels,
+                w,
+                h,
+                x + 12 * scale,
+                tab_y + (self.tab_height.saturating_sub(ch)) / 2,
+                &label,
+                px,
+                ascent,
+                self.theme.fg,
+                font,
+                fallback_fonts,
+                glyphs,
+            );
+            if self.sessions.len() > 1 {
+                draw_text(
+                    pixels,
+                    w,
+                    h,
+                    x + layout.width.saturating_sub(28 * scale),
+                    tab_y + (self.tab_height.saturating_sub(ch)) / 2,
+                    "×",
+                    px,
+                    ascent,
+                    self.theme.fg,
+                    font,
+                    fallback_fonts,
+                    glyphs,
+                );
+            }
+        }
+        let arrow_y = tab_y + (self.tab_height.saturating_sub(30 * scale)) / 2;
+        let arrow_h = 30 * scale;
+        let can_scroll_left = layout.first_visible > 0;
+        let can_scroll_right = layout.first_visible + layout.visible_count < session_count;
+        for (x, label, enabled) in [
+            (layout.left_arrow_x, "‹", can_scroll_left),
+            (layout.right_arrow_x, "›", can_scroll_right),
+        ] {
+            if !enabled {
+                continue;
+            }
+            let hovered = self.cursor_pos.0 >= x as f64
+                && self.cursor_pos.0 < (x + layout.arrow_w) as f64
+                && self.cursor_pos.1 >= arrow_y as f64
+                && self.cursor_pos.1 < (arrow_y + arrow_h) as f64;
+            draw_kde_button(
+                pixels,
+                w,
+                h,
+                x,
+                arrow_y,
+                layout.arrow_w,
+                arrow_h,
+                scale,
+                self.theme.bg,
+                self.theme.border,
+                accent,
+                hovered,
+            );
+            draw_text(
+                pixels,
+                w,
+                h,
+                x + (layout.arrow_w.saturating_sub(self.cw)) / 2,
+                arrow_y + (arrow_h.saturating_sub(ch)) / 2,
+                label,
+                px,
+                ascent,
+                self.theme.fg,
+                font,
+                fallback_fonts,
+                glyphs,
+            );
+        }
+        let button_y = tab_y + (self.tab_height.saturating_sub(34 * scale)) / 2;
+        let button_h = 34 * scale;
+        let plus_hovered = self.cursor_pos.0 >= layout.plus_x as f64
+            && self.cursor_pos.0 < (layout.plus_x + layout.plus_w) as f64
+            && self.cursor_pos.1 >= button_y as f64
+            && self.cursor_pos.1 < (button_y + button_h) as f64;
+        let settings_hovered = self.cursor_pos.0 >= layout.settings_x as f64
+            && self.cursor_pos.0 < (layout.settings_x + layout.settings_w) as f64
+            && self.cursor_pos.1 >= button_y as f64
+            && self.cursor_pos.1 < (button_y + button_h) as f64;
+        draw_kde_button(
+            pixels,
+            w,
+            h,
+            layout.plus_x,
+            button_y,
+            layout.plus_w,
+            button_h,
+            scale,
+            self.theme.bg,
+            self.theme.border,
+            accent,
+            plus_hovered,
+        );
+        draw_text(
+            pixels,
+            w,
+            h,
+            layout.plus_x + (layout.plus_w.saturating_sub(self.cw)) / 2,
+            button_y + (button_h.saturating_sub(ch)) / 2,
+            "+",
+            px,
+            ascent,
+            self.theme.fg,
+            font,
+            fallback_fonts,
+            glyphs,
+        );
+        draw_kde_button(
+            pixels,
+            w,
+            h,
+            layout.settings_x,
+            button_y,
+            layout.settings_w,
+            button_h,
+            scale,
+            self.theme.bg,
+            self.theme.border,
+            accent,
+            settings_hovered,
+        );
+        draw_text(
+            pixels,
+            w,
+            h,
+            layout.settings_x + 10 * scale,
+            button_y + (button_h.saturating_sub(ch)) / 2,
+            "Settings",
+            px,
+            ascent,
+            self.theme.fg,
+            font,
+            fallback_fonts,
+            glyphs,
+        );
         let history_len = term.scrollback.len();
         let screen_start = history_len.saturating_sub(term.scroll_offset);
 
@@ -742,26 +2407,43 @@ impl App {
                 &term.cells[start..start + term.cols]
             };
             for (col, &cell) in row_cells.iter().enumerate() {
+                let is_selected = selected.is_some_and(|(start, end)| {
+                    let point = CellPoint {
+                        row: absolute_row,
+                        col,
+                    };
+                    point >= start && point <= end
+                });
                 let is_cursor = term.cursor_visible
                     && term.scroll_offset == 0
                     && row == term.cy
                     && col == term.cx;
-                let (fg, bg) = if is_cursor {
+                let (mut fg, mut bg) = if is_cursor {
                     (cell.bg, cell.fg)
                 } else {
                     (cell.fg, cell.bg)
                 };
+                if is_selected {
+                    fg = 0x1E1E2E;
+                    bg = 0x89B4FA;
+                }
 
                 let x0 = m + col * cw;
                 let y0 = top + row * ch;
                 fill_rect(pixels, w, h, x0, y0, cw, ch, bg);
 
-                if cell.ch == ' ' {
+                if cell.ch == ' ' || cell.width == 0 {
                     continue;
                 }
+                let font_index = glyph_font_index(font, fallback_fonts, cell.ch);
+                let glyph_font = if font_index == 0 {
+                    font
+                } else {
+                    &fallback_fonts[font_index - 1]
+                };
                 let (gm, bitmap) = glyphs
-                    .entry(cell.ch)
-                    .or_insert_with(|| font.rasterize(cell.ch, px));
+                    .entry((cell.ch, font_index))
+                    .or_insert_with(|| glyph_font.rasterize(cell.ch, px));
 
                 let gx0 = x0 as i32 + gm.xmin;
                 let gy0 = y0 as i32 + ascent - gm.ymin - gm.height as i32;
@@ -773,7 +2455,13 @@ impl App {
                         }
                         let x = gx0 + gx as i32;
                         let y = gy0 + gy as i32;
-                        if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 {
+                        if x < x0 as i32
+                            || x >= x0 as i32 + cw as i32 * cell.width as i32
+                            || y < 0
+                            || x < 0
+                            || x >= w as i32
+                            || y >= h as i32
+                        {
                             continue;
                         }
                         pixels[y as usize * w + x as usize] = blend(bg, fg, a);
@@ -805,6 +2493,207 @@ fn fill_rect(
         let row_end = yy * w + x_end;
         px[row_start..row_end].fill(color);
     }
+}
+
+fn fill_round_rect(
+    pixels: &mut [u32],
+    width: usize,
+    height: usize,
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    radius: usize,
+    color: u32,
+) {
+    let radius = radius.min(h / 2).min(w / 2);
+    for row in 0..h {
+        let dy = if row < radius {
+            radius - row
+        } else if row >= h - radius {
+            row - (h - radius - 1)
+        } else {
+            0
+        };
+        let inset = if dy == 0 {
+            0
+        } else {
+            radius.saturating_sub(
+                radius
+                    .saturating_mul(radius)
+                    .saturating_sub(dy * dy)
+                    .isqrt(),
+            )
+        };
+        fill_rect(
+            pixels,
+            width,
+            height,
+            x + inset,
+            y + row,
+            w.saturating_sub(2 * inset),
+            1,
+            color,
+        );
+    }
+}
+
+fn draw_kde_button(
+    pixels: &mut [u32],
+    width: usize,
+    height: usize,
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    scale: usize,
+    background: u32,
+    border: u32,
+    accent: u32,
+    hovered: bool,
+) {
+    fill_round_rect(pixels, width, height, x, y, w, h, 5 * scale, border);
+    let face = if hovered {
+        blend(background, accent, 52)
+    } else {
+        blend(background, border, 38)
+    };
+    fill_round_rect(
+        pixels,
+        width,
+        height,
+        x + scale,
+        y + scale,
+        w.saturating_sub(2 * scale),
+        h.saturating_sub(2 * scale),
+        4 * scale,
+        face,
+    );
+}
+
+fn draw_text(
+    pixels: &mut [u32],
+    width: usize,
+    height: usize,
+    x: usize,
+    y: usize,
+    text: &str,
+    px: f32,
+    ascent: i32,
+    color: u32,
+    font: &Font,
+    fallback_fonts: &[Font],
+    glyphs: &mut HashMap<(char, usize), (Metrics, Vec<u8>)>,
+) {
+    let mut cursor_x = x as i32;
+    for ch in text.chars() {
+        let font_index = glyph_font_index(font, fallback_fonts, ch);
+        let glyph_font = if font_index == 0 {
+            font
+        } else {
+            &fallback_fonts[font_index - 1]
+        };
+        let (metrics, bitmap) = glyphs
+            .entry((ch, font_index))
+            .or_insert_with(|| glyph_font.rasterize(ch, px));
+        let gx0 = cursor_x + metrics.xmin;
+        let gy0 = y as i32 + ascent - metrics.ymin - metrics.height as i32;
+        for gy in 0..metrics.height {
+            for gx in 0..metrics.width {
+                let alpha = bitmap[gy * metrics.width + gx] as u32;
+                let px_x = gx0 + gx as i32;
+                let px_y = gy0 + gy as i32;
+                if alpha == 0
+                    || px_x < 0
+                    || px_y < 0
+                    || px_x >= width as i32
+                    || px_y >= height as i32
+                {
+                    continue;
+                }
+                let index = px_y as usize * width + px_x as usize;
+                pixels[index] = blend(pixels[index], color, alpha);
+            }
+        }
+        cursor_x += metrics.advance_width.ceil() as i32;
+        if cursor_x >= width as i32 {
+            break;
+        }
+    }
+}
+
+fn clipboard_write_with(program: &str, args: &[&str], text: &str) -> std::io::Result<()> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .spawn()?;
+    child.stdin.take().unwrap().write_all(text.as_bytes())?;
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "{program} exited with {status}"
+        )))
+    }
+}
+
+fn clipboard_read_with(program: &str, args: &[&str]) -> std::io::Result<String> {
+    let output = Command::new(program).args(args).output()?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(std::io::Error::other(format!(
+            "{program} exited with {}",
+            output.status
+        )))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn clipboard_write(text: &str) -> std::io::Result<()> {
+    clipboard_write_with("pbcopy", &[], text)
+}
+
+#[cfg(target_os = "macos")]
+fn clipboard_read() -> std::io::Result<String> {
+    clipboard_read_with("pbpaste", &[])
+}
+
+#[cfg(target_os = "linux")]
+fn clipboard_write(text: &str) -> std::io::Result<()> {
+    if env::var_os("WAYLAND_DISPLAY").is_some() {
+        if let Ok(()) = clipboard_write_with("wl-copy", &[], text) {
+            return Ok(());
+        }
+    }
+    clipboard_write_with("xclip", &["-selection", "clipboard"], text)
+        .or_else(|_| clipboard_write_with("xsel", &["--clipboard", "--input"], text))
+}
+
+#[cfg(target_os = "linux")]
+fn clipboard_read() -> std::io::Result<String> {
+    if env::var_os("WAYLAND_DISPLAY").is_some() {
+        if let Ok(text) = clipboard_read_with("wl-paste", &["--no-newline"]) {
+            return Ok(text);
+        }
+    }
+    clipboard_read_with("xclip", &["-selection", "clipboard", "-o"])
+        .or_else(|_| clipboard_read_with("xsel", &["--clipboard", "--output"]))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn clipboard_write(_: &str) -> std::io::Result<()> {
+    Err(std::io::Error::other(
+        "clipboard support is unavailable on this platform",
+    ))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn clipboard_read() -> std::io::Result<String> {
+    Err(std::io::Error::other(
+        "clipboard support is unavailable on this platform",
+    ))
 }
 
 fn blend(bg: u32, fg: u32, a: u32) -> u32 {
@@ -844,11 +2733,23 @@ impl ApplicationHandler<UserEvent> for App {
         self.px = 18.0 * scale;
         self.margin = (8.0 * scale) as usize;
         self.border = (scale * 3.0) as usize;
-        self.top = if cfg!(target_os = "macos") {
-            (28.0 * scale) as usize // space for the traffic lights
+        self.titlebar_height = if cfg!(target_os = "macos") {
+            (28.0 * scale) as usize
         } else {
-            self.margin
+            0
         };
+        self.tab_height = (if cfg!(target_os = "macos") {
+            34.0
+        } else {
+            46.0
+        } * scale) as usize;
+        self.top = self.titlebar_height
+            + if cfg!(target_os = "macos") {
+                0
+            } else {
+                self.tab_height
+            }
+            + self.margin;
 
         let lm = self
             .font
@@ -859,8 +2760,8 @@ impl ApplicationHandler<UserEvent> for App {
         self.cw = self.font.metrics('M', self.px).advance_width.ceil() as usize;
 
         let size = PhysicalSize::new(
-            (self.cw * self.term.cols + 2 * self.margin) as u32,
-            (self.ch * self.term.rows + self.top + self.margin) as u32,
+            (self.cw * self.active_term().cols + 2 * self.margin) as u32,
+            (self.ch * self.active_term().rows + self.top + self.margin) as u32,
         );
         let _ = window.request_inner_size(size);
 
@@ -870,24 +2771,56 @@ impl ApplicationHandler<UserEvent> for App {
         self.surface = Some(surface);
         self._context = Some(context);
         self.window = Some(window);
+        self.update_window_title();
 
         let s = self.window.as_ref().unwrap().inner_size();
         self.resize(s.width, s.height);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if self
+            .settings_window
+            .as_ref()
+            .is_some_and(|window| window.id() == id)
+        {
+            self.settings_window_event(event);
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::ModifiersChanged(m) => {
                 self.ctrl = m.state().control_key();
                 self.shift = m.state().shift_key();
+                self.super_key = m.state().super_key();
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                let (x, y) = self.cursor_pos;
+                let scroll_up = match &delta {
+                    MouseScrollDelta::LineDelta(_, n) => *n > 0.0,
+                    MouseScrollDelta::PixelDelta(p) => p.y > 0.0,
+                };
+                if y >= self.tab_y() as f64 && y < self.top as f64 {
+                    let layout = self.tab_layout();
+                    if layout.first_visible > 0 && scroll_up {
+                        self.tab_scroll -= 1;
+                    } else if layout.first_visible + layout.visible_count < self.sessions.len()
+                        && !scroll_up
+                    {
+                        self.tab_scroll += 1;
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
+                if self.send_mouse_report(if scroll_up { 64 } else { 65 }, x, y, false, false) {
+                    return;
+                }
                 let lines = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y.round() as isize,
                     MouseScrollDelta::PixelDelta(p) => (p.y / 24.0).round() as isize,
                 };
-                self.term.scroll_view(lines);
+                self.active_session_mut().term.scroll_view(lines);
                 if let Some(win) = &self.window {
                     win.request_redraw();
                 }
@@ -900,17 +2833,143 @@ impl ApplicationHandler<UserEvent> for App {
                     self.cycle_theme();
                     return;
                 }
+                if self.super_key
+                    && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("t"))
+                    || self.ctrl
+                        && self.shift
+                        && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("n"))
+                {
+                    self.add_tab();
+                    return;
+                }
+                let copy_shortcut = self.super_key
+                    && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("c"))
+                    || self.ctrl
+                        && self.shift
+                        && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("c"));
+                if copy_shortcut {
+                    if self.selection.is_some() {
+                        self.copy_selection();
+                    }
+                    return;
+                }
+                let paste_shortcut = self.super_key
+                    && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("v"))
+                    || self.ctrl
+                        && self.shift
+                        && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("v"));
+                if paste_shortcut {
+                    self.paste_clipboard();
+                    return;
+                }
+                if matches!(&event.logical_key, Key::Named(NamedKey::Tab)) && self.ctrl {
+                    self.switch_tab(if self.shift { -1 } else { 1 });
+                    return;
+                }
+                if self.super_key
+                    && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("w"))
+                {
+                    self.close_active_tab(event_loop);
+                    return;
+                }
                 if let Some(bytes) = self.key_bytes(&event.logical_key) {
-                    let _ = self.writer.write_all(&bytes);
-                    let _ = self.writer.flush();
+                    let session = self.active_session_mut();
+                    let _ = session.writer.write_all(&bytes);
+                    let _ = session.writer.flush();
                 }
             }
-            // No title bar, so click-drag anywhere moves the window.
-            WindowEvent::MouseInput { state, button, .. }
-                if state == ElementState::Pressed && button == MouseButton::Left =>
-            {
-                if let Some(win) = &self.window {
-                    let _ = win.drag_window();
+            WindowEvent::CursorMoved { position, .. } => {
+                let previous = self.cursor_pos;
+                self.cursor_pos = (position.x, position.y);
+                if self.selecting {
+                    self.extend_selection(position.x, position.y);
+                } else if (self.active_term().mouse_tracking == 1003 || self.mouse_button_down)
+                    && self.send_mouse_report(0, position.x, position.y, false, true)
+                {
+                    // Motion reporting is enabled by the running terminal application.
+                }
+                if previous.1 < self.top as f64 || position.y < self.top as f64 {
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let (x, y) = self.cursor_pos;
+                self.mouse_button_down = state == ElementState::Pressed;
+                let tab_y = self.tab_y() as f64;
+                if state == ElementState::Pressed && button == MouseButton::Left {
+                    let layout = self.tab_layout();
+                    let in_tabbar = y >= tab_y && y < self.top as f64;
+                    if in_tabbar
+                        && x >= layout.settings_x as f64
+                        && x < (layout.settings_x + layout.settings_w) as f64
+                    {
+                        self.open_settings_window(event_loop);
+                    } else if in_tabbar
+                        && x >= layout.plus_x as f64
+                        && x < (layout.plus_x + layout.plus_w) as f64
+                    {
+                        self.add_tab();
+                    } else if in_tabbar {
+                        if x >= layout.left_arrow_x as f64
+                            && x < (layout.left_arrow_x + layout.arrow_w) as f64
+                            && layout.first_visible > 0
+                        {
+                            self.tab_scroll = self.tab_scroll.saturating_sub(1);
+                        } else if x >= layout.right_arrow_x as f64
+                            && x < (layout.right_arrow_x + layout.arrow_w) as f64
+                            && layout.first_visible + layout.visible_count < self.sessions.len()
+                        {
+                            self.tab_scroll += 1;
+                        }
+                        for local_index in 0..layout.visible_count {
+                            let index = layout.first_visible + local_index;
+                            if index >= self.sessions.len() {
+                                break;
+                            }
+                            let left = layout.start + local_index * (layout.width + layout.gap);
+                            if x >= left as f64 && x < (left + layout.width) as f64 {
+                                if self.sessions.len() > 1
+                                    && x >= (left + layout.width.saturating_sub(28 * layout.scale))
+                                        as f64
+                                {
+                                    self.close_tab(index, event_loop);
+                                } else {
+                                    self.active = index;
+                                    self.ensure_active_tab_visible();
+                                    self.selection = None;
+                                    self.update_window_title();
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                } else if state == ElementState::Pressed
+                    && button == MouseButton::Left
+                    && y < self.titlebar_height as f64
+                {
+                    if let Some(window) = &self.window {
+                        let _ = window.drag_window();
+                    }
+                } else {
+                    let code = match button {
+                        MouseButton::Left => 0,
+                        MouseButton::Middle => 1,
+                        MouseButton::Right => 2,
+                        _ => 0,
+                    };
+                    let handled =
+                        self.send_mouse_report(code, x, y, state == ElementState::Released, false);
+                    if state == ElementState::Pressed && button == MouseButton::Left && !handled {
+                        self.begin_selection(x, y);
+                    }
+                    if state == ElementState::Released {
+                        self.selecting = false;
+                    }
                 }
             }
             WindowEvent::Resized(size) => self.resize(size.width, size.height),
@@ -921,16 +2980,35 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::Output(bytes) => {
+            UserEvent::Output(id, bytes) => {
                 // vte's Parser consumes one byte at a time.
-                for &b in bytes.iter() {
-                    self.parser.advance(&mut self.term, b);
+                if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
+                    for &b in bytes.iter() {
+                        session.parser.advance(&mut session.term, b);
+                    }
+                    for response in std::mem::take(&mut session.term.responses) {
+                        let _ = session.writer.write_all(&response);
+                    }
+                    let _ = session.writer.flush();
+                    if id == self.sessions[self.active].id {
+                        self.update_window_title();
+                    }
                 }
                 if let Some(win) = &self.window {
                     win.request_redraw();
                 }
             }
-            UserEvent::Closed => event_loop.exit(),
+            UserEvent::Closed(id) => {
+                if let Some(index) = self.sessions.iter().position(|s| s.id == id) {
+                    self.sessions.remove(index);
+                    if self.sessions.is_empty() {
+                        event_loop.exit();
+                    } else {
+                        self.active = self.active.min(self.sessions.len() - 1);
+                        self.update_window_title();
+                    }
+                }
+            }
         }
     }
 }
@@ -945,73 +3023,77 @@ fn main() -> Result<(), Box<dyn Error>> {
         include_bytes!("../assets/font.ttf") as &[u8],
         FontSettings::default(),
     )?;
-
-    let (cols, rows) = (100usize, 30usize);
-    let pty = native_pty_system();
-    let pair = pty.openpty(PtySize {
-        rows: rows as u16,
-        cols: cols as u16,
-        pixel_width: 0,
-        pixel_height: 0,
-    })?;
-
-    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    let mut cmd = CommandBuilder::new(shell);
-    cmd.env("TERM", "xterm-256color");
-    #[cfg(target_os = "macos")]
-    cmd.arg("-l");
-    let _child = pair.slave.spawn_command(cmd)?;
-    // The slave must be closed in the parent for EOF to arrive.
-    drop(pair.slave);
-
-    let mut reader = pair.master.try_clone_reader()?;
-    let writer = pair.master.take_writer()?;
-
-    thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => {
-                    let _ = proxy.send_event(UserEvent::Closed);
-                    break;
-                }
-                Ok(n) => {
-                    if proxy
-                        .send_event(UserEvent::Output(buf[..n].to_vec()))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            }
-        }
-    });
+    let fallback_fonts = load_symbol_fallbacks();
 
     let theme = Theme::load();
+    let session = spawn_session(1, 100, 30, theme, proxy.clone())?;
     let mut app = App {
         theme,
         font,
         glyphs: HashMap::new(),
+        fallback_fonts,
         px: 18.0,
         cw: 10,
         ch: 20,
         ascent: 15,
         margin: 8,
         top: 8,
+        titlebar_height: 0,
+        tab_height: 46,
         border: 1,
-        term: Term::new(cols, rows, theme),
-        parser: Parser::new(),
-        master: pair.master,
-        writer,
+        sessions: vec![session],
+        active: 0,
+        tab_scroll: 0,
+        next_session_id: 2,
+        proxy,
+        presence: start_discord_presence(),
         window: None,
+        reported_title: String::new(),
         _context: None,
         surface: None,
+        settings_window: None,
+        _settings_context: None,
+        settings_surface: None,
+        settings_width: 0,
+        settings_height: 0,
+        settings_cursor_pos: (0.0, 0.0),
+        settings_editor: SettingsEditor::load(),
         width: 0,
         height: 0,
         ctrl: false,
         shift: false,
+        super_key: false,
+        cursor_pos: (0.0, 0.0),
+        mouse_button_down: false,
+        selection: None,
+        selecting: false,
     };
 
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tab_layout;
+
+    #[test]
+    fn tab_strip_can_reach_older_tabs() {
+        let first_page = tab_layout(980, 20, 1, 0, 0);
+        let last_page = tab_layout(980, 20, 1, 0, 19);
+
+        assert!(first_page.visible_count < 20);
+        assert_eq!(first_page.first_visible, 0);
+        assert!(last_page.first_visible > 0);
+        assert!(last_page.first_visible + last_page.visible_count <= 20);
+    }
+
+    #[test]
+    fn narrow_tab_strip_keeps_a_reachable_tab() {
+        let layout = tab_layout(450, 20, 1, 0, 19);
+
+        assert!(layout.visible_count >= 1);
+        assert!(layout.first_visible < 20);
+        assert!(layout.first_visible + layout.visible_count <= 20);
+    }
 }

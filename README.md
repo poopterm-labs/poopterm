@@ -1,9 +1,9 @@
 # poopterm 💩
 
-Poopterm is a small, poop-colored terminal emulator written in Rust. It opens
-your default shell in a native window, with a caramel frame and four built-in
-color themes. It is a lightweight project and an intentionally incomplete
-terminal emulator, so some command-line apps may not behave as expected.
+Poopterm is a lightweight terminal emulator written in Rust. It opens your
+default shell in a native window, with tabs, clipboard support, and seven built-in
+color themes. Terminal compatibility is growing and is not yet a complete xterm
+implementation.
 
 ![Poopterm app icon](assets/icon.png)
 
@@ -13,8 +13,11 @@ terminal emulator, so some command-line apps may not behave as expected.
 - Supports basic cursor movement, 16-color, 256-color, and truecolor SGR,
   alternate-screen switching, and common editing and function keys.
 - Keeps up to 5,000 lines of scrollback. Use the mouse wheel to browse it.
+- Supports drag-to-select text and system clipboard copy/paste.
+- Opens multiple independent shell sessions in tabs.
+- Supports bracketed paste and common SGR mouse reporting modes.
 - Resizes the shell along with the window.
-- Includes macOS, Catppuccin Mocha, Rosé Pine, and signature Poop themes.
+- Includes macOS Light and Dark, all four Catppuccin flavors, and signature Poop themes.
 - Includes a desktop launcher and icon for Linux and FreeBSD.
 
 ## Build and run
@@ -89,29 +92,75 @@ pkg install rust pkgconf xorg libX11 libxkbcommon wayland
 
 ## Themes
 
-Poopterm includes macOS, Catppuccin Mocha, Rosé Pine, and signature Poop themes.
-Press **Ctrl+Shift+T** to cycle through them. The selected theme is saved to a
-config file and restored the next time you launch Poopterm.
+Poopterm includes macOS Light and Dark, Catppuccin Latte, Frappé, Macchiato,
+Mocha, and signature Poop themes. Rosé Pine has been removed for now. Choose a
+theme in **Settings** or press **Ctrl+Shift+T** to cycle through them. The
+selection is saved to a config file and restored on the next launch.
 
 The default config path is `~/Library/Application Support/poopterm/config.toml`
 on macOS and `~/.config/poopterm/config.toml` on Linux and FreeBSD (or
 `$XDG_CONFIG_HOME/poopterm/config.toml` when `XDG_CONFIG_HOME` is set). Create
-the file and set `theme` to one of `macos`, `catppuccin`, `rosepine`, or `poop`:
+the file or open **Settings** from the tab bar to edit it. Settings opens a
+separate window with the complete config file; click **Save** or press
+**Cmd+S**/**Ctrl+S**. The currently supported keys are:
 
 ```toml
-theme = "catppuccin"
+theme = "catppuccin-mocha"
+discord_client_id = "YOUR_DISCORD_APPLICATION_ID"
+symbol_font = "/path/to/SymbolsNerdFontMono-Regular.ttf"
 ```
+
+`theme` accepts `macos-dark`, `macos-light`, `catppuccin-latte`,
+`catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, or `poop`.
+Theme and symbol-font changes apply immediately; Discord presence reconnects
+with the saved client ID. Unknown TOML keys are preserved when the theme is
+changed but currently have no effect.
 
 Set `POOPTERM_CONFIG` to use a config file at another path. `POOPTERM_THEME`
 can override the saved setting for a single launch, for example:
 
 ```sh
-POOPTERM_THEME=catppuccin cargo run --release
+POOPTERM_THEME=catppuccin-mocha cargo run --release
 ```
 
 ```sh
-POOPTERM_THEME=rosepine poopterm
+POOPTERM_THEME=catppuccin-latte poopterm
 ```
+
+### Discord Rich Presence
+
+On macOS and Linux, Poopterm can show the active terminal window title in Discord
+Rich Presence. Create a Discord application and add its Application ID to the
+Poopterm config:
+
+```toml
+discord_client_id = "YOUR_DISCORD_APPLICATION_ID"
+```
+
+You can instead set `POOPTERM_DISCORD_CLIENT_ID` in the app's environment. The
+presence follows the active terminal title (including titles set by shell or
+terminal applications). It uses Discord's local IPC socket, so Vesktop works
+when it can access that socket; Vesktop installed as a sandboxed Flatpak may
+need host IPC access configured.
+
+## Tabs and keyboard shortcuts
+
+- **Cmd+T** on macOS or **Ctrl+Shift+N** elsewhere: open a tab.
+- **Ctrl+Tab** / **Ctrl+Shift+Tab**: move to the next or previous tab.
+- **Cmd+W** on macOS: close the active tab. Closing the last tab exits.
+- Click a tab to switch sessions, or click **+** to open one.
+- On macOS, tabs share the transparent titlebar beside the traffic lights. On
+  Linux, they remain in the separate tab row.
+- Click **Settings** in the tab bar to open the config editor. Click a tab's
+  **×** to close it.
+- **Cmd+C / Cmd+V** on macOS, or **Ctrl+Shift+C / Ctrl+Shift+V** on Linux:
+  copy a selection or paste clipboard text.
+- Drag with the left mouse button to select text. The mouse wheel scrolls
+  scrollback unless the running app has enabled mouse reporting.
+- **Ctrl+Shift+T** cycles themes and saves the choice to the config file.
+
+On Linux, clipboard shortcuts need a clipboard command-line tool: `wl-clipboard`
+for Wayland (`wl-copy` and `wl-paste`), or `xclip`/`xsel` for X11.
 
 ## Install on Linux or FreeBSD
 
@@ -150,21 +199,28 @@ must be installed and available on the PATH in that login shell.
 
 ## Compatibility notes
 
-Poopterm has basic support for full-screen programs such as `nano` and `htop`,
-including alternate-screen use and common navigation keys. It is not a complete
-xterm implementation yet. Text selection, copy and paste, mouse reporting,
-scroll regions, and some terminal control sequences are not implemented, so
-applications that depend on those features may display or behave incorrectly.
-The bundled font may not contain every symbol, and wide characters such as
-emoji and some CJK characters do not yet occupy two terminal cells.
+Poopterm supports alternate-screen programs such as `nano` and `btop`, common
+cursor and editing sequences, device status replies, scroll regions, 256-color
+and truecolor output, wide-character cell spacing, text selection, clipboard
+shortcuts, bracketed paste, and common mouse reporting. It remains a small emulator rather than a
+complete xterm implementation; advanced terminal applications may rely on
+sequences or input modes that are not supported yet. Combining marks are not
+rendered. Nerd Font symbols use an installed Symbols Nerd Font Mono fallback
+when one is available; set `POOPTERM_SYMBOL_FONT` to use a different fallback
+font file.
 
 The shell is currently told that the terminal is `xterm-256color`; apps may
 therefore try features Poopterm does not support yet.
+
+For system monitoring, we recommend [btop](https://github.com/aristocratos/btop)
+instead of `htop`. `htop` can still have display issues in Poopterm, and advanced
+terminal features in either program may expose remaining compatibility gaps.
 
 ## Font and license
 
 Poopterm bundles DejaVu Sans Mono for Powerline as `assets/font.ttf`. The font is
 distributed under the Bitstream Vera license, with public-domain changes. See
-the [DejaVu font license](https://dejavu-fonts.github.io/License.html).
+the [DejaVu font license](https://dejavu-fonts.github.io/License.html). Nerd
+Font symbols are loaded from the system when available and are not bundled.
 
 Poopterm is MIT licensed; see [LICENSE](LICENSE).

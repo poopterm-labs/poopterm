@@ -1,6 +1,6 @@
 [package]
 name = "poopterm"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 [dependencies]
@@ -9,6 +9,7 @@ softbuffer = "0.4"
 portable-pty = "0.8"
 vte = "0.13"
 fontdue = "0.9"
+unicode-width = "0.2"
 
 [profile.release]
 opt-level = 3
