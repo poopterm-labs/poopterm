@@ -1,5 +1,14 @@
+mod config;
+mod osc;
+mod parser;
+use osc::decode_uri_path;
+mod sixel;
+mod state;
+use config::Preferences;
+use state::{Cell, Term};
+
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     env,
     error::Error,
     fs,
@@ -7,19 +16,18 @@ use std::{
     num::NonZeroU32,
     path::PathBuf,
     process::{Command, Stdio},
-    sync::Arc,
+    sync::{mpsc, Arc},
     thread,
 };
 
 use fontdue::{Font, FontSettings, Metrics};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use unicode_width::UnicodeWidthChar;
-use vte::{Params, Parser, Perform};
+use vte::Parser;
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalSize},
     event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
@@ -171,7 +179,7 @@ impl Theme {
         let kind = env::var("POOPTERM_THEME")
             .ok()
             .and_then(|s| ThemeKind::parse(&s))
-            .or_else(|| read_config_theme())
+            .or_else(read_config_theme)
             .unwrap_or(ThemeKind::Poop);
         Self::from_kind(kind)
     }
@@ -209,12 +217,14 @@ fn read_session_dirs() -> Vec<PathBuf> {
 }
 
 fn decode_session_path(line: &str) -> Option<PathBuf> {
-    if line.len() % 2 != 0 {
+    if !line.len().is_multiple_of(2) {
         return None;
     }
     let bytes = line
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let text = std::str::from_utf8(pair).ok()?;
             u8::from_str_radix(text, 16).ok()
@@ -240,7 +250,7 @@ fn save_session_dirs(dirs: &[PathBuf]) -> std::io::Result<()> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let temp = path.with_extension("tmp");
+    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
     fs::write(&temp, text)?;
     fs::rename(temp, path)
 }
@@ -253,9 +263,12 @@ fn default_cwd() -> PathBuf {
 }
 
 fn restored_session_dirs() -> Vec<PathBuf> {
+    if !Preferences::load().restore_sessions {
+        return vec![default_cwd()];
+    }
     let dirs: Vec<_> = read_session_dirs()
         .into_iter()
-        .filter(|dir| dir.is_dir())
+        .map(|dir| if dir.is_dir() { dir } else { default_cwd() })
         .collect();
     if dirs.is_empty() {
         vec![default_cwd()]
@@ -265,42 +278,42 @@ fn restored_session_dirs() -> Vec<PathBuf> {
 }
 
 fn read_config_value(key: &str) -> Option<String> {
-    fs::read_to_string(config_path())
-        .ok()?
-        .lines()
-        .find_map(|line| {
-            let line = line.split('#').next()?.trim();
-            let (found, value) = line.split_once('=')?;
-            (found.trim() == key).then(|| value.trim().trim_matches('"').to_owned())
-        })
+    config::value(&fs::read_to_string(config_path()).ok()?, key)
 }
 
 fn save_config_theme(kind: ThemeKind) -> std::io::Result<()> {
-    let path = config_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    config::save(&config_path(), &[("theme", format!("\"{}\"", kind.name()))])
+}
+
+fn dec_graphic(c: char) -> char {
+    match c {
+        '`' => '◆',
+        'a' => '▒',
+        'f' => '°',
+        'g' => '±',
+        'j' => '┘',
+        'k' => '┐',
+        'l' => '┌',
+        'm' => '└',
+        'n' => '┼',
+        'o' => '⎺',
+        'p' => '⎻',
+        'q' => '─',
+        'r' => '⎼',
+        's' => '⎽',
+        't' => '├',
+        'u' => '┤',
+        'v' => '┴',
+        'w' => '┬',
+        'x' => '│',
+        'y' => '≤',
+        'z' => '≥',
+        '{' => 'π',
+        '|' => '≠',
+        '}' => '£',
+        '~' => '·',
+        _ => c,
     }
-    let previous = fs::read_to_string(&path).unwrap_or_default();
-    let mut lines: Vec<String> = previous
-        .lines()
-        .filter(|line| {
-            line.split('#')
-                .next()
-                .and_then(|s| s.split_once('='))
-                .is_none_or(|(key, _)| {
-                    !matches!(
-                        key.trim(),
-                        "theme" | "discord_enabled" | "discord_client_id"
-                    )
-                })
-        })
-        .map(str::to_owned)
-        .collect();
-    lines.push(format!("theme = \"{}\"", kind.name()));
-    fs::write(
-        path,
-        format!("# Poopterm configuration\n{}\n", lines.join("\n")),
-    )
 }
 
 fn bright_color(index: usize) -> u32 {
@@ -327,595 +340,11 @@ fn xterm_color(index: u8, palette: [u32; 8]) -> u32 {
 
 // ---- Terminal state --------------------------------------------------------
 
-#[derive(Clone, Copy)]
-struct Cell {
-    ch: char,
-    fg: u32,
-    bg: u32,
-    width: u8,
-}
-
-struct Term {
-    cols: usize,
-    rows: usize,
-    cells: Vec<Cell>,
-    scrollback: VecDeque<Vec<Cell>>,
-    scroll_offset: usize,
-    primary_screen: Option<(Vec<Cell>, usize, usize, u32, u32)>,
-    cursor_visible: bool,
-    default_fg: u32,
-    default_bg: u32,
-    palette: [u32; 8],
-    cx: usize,
-    cy: usize,
-    fg: u32,
-    bg: u32,
-    scroll_top: usize,
-    scroll_bottom: usize,
-    saved_cursor: (usize, usize),
-    bracketed_paste: bool,
-    mouse_tracking: u16,
-    mouse_sgr: bool,
-    application_cursor: bool,
-    origin_mode: bool,
-    auto_wrap: bool,
-    bold: bool,
-    reverse: bool,
-    responses: Vec<Vec<u8>>,
-    title: String,
-    cwd: PathBuf,
-    bell: bool,
-}
-
-impl Term {
-    fn row_cells(&self, row: usize) -> Option<&[Cell]> {
-        if row < self.scrollback.len() {
-            self.scrollback.get(row).map(Vec::as_slice)
-        } else {
-            let row = row - self.scrollback.len();
-            (row < self.rows).then(|| {
-                let start = row * self.cols;
-                &self.cells[start..start + self.cols]
-            })
-        }
-    }
-
-    fn set_theme(&mut self, theme: Theme) {
-        let (old_fg, old_bg) = (self.default_fg, self.default_bg);
-        let recolor = |cells: &mut [Cell]| {
-            for cell in cells {
-                if cell.fg == old_fg {
-                    cell.fg = theme.fg;
-                }
-                if cell.bg == old_bg {
-                    cell.bg = theme.bg;
-                }
-            }
-        };
-        recolor(&mut self.cells);
-        for line in &mut self.scrollback {
-            recolor(line);
-        }
-        if let Some((cells, _, _, fg, bg)) = &mut self.primary_screen {
-            recolor(cells);
-            if *fg == old_fg {
-                *fg = theme.fg;
-            }
-            if *bg == old_bg {
-                *bg = theme.bg;
-            }
-        }
-        self.default_fg = theme.fg;
-        self.default_bg = theme.bg;
-        self.palette = theme.palette;
-        if self.fg == old_fg {
-            self.fg = theme.fg;
-        }
-        if self.bg == old_bg {
-            self.bg = theme.bg;
-        }
-    }
-
-    fn blank(&self) -> Cell {
-        Cell {
-            ch: ' ',
-            fg: self.default_fg,
-            bg: self.default_bg,
-            width: 1,
-        }
-    }
-    fn new(cols: usize, rows: usize, theme: Theme, cwd: PathBuf) -> Self {
-        Self {
-            cols,
-            rows,
-            cells: vec![
-                Cell {
-                    ch: ' ',
-                    fg: theme.fg,
-                    bg: theme.bg,
-                    width: 1,
-                };
-                cols * rows
-            ],
-            scrollback: VecDeque::new(),
-            scroll_offset: 0,
-            primary_screen: None,
-            cursor_visible: true,
-            cx: 0,
-            cy: 0,
-            default_fg: theme.fg,
-            default_bg: theme.bg,
-            palette: theme.palette,
-            fg: theme.fg,
-            bg: theme.bg,
-            scroll_top: 0,
-            scroll_bottom: rows.saturating_sub(1),
-            saved_cursor: (0, 0),
-            bracketed_paste: false,
-            mouse_tracking: 0,
-            mouse_sgr: false,
-            application_cursor: false,
-            origin_mode: false,
-            auto_wrap: true,
-            bold: false,
-            reverse: false,
-            responses: Vec::new(),
-            title: "Shell".into(),
-            cwd,
-            bell: false,
-        }
-    }
-
-    fn idx(&self, x: usize, y: usize) -> usize {
-        y * self.cols + x
-    }
-
-    fn resize(&mut self, cols: usize, rows: usize) {
-        let cols = cols.max(1);
-        let rows = rows.max(1);
-        let blank = self.blank();
-        let mut new = vec![blank; cols * rows];
-        let (old_cols, old_rows) = (self.cols, self.rows);
-        for y in 0..rows.min(old_rows) {
-            for x in 0..cols.min(old_cols) {
-                new[y * cols + x] = self.cells[y * old_cols + x];
-            }
-        }
-        self.cells = new;
-        for line in &mut self.scrollback {
-            line.resize(cols, blank);
-            line.truncate(cols);
-        }
-        self.cols = cols;
-        self.rows = rows;
-        self.scroll_top = 0;
-        self.scroll_bottom = rows.saturating_sub(1);
-        if let Some((primary, cx, cy, ..)) = &mut self.primary_screen {
-            let mut resized = vec![blank; cols * rows];
-            for y in 0..rows.min(old_rows) {
-                for x in 0..cols.min(old_cols) {
-                    resized[y * cols + x] = primary[y * old_cols + x];
-                }
-            }
-            *primary = resized;
-            *cx = (*cx).min(cols - 1);
-            *cy = (*cy).min(rows - 1);
-        }
-        self.cx = self.cx.min(cols - 1);
-        self.cy = self.cy.min(rows - 1);
-    }
-
-    fn scroll_up(&mut self) {
-        if self.primary_screen.is_none() {
-            let first_row = self.cells[..self.cols].to_vec();
-            self.scrollback.push_back(first_row);
-            if self.scrollback.len() > 5000 {
-                self.scrollback.pop_front();
-            }
-        }
-        self.cells.copy_within(self.cols.., 0);
-        let end = self.cells.len();
-        let blank = self.blank();
-        self.cells[end - self.cols..].fill(blank);
-        if self.scroll_offset > 0 {
-            self.scroll_offset = (self.scroll_offset + 1).min(self.scrollback.len());
-        }
-    }
-
-    fn scroll_view(&mut self, lines: isize) {
-        self.scroll_offset = if lines > 0 {
-            self.scroll_offset
-                .saturating_add(lines as usize)
-                .min(self.scrollback.len())
-        } else {
-            self.scroll_offset.saturating_sub(lines.unsigned_abs())
-        };
-    }
-
-    fn alternate_screen(&mut self, enabled: bool) {
-        if enabled && self.primary_screen.is_none() {
-            let blank = self.blank();
-            self.primary_screen = Some((
-                std::mem::replace(&mut self.cells, vec![blank; self.cols * self.rows]),
-                self.cx,
-                self.cy,
-                self.fg,
-                self.bg,
-            ));
-            self.cx = 0;
-            self.cy = 0;
-            self.scroll_offset = 0;
-        } else if !enabled {
-            if let Some((cells, cx, cy, fg, bg)) = self.primary_screen.take() {
-                self.cells = cells;
-                self.cx = cx;
-                self.cy = cy;
-                self.fg = fg;
-                self.bg = bg;
-                self.scroll_offset = 0;
-            }
-        }
-    }
-
-    fn linefeed(&mut self) {
-        if self.cy == self.scroll_bottom {
-            self.scroll_region_up(1);
-        } else if self.cy + 1 < self.rows {
-            self.cy += 1;
-        } else {
-            self.scroll_up();
-        }
-    }
-
-    fn scroll_region_up(&mut self, count: usize) {
-        let count = count.min(self.scroll_bottom - self.scroll_top + 1);
-        let start = self.scroll_top * self.cols;
-        let end = (self.scroll_bottom + 1) * self.cols;
-        let history = if self.scroll_top == 0
-            && self.scroll_bottom + 1 == self.rows
-            && self.primary_screen.is_none()
-        {
-            (0..count)
-                .map(|row| {
-                    let from = start + row * self.cols;
-                    self.cells[from..from + self.cols].to_vec()
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        self.cells
-            .copy_within(start + count * self.cols..end, start);
-        let blank = self.blank();
-        self.cells[end - count * self.cols..end].fill(blank);
-        self.scrollback.extend(history);
-        while self.scrollback.len() > 5000 {
-            self.scrollback.pop_front();
-        }
-    }
-
-    fn scroll_region_down(&mut self, count: usize) {
-        let count = count.min(self.scroll_bottom - self.scroll_top + 1);
-        let start = self.scroll_top * self.cols;
-        let end = (self.scroll_bottom + 1) * self.cols;
-        self.cells
-            .copy_within(start..end - count * self.cols, start + count * self.cols);
-        let blank = self.blank();
-        self.cells[start..start + count * self.cols].fill(blank);
-    }
-
-    fn clear_range(&mut self, from: usize, to: usize) {
-        for i in from..to.min(self.cells.len()) {
-            self.cells[i] = Cell {
-                ch: ' ',
-                fg: self.default_fg,
-                bg: self.default_bg,
-                width: 1,
-            };
-        }
-    }
-
-    fn sgr(&mut self, params: &Params) {
-        let values: Vec<u16> = params.iter().flat_map(|p| p.iter().copied()).collect();
-        if values.is_empty() {
-            self.fg = self.default_fg;
-            self.bg = self.default_bg;
-            return;
-        }
-        let mut i = 0;
-        while i < values.len() {
-            let code = values[i];
-            match code {
-                0 => {
-                    self.fg = self.default_fg;
-                    self.bg = self.default_bg;
-                    self.bold = false;
-                    self.reverse = false;
-                }
-                1 => self.bold = true,
-                22 => self.bold = false,
-                7 => self.reverse = true,
-                27 => self.reverse = false,
-                30..=37 => self.fg = self.palette[(code - 30) as usize],
-                39 => self.fg = self.default_fg,
-                40..=47 => self.bg = self.palette[(code - 40) as usize],
-                49 => self.bg = self.default_bg,
-                90..=97 => self.fg = bright_color((code - 90) as usize),
-                100..=107 => self.bg = bright_color((code - 100) as usize),
-                38 | 48 if values.get(i + 1) == Some(&5) && values.len() > i + 2 => {
-                    let color = xterm_color(values[i + 2] as u8, self.palette);
-                    if code == 38 {
-                        self.fg = color
-                    } else {
-                        self.bg = color
-                    }
-                    i += 2;
-                }
-                38 | 48 if values.get(i + 1) == Some(&2) && values.len() > i + 4 => {
-                    let color = ((values[i + 2] as u32 & 255) << 16)
-                        | ((values[i + 3] as u32 & 255) << 8)
-                        | (values[i + 4] as u32 & 255);
-                    if code == 38 {
-                        self.fg = color
-                    } else {
-                        self.bg = color
-                    }
-                    i += 4;
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-    }
-}
-
-impl Perform for Term {
-    fn print(&mut self, c: char) {
-        let width = c.width().unwrap_or(0);
-        if width == 0 {
-            return;
-        }
-        if self.cx + width > self.cols {
-            if self.auto_wrap {
-                self.cx = 0;
-                self.linefeed();
-            } else {
-                self.cx = self.cols.saturating_sub(width);
-            }
-        }
-        let i = self.idx(self.cx, self.cy);
-        let mut fg = self.fg;
-        let mut bg = self.bg;
-        if self.bold {
-            if let Some(index) = self.palette.iter().position(|&color| color == fg) {
-                fg = bright_color(index);
-            }
-        }
-        if self.reverse {
-            std::mem::swap(&mut fg, &mut bg);
-        }
-        self.cells[i] = Cell {
-            ch: c,
-            fg,
-            bg,
-            width: width as u8,
-        };
-        if width == 2 && self.cx + 1 < self.cols {
-            self.cells[i + 1] = Cell {
-                ch: ' ',
-                fg,
-                bg,
-                width: 0,
-            };
-        }
-        self.cx += width;
-    }
-
-    fn execute(&mut self, byte: u8) {
-        match byte {
-            7 => self.bell = true,
-            b'\n' | 0x0b | 0x0c => self.linefeed(),
-            b'\r' => self.cx = 0,
-            0x08 => self.cx = self.cx.saturating_sub(1),
-            b'\t' => self.cx = (((self.cx / 8) + 1) * 8).min(self.cols - 1),
-            _ => {}
-        }
-    }
-
-    fn csi_dispatch(&mut self, params: &Params, _: &[u8], private: bool, action: char) {
-        // First value of the i-th param, with 0 treated as "default".
-        let p = |i: usize, d: u16| {
-            params
-                .iter()
-                .nth(i)
-                .and_then(|s| s.first().copied())
-                .filter(|&v| v != 0)
-                .unwrap_or(d) as usize
-        };
-        let raw0 = params
-            .iter()
-            .next()
-            .and_then(|s| s.first().copied())
-            .unwrap_or(0);
-
-        if private && matches!(action, 'h' | 'l') {
-            let enabled = action == 'h';
-            for p in params.iter().filter_map(|s| s.first().copied()) {
-                match p {
-                    1 => self.application_cursor = enabled,
-                    6 => self.origin_mode = enabled,
-                    7 => self.auto_wrap = enabled,
-                    25 => self.cursor_visible = enabled,
-                    1049 | 47 | 1047 => self.alternate_screen(enabled),
-                    1000 | 1002 | 1003 => self.mouse_tracking = if enabled { p } else { 0 },
-                    1006 => self.mouse_sgr = enabled,
-                    2004 => self.bracketed_paste = enabled,
-                    _ => {}
-                }
-            }
-            return;
-        }
-
-        match action {
-            'A' => {
-                let top = if self.origin_mode { self.scroll_top } else { 0 };
-                self.cy = self.cy.saturating_sub(p(0, 1)).max(top);
-            }
-            'B' => {
-                self.cy = (self.cy + p(0, 1)).min(if self.origin_mode {
-                    self.scroll_bottom
-                } else {
-                    self.rows - 1
-                })
-            }
-            'C' => self.cx = (self.cx + p(0, 1)).min(self.cols - 1),
-            'D' => self.cx = self.cx.saturating_sub(p(0, 1)),
-            'G' => self.cx = (p(0, 1) - 1).min(self.cols - 1),
-            'H' | 'f' => {
-                let row = p(0, 1) - 1 + if self.origin_mode { self.scroll_top } else { 0 };
-                self.cy = row.min(if self.origin_mode {
-                    self.scroll_bottom
-                } else {
-                    self.rows - 1
-                });
-                self.cx = (p(1, 1) - 1).min(self.cols - 1);
-            }
-            'r' => {
-                let top = (p(0, 1) - 1).min(self.rows - 1);
-                let bottom = (p(1, self.rows as u16) - 1).min(self.rows - 1);
-                if top < bottom {
-                    self.scroll_top = top;
-                    self.scroll_bottom = bottom;
-                    self.cx = 0;
-                    self.cy = top;
-                }
-            }
-            'S' => self.scroll_region_up(p(0, 1)),
-            'T' => self.scroll_region_down(p(0, 1)),
-            's' => self.saved_cursor = (self.cx, self.cy),
-            'u' => {
-                self.cx = self.saved_cursor.0.min(self.cols - 1);
-                self.cy = self.saved_cursor.1.min(self.rows - 1);
-            }
-            'J' => match raw0 {
-                0 => {
-                    let from = self.idx(self.cx, self.cy);
-                    self.clear_range(from, self.cells.len());
-                }
-                1 => self.clear_range(0, self.idx(self.cx + 1, self.cy)),
-                2 => self.clear_range(0, self.cells.len()),
-                3 => {
-                    self.clear_range(0, self.cells.len());
-                    self.scrollback.clear();
-                    self.scroll_offset = 0;
-                }
-                _ => {}
-            },
-            'K' => {
-                let row_start = self.idx(0, self.cy);
-                let row_end = row_start + self.cols;
-                match raw0 {
-                    0 => self.clear_range(self.idx(self.cx, self.cy), row_end),
-                    1 => self.clear_range(row_start, self.idx(self.cx + 1, self.cy)),
-                    2 => self.clear_range(row_start, row_end),
-                    _ => {}
-                }
-            }
-            '@' => {
-                let count = p(0, 1).min(self.cols - self.cx);
-                let start = self.idx(self.cx, self.cy);
-                let end = self.idx(self.cols - count, self.cy);
-                self.cells.copy_within(start..end, start + count);
-                self.clear_range(start, start + count);
-            }
-            'P' => {
-                let count = p(0, 1).min(self.cols - self.cx);
-                let start = self.idx(self.cx, self.cy);
-                let end = self.idx(self.cols, self.cy);
-                self.cells.copy_within(start + count..end, start);
-                self.clear_range(end - count, end);
-            }
-            'X' => {
-                let start = self.idx(self.cx, self.cy);
-                self.clear_range(start, start + p(0, 1).min(self.cols - self.cx));
-            }
-            'L' | 'M' if self.cy < self.rows => {
-                let bottom = self.scroll_bottom.max(self.cy).min(self.rows - 1);
-                let count = p(0, 1).min(bottom + 1 - self.cy);
-                let start = self.cy * self.cols;
-                let end = (bottom + 1) * self.cols;
-                if action == 'L' {
-                    self.cells
-                        .copy_within(start..end - count * self.cols, start + count * self.cols);
-                    self.clear_range(start, start + count * self.cols);
-                } else {
-                    self.cells
-                        .copy_within(start + count * self.cols..end, start);
-                    self.clear_range(end - count * self.cols, end);
-                }
-            }
-            'm' => self.sgr(params),
-            'n' => match raw0 {
-                5 => self.responses.push(b"\x1b[0n".to_vec()),
-                6 => self.responses.push(
-                    format!("\x1b[{};{}R", self.cy + 1, self.cx.min(self.cols - 1) + 1)
-                        .into_bytes(),
-                ),
-                _ => {}
-            },
-            'c' => self.responses.push(b"\x1b[?1;2c".to_vec()),
-            _ => {}
-        }
-    }
-
-    fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
-        if ignore || !intermediates.is_empty() {
-            return;
-        }
-        match byte {
-            b'M' => {
-                if self.cy == self.scroll_top {
-                    self.scroll_region_down(1);
-                } else {
-                    self.cy = self.cy.saturating_sub(1);
-                }
-            }
-            b'D' => self.linefeed(),
-            b'E' => {
-                self.cx = 0;
-                self.linefeed();
-            }
-            b'7' => self.saved_cursor = (self.cx, self.cy),
-            b'8' => {
-                self.cx = self.saved_cursor.0.min(self.cols - 1);
-                self.cy = self.saved_cursor.1.min(self.rows - 1);
-            }
-            _ => {}
-        }
-    }
-
-    fn osc_dispatch(&mut self, params: &[&[u8]], _: bool) {
-        if params.len() >= 2 && matches!(params[0], b"0" | b"2") {
-            let title = String::from_utf8_lossy(params[1]);
-            self.title = title.chars().filter(|c| !c.is_control()).take(64).collect();
-        } else if params.len() >= 2 && params[0] == b"7" {
-            if let Ok(uri) = std::str::from_utf8(params[1]) {
-                if let Some(path) = uri.strip_prefix("file://") {
-                    let path = path.find('/').map(|index| &path[index..]).unwrap_or(path);
-                    if !path.is_empty() {
-                        self.cwd = PathBuf::from(path.replace("%20", " "));
-                    }
-                }
-            }
-        }
-    }
-}
-
 // ---- Events from the PTY reader thread --------------------------------------
 
 #[derive(Debug)]
 enum UserEvent {
-    Output(u64, Vec<u8>),
+    Output(u64, Vec<u8>, mpsc::SyncSender<()>),
     Closed(u64),
 }
 
@@ -943,6 +372,7 @@ struct Selection {
 
 struct SettingsEditor {
     theme: ThemeKind,
+    preferences: Preferences,
     status: String,
 }
 
@@ -950,7 +380,8 @@ impl SettingsEditor {
     fn load() -> Self {
         Self {
             theme: read_config_theme().unwrap_or(ThemeKind::Poop),
-            status: "Choose a theme and save your preference.".into(),
+            preferences: Preferences::load(),
+            status: "Change preferences, then click Save.".into(),
         }
     }
 }
@@ -1054,18 +485,23 @@ fn spawn_session(
     let mut reader = pair.master.try_clone_reader()?;
     let writer = pair.master.take_writer()?;
     thread::spawn(move || {
-        let mut buf = [0u8; 4096];
+        let mut buf = [0u8; 16384];
         loop {
             match reader.read(&mut buf) {
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Ok(0) | Err(_) => {
                     let _ = proxy.send_event(UserEvent::Closed(id));
                     break;
                 }
                 Ok(n) => {
+                    let (ack, received) = mpsc::sync_channel(1);
                     if proxy
-                        .send_event(UserEvent::Output(id, buf[..n].to_vec()))
+                        .send_event(UserEvent::Output(id, buf[..n].to_vec(), ack))
                         .is_err()
                     {
+                        break;
+                    }
+                    if received.recv().is_err() {
                         break;
                     }
                 }
@@ -1073,9 +509,11 @@ fn spawn_session(
         }
     });
 
+    let mut term = Term::new(cols, rows, theme, cwd);
+    term.scrollback_limit = Preferences::load().scrollback_lines;
     Ok(Session {
         id,
-        term: Term::new(cols, rows, theme, cwd),
+        term,
         parser: Parser::new(),
         master: pair.master,
         writer,
@@ -1128,6 +566,7 @@ struct App {
     selection: Option<Selection>,
     selecting: bool,
     search_active: bool,
+    search_dirty: bool,
     search_query: String,
     search_matches: Vec<Selection>,
     search_match_index: usize,
@@ -1158,6 +597,9 @@ fn find_matches(term: &Term, query: &str) -> Vec<Selection> {
                     .map(|(ch, _)| *ch)
                     .eq(needle.iter().copied())
                 {
+                    if matches.len() >= 10_000 {
+                        return matches;
+                    }
                     matches.push(Selection {
                         start: CellPoint {
                             row,
@@ -1177,6 +619,7 @@ fn find_matches(term: &Term, query: &str) -> Vec<Selection> {
 
 impl App {
     fn search(&mut self, direction: isize, advance: bool) {
+        self.search_dirty = false;
         let matches = find_matches(self.active_term(), &self.search_query);
         self.search_matches = matches;
         if self.search_matches.is_empty() {
@@ -1233,7 +676,11 @@ impl App {
         tab_layout(
             self.width as usize,
             self.sessions.len(),
-            (self.px / 18.0).round() as usize,
+            self.window
+                .as_ref()
+                .map_or(1.0, |w| w.scale_factor())
+                .round()
+                .max(1.0) as usize,
             self.tab_left_reserve(),
             self.tab_scroll,
         )
@@ -1258,7 +705,8 @@ impl App {
         self.settings_editor = SettingsEditor::load();
         let attributes = Window::default_attributes()
             .with_title("Poopterm Settings")
-            .with_inner_size(LogicalSize::new(760.0, 560.0));
+            .with_inner_size(LogicalSize::new(760.0, 560.0))
+            .with_min_inner_size(LogicalSize::new(680.0, 520.0));
         let window = Arc::new(
             event_loop
                 .create_window(attributes)
@@ -1283,31 +731,44 @@ impl App {
     }
 
     fn save_settings_config(&mut self) {
-        let path = config_path();
-        let previous = fs::read_to_string(&path).unwrap_or_default();
-        let mut lines: Vec<String> = previous
-            .lines()
-            .filter(|line| {
-                let key = line.split('#').next().unwrap_or_default().split_once('=');
-                key.is_none_or(|(key, _)| {
-                    !matches!(
-                        key.trim(),
-                        "theme" | "discord_enabled" | "discord_client_id"
-                    )
-                })
-            })
-            .map(str::to_owned)
-            .collect();
-        lines.push(format!("theme = \"{}\"", self.settings_editor.theme.name()));
-        let text = format!("# Poopterm configuration\n{}\n", lines.join("\n"));
-        let result = path
-            .parent()
-            .map(fs::create_dir_all)
-            .transpose()
-            .and_then(|_| fs::write(&path, text));
+        let preferences = self.settings_editor.preferences;
+        let result = config::save(
+            &config_path(),
+            &[
+                (
+                    "theme",
+                    format!("\"{}\"", self.settings_editor.theme.name()),
+                ),
+                ("font_size", preferences.font_size.to_string()),
+                ("scrollback_lines", preferences.scrollback_lines.to_string()),
+                ("restore_sessions", preferences.restore_sessions.to_string()),
+            ],
+        );
         match result {
             Ok(()) => {
-                self.apply_theme(self.settings_editor.theme);
+                self.theme = Theme::from_kind(self.settings_editor.theme);
+                for session in &mut self.sessions {
+                    session.term.set_theme(self.theme);
+                    session.term.scrollback_limit = preferences.scrollback_lines;
+                    while session.term.scrollback.len() > preferences.scrollback_lines {
+                        session.term.scrollback.pop_front();
+                        session.term.history_base = session.term.history_base.saturating_add(1);
+                    }
+                    session.term.scroll_offset = session
+                        .term
+                        .scroll_offset
+                        .min(session.term.scrollback.len());
+                }
+                let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
+                self.px = preferences.font_size as f32 * scale;
+                if let Some(metrics) = self.font.horizontal_line_metrics(self.px) {
+                    self.ascent = metrics.ascent.round() as i32;
+                    self.ch = metrics.new_line_size.ceil() as usize;
+                }
+                self.cw = self.font.metrics('M', self.px).advance_width.ceil() as usize;
+                self.selection = None;
+                self.end_search();
+                self.resize(self.width, self.height);
                 self.glyphs.clear();
                 self.settings_editor = SettingsEditor::load();
                 self.settings_editor.status = "Saved. Settings applied.".into();
@@ -1484,13 +945,131 @@ impl App {
             height,
             x,
             210 * scale,
-            "Theme changes are saved to your config file.",
+            "Preferences are saved to your config file.",
             px * 0.72,
             ascent,
             self.theme.fg,
             font,
             glyphs,
         );
+        for (row, label, value) in [
+            (
+                270,
+                "Font size",
+                self.settings_editor.preferences.font_size.to_string(),
+            ),
+            (
+                326,
+                "Scrollback lines",
+                self.settings_editor
+                    .preferences
+                    .scrollback_lines
+                    .to_string(),
+            ),
+            (
+                382,
+                "Restore tabs on launch",
+                if self.settings_editor.preferences.restore_sessions {
+                    "On".into()
+                } else {
+                    "Off".into()
+                },
+            ),
+        ] {
+            draw_text(
+                pixels,
+                width,
+                height,
+                x,
+                (row + 8) * scale,
+                label,
+                px * 0.82,
+                ascent,
+                self.theme.fg,
+                font,
+                glyphs,
+            );
+            if row == 382 {
+                let bx = width.saturating_sub(240 * scale);
+                draw_kde_button(
+                    pixels,
+                    width,
+                    height,
+                    bx,
+                    row * scale,
+                    216 * scale,
+                    40 * scale,
+                    scale,
+                    self.theme.bg,
+                    self.theme.border,
+                    self.theme.palette[4],
+                    self.settings_editor.preferences.restore_sessions,
+                );
+                draw_text(
+                    pixels,
+                    width,
+                    height,
+                    bx + 16 * scale,
+                    (row + 8) * scale,
+                    if self.settings_editor.preferences.restore_sessions {
+                        "Enabled"
+                    } else {
+                        "Disabled"
+                    },
+                    px * 0.82,
+                    ascent,
+                    self.theme.fg,
+                    font,
+                    glyphs,
+                );
+                continue;
+            }
+            for (bx, text) in [
+                (width.saturating_sub(240 * scale), "−"),
+                (width.saturating_sub(72 * scale), "+"),
+            ] {
+                draw_kde_button(
+                    pixels,
+                    width,
+                    height,
+                    bx,
+                    row * scale,
+                    48 * scale,
+                    40 * scale,
+                    scale,
+                    self.theme.bg,
+                    self.theme.border,
+                    self.theme.palette[4],
+                    false,
+                );
+                draw_text(
+                    pixels,
+                    width,
+                    height,
+                    bx + 16 * scale,
+                    (row + 7) * scale,
+                    text,
+                    px,
+                    ascent,
+                    self.theme.fg,
+                    font,
+                    glyphs,
+                );
+            }
+            draw_text(
+                pixels,
+                width,
+                height,
+                width.saturating_sub(180 * scale),
+                (row + 8) * scale,
+                &value,
+                px * 0.82,
+                ascent,
+                self.theme.fg,
+                font,
+                glyphs,
+            );
+        }
         let save_x = width.saturating_sub(140 * scale);
         let save_y = height.saturating_sub(52 * scale);
         let save_w = 120 * scale;
@@ -1518,7 +1097,7 @@ impl App {
             width,
             height,
             save_x + (save_w - 4 * cell_width) / 2,
-            save_y + (save_h.saturating_sub(self.ch)) / 2,
+            save_y + 6 * scale,
             "Save",
             px,
             ascent,
@@ -1588,6 +1167,43 @@ impl App {
                 {
                     self.save_settings_config();
                     return;
+                }
+                let width = self.settings_width as usize;
+                if (382 * scale..422 * scale).contains(&y)
+                    && x >= width.saturating_sub(240 * scale)
+                    && x < width.saturating_sub(24 * scale)
+                {
+                    self.settings_editor.preferences.restore_sessions =
+                        !self.settings_editor.preferences.restore_sessions;
+                    if let Some(window) = &self.settings_window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
+                let decrease =
+                    x >= width.saturating_sub(240 * scale) && x < width.saturating_sub(192 * scale);
+                let increase =
+                    x >= width.saturating_sub(72 * scale) && x < width.saturating_sub(24 * scale);
+                if decrease || increase {
+                    let prefs = &mut self.settings_editor.preferences;
+                    if (270 * scale..310 * scale).contains(&y) {
+                        prefs.font_size = if increase {
+                            (prefs.font_size + 1).min(32)
+                        } else {
+                            prefs.font_size.saturating_sub(1).max(10)
+                        };
+                    } else if (326 * scale..366 * scale).contains(&y) {
+                        prefs.scrollback_lines = if increase {
+                            (prefs.scrollback_lines + 1000).min(100_000)
+                        } else {
+                            prefs.scrollback_lines.saturating_sub(1000)
+                        };
+                    } else if (382 * scale..422 * scale).contains(&y) {
+                        prefs.restore_sessions = !prefs.restore_sessions;
+                    }
+                    if let Some(window) = &self.settings_window {
+                        window.request_redraw();
+                    }
                 }
                 let content_x = 24 * scale;
                 let content_w = (self.settings_width as usize).saturating_sub(48 * scale);
@@ -1672,7 +1288,7 @@ impl App {
     }
 
     fn add_tab(&mut self) {
-        self.refresh_directories();
+        self.refresh_directories(true);
         let id = self.next_session_id;
         self.next_session_id += 1;
         let cols = self.active_term().cols;
@@ -1733,8 +1349,11 @@ impl App {
         if index >= self.sessions.len() {
             return;
         }
-        let _ = self.sessions[index]._child.kill();
-        self.sessions.remove(index);
+        let mut session = self.sessions.remove(index);
+        let _ = session._child.kill();
+        thread::spawn(move || {
+            let _ = session._child.wait();
+        });
         self.persist_sessions();
         self.search_matches.clear();
         self.selection = None;
@@ -1767,8 +1386,11 @@ impl App {
         }
     }
 
-    fn refresh_directories(&mut self) {
-        for session in &mut self.sessions {
+    fn refresh_directories(&mut self, only_active: bool) {
+        for (index, session) in self.sessions.iter_mut().enumerate() {
+            if only_active && index != self.active {
+                continue;
+            }
             if let Some(pid) = session._child.process_id() {
                 #[cfg(target_os = "linux")]
                 if let Ok(path) = fs::read_link(format!("/proc/{pid}/cwd")) {
@@ -1804,6 +1426,7 @@ impl App {
     fn point_at(&self, x: f64, y: f64) -> Option<CellPoint> {
         let term = self.active_term();
         if x < self.margin as f64
+            || x >= (self.margin + term.cols * self.cw) as f64
             || y < self.top as f64
             || y >= (self.height as usize).saturating_sub(self.status_height + self.margin) as f64
         {
@@ -2053,6 +1676,12 @@ impl App {
         .max(2);
 
         for session in &mut self.sessions {
+            session.term.cell_width = self.cw;
+            session.term.cell_height = self.ch;
+            if let Some(pending) = &mut session.term.synchronized {
+                pending.cell_width = self.cw;
+                pending.cell_height = self.ch;
+            }
             if cols != session.term.cols || rows != session.term.rows {
                 session.term.resize(cols, rows);
                 let _ = session.master.resize(PtySize {
@@ -2081,9 +1710,13 @@ impl App {
             Key::Named(n) => match n {
                 NamedKey::Enter => Some(b"\r".to_vec()),
                 NamedKey::Backspace => Some(vec![0x7f]),
-                NamedKey::Tab => Some(b"\t".to_vec()),
+                NamedKey::Tab => Some(if self.shift {
+                    b"\x1b[Z".to_vec()
+                } else {
+                    b"\t".to_vec()
+                }),
                 NamedKey::Escape => Some(vec![0x1b]),
-                NamedKey::Space => Some(b" ".to_vec()),
+                NamedKey::Space => Some(vec![if self.ctrl { 0 } else { b' ' }]),
                 NamedKey::ArrowUp => Some(if self.active_term().application_cursor {
                     b"\x1bOA".to_vec()
                 } else {
@@ -2131,7 +1764,16 @@ impl App {
                     if c.is_ascii_alphabetic() {
                         return Some(vec![c.to_ascii_lowercase() & 0x1f]);
                     }
-                    return None;
+                    return match c {
+                        b' ' | b'@' | b'2' => Some(vec![0]),
+                        b'[' | b'3' => Some(vec![27]),
+                        b'\\' | b'4' => Some(vec![28]),
+                        b']' | b'5' => Some(vec![29]),
+                        b'^' | b'6' => Some(vec![30]),
+                        b'_' | b'/' | b'7' => Some(vec![31]),
+                        b'?' | b'8' => Some(vec![127]),
+                        _ => None,
+                    };
                 }
                 Some(s.as_bytes().to_vec())
             }
@@ -2140,8 +1782,27 @@ impl App {
     }
 
     fn draw(&mut self) {
+        if self.search_active && self.search_dirty {
+            let previous = self
+                .search_matches
+                .get(self.search_match_index)
+                .map(|m| m.start);
+            self.search_matches = find_matches(self.active_term(), &self.search_query);
+            self.search_match_index = previous
+                .and_then(|point| self.search_matches.iter().position(|m| m.start == point))
+                .unwrap_or(0);
+            self.search_dirty = false;
+        }
+        if self.glyphs.len() > 4096 {
+            self.glyphs.clear();
+        }
         let tab_y = self.tab_y();
-        let scale = (self.px / 18.0).round() as usize;
+        let scale = self
+            .window
+            .as_ref()
+            .map_or(1.0, |w| w.scale_factor())
+            .round()
+            .max(1.0) as usize;
         let left_reserve = self.tab_left_reserve();
         let session_count = self.sessions.len();
         let tab_scroll = self.tab_scroll;
@@ -2167,13 +1828,17 @@ impl App {
             self.theme.bg,
         );
 
-        let (cw, ch, m, top, px, ascent) = (
-            self.cw,
-            self.ch,
-            self.margin,
-            self.top,
-            self.px,
-            self.ascent,
+        let (m, top) = (self.margin, self.top);
+        let ui_px = 18.0 * scale as f32;
+        let ui_metrics = self
+            .font
+            .horizontal_line_metrics(ui_px)
+            .expect("font metrics");
+        let (cw, ch, px, ascent) = (
+            self.font.metrics('M', ui_px).advance_width.ceil() as usize,
+            ui_metrics.new_line_size.ceil() as usize,
+            ui_px,
+            ui_metrics.ascent.round() as i32,
         );
         let font = &self.font;
         let glyphs = &mut self.glyphs;
@@ -2249,7 +1914,7 @@ impl App {
                     accent,
                 );
             }
-            let title_chars = layout.width.saturating_sub(42 * scale) / self.cw.max(1);
+            let title_chars = layout.width.saturating_sub(42 * scale) / cw.max(1);
             let mut label: String = session
                 .term
                 .title
@@ -2341,7 +2006,7 @@ impl App {
                 pixels,
                 w,
                 h,
-                x + (layout.arrow_w.saturating_sub(self.cw)) / 2,
+                x + (layout.arrow_w.saturating_sub(cw)) / 2,
                 arrow_y + (arrow_h.saturating_sub(ch)) / 2,
                 label,
                 px * 0.82,
@@ -2379,7 +2044,7 @@ impl App {
             pixels,
             w,
             h,
-            layout.plus_x + (layout.plus_w.saturating_sub(self.cw)) / 2,
+            layout.plus_x + (layout.plus_w.saturating_sub(cw)) / 2,
             button_y + (button_h.saturating_sub(ch)) / 2,
             "+",
             px,
@@ -2406,7 +2071,7 @@ impl App {
             pixels,
             w,
             h,
-            layout.settings_x + (layout.settings_w.saturating_sub(self.cw)) / 2,
+            layout.settings_x + (layout.settings_w.saturating_sub(cw)) / 2,
             button_y + (button_h.saturating_sub(ch)) / 2,
             "⚙",
             px,
@@ -2415,6 +2080,8 @@ impl App {
             font,
             glyphs,
         );
+        let (ui_cw, ui_ch, ui_ascent) = (cw, ch, ascent);
+        let (cw, ch, px, ascent) = (self.cw, self.ch, self.px, self.ascent);
         let history_len = term.scrollback.len();
         let screen_start = history_len.saturating_sub(term.scroll_offset);
         let active_search_match = self
@@ -2430,7 +2097,7 @@ impl App {
                 let start = (absolute_row - history_len) * term.cols;
                 &term.cells[start..start + term.cols]
             };
-            for (col, &cell) in row_cells.iter().enumerate() {
+            for (col, &cell) in row_cells.iter().enumerate().rev() {
                 let is_selected = selected.is_some_and(|(start, end)| {
                     let point = CellPoint {
                         row: absolute_row,
@@ -2466,6 +2133,21 @@ impl App {
                 let y0 = top + row * ch;
                 fill_rect(pixels, w, h, x0, y0, cw, ch, bg);
 
+                if cell.attrs & 4 != 0 {
+                    fill_rect(
+                        pixels,
+                        w,
+                        h,
+                        x0,
+                        y0 + ch.saturating_sub(2 * scale),
+                        cw,
+                        scale.max(1),
+                        fg,
+                    );
+                }
+                if cell.attrs & 16 != 0 {
+                    fill_rect(pixels, w, h, x0, y0 + ch / 2, cw, scale.max(1), fg);
+                }
                 if cell.ch == ' ' || cell.width == 0 {
                     continue;
                 }
@@ -2481,7 +2163,13 @@ impl App {
                         if a == 0 {
                             continue;
                         }
-                        let x = gx0 + gx as i32;
+                        let x = gx0
+                            + gx as i32
+                            + if cell.attrs & 2 != 0 {
+                                (gm.height.saturating_sub(gy) / 6) as i32
+                            } else {
+                                0
+                            };
                         let y = gy0 + gy as i32;
                         if x < x0 as i32
                             || x >= x0 as i32 + cw as i32 * cell.width as i32
@@ -2498,6 +2186,24 @@ impl App {
             }
         }
 
+        for image in &term.images {
+            let image_x = m + image.col * cw;
+            let image_y = top as isize + (image.row + term.scroll_offset as isize) * ch as isize;
+            for sy in 0..image.bitmap.height {
+                let y = image_y + sy as isize;
+                if y < top as isize || y >= (top + term.rows * ch).min(h) as isize {
+                    continue;
+                }
+                for sx in 0..image.bitmap.width.min(w.saturating_sub(image_x)) {
+                    let pixel = image.bitmap.pixels[sy * image.bitmap.width + sx];
+                    if pixel != sixel::TRANSPARENT {
+                        pixels[y as usize * w + image_x + sx] = pixel;
+                    }
+                }
+            }
+        }
+
+        let (cw, ch, px, ascent) = (ui_cw, ui_ch, ui_px, ui_ascent);
         if self.search_active {
             let box_w = (500 * scale).min(w.saturating_sub(24 * scale));
             let box_h = 42 * scale;
@@ -2588,10 +2294,18 @@ impl App {
             .unwrap_or("~");
         let status_left: String = cwd.chars().take(w / cw.max(1) / 3).collect();
         let status_right = format!(
-            "{} × {}   ·   {}",
+            "{} × {}   ·   {}{}",
             term.cols,
             term.rows,
-            self.theme.kind.name()
+            self.theme.kind.name(),
+            if term.shell.phase == osc::Phase::Output {
+                "   ·   running".to_owned()
+            } else {
+                term.shell
+                    .last_exit_code
+                    .map(|code| format!("   ·   exit {code}"))
+                    .unwrap_or_default()
+            }
         );
         draw_text(
             pixels,
@@ -2625,6 +2339,7 @@ impl App {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_rect(
     px: &mut [u32],
     w: usize,
@@ -2646,6 +2361,7 @@ fn fill_rect(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_round_rect(
     pixels: &mut [u32],
     width: usize,
@@ -2689,6 +2405,7 @@ fn fill_round_rect(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_kde_button(
     pixels: &mut [u32],
     width: usize,
@@ -2727,6 +2444,7 @@ fn draw_kde_button(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_text(
     pixels: &mut [u32],
     width: usize,
@@ -2801,12 +2519,20 @@ fn clipboard_read_with(program: &str, args: &[&str]) -> std::io::Result<String> 
 
 #[cfg(target_os = "macos")]
 fn open_external(target: &str) -> std::io::Result<()> {
-    Command::new("open").arg(target).spawn().map(|_| ())
+    let mut child = Command::new("open").arg(target).spawn()?;
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
 fn open_external(target: &str) -> std::io::Result<()> {
-    Command::new("xdg-open").arg(target).spawn().map(|_| ())
+    let mut child = Command::new("xdg-open").arg(target).spawn()?;
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -2876,7 +2602,8 @@ impl ApplicationHandler<UserEvent> for App {
 
         let attrs = Window::default_attributes()
             .with_title("💩 poopterm")
-            .with_inner_size(LogicalSize::new(900.0, 560.0));
+            .with_inner_size(LogicalSize::new(900.0, 560.0))
+            .with_min_inner_size(LogicalSize::new(480.0, 240.0));
 
         // On macOS, keep the native frame so the traffic lights exist,
         // but make the title bar transparent and hide the title text.
@@ -2893,7 +2620,7 @@ impl ApplicationHandler<UserEvent> for App {
         );
 
         let scale = window.scale_factor() as f32;
-        self.px = 18.0 * scale;
+        self.px = Preferences::load().font_size as f32 * scale;
         self.margin = (8.0 * scale) as usize;
         self.border = scale as usize;
         self.titlebar_height = if cfg!(target_os = "macos") {
@@ -2953,7 +2680,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
         match event {
             WindowEvent::CloseRequested => {
-                self.refresh_directories();
+                self.refresh_directories(false);
                 self.persist_sessions();
                 event_loop.exit();
             }
@@ -3005,6 +2732,18 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 if self.search_active {
+                    if (self.super_key || (self.ctrl && self.shift))
+                        && matches!(&event.logical_key, Key::Character(value) if value.eq_ignore_ascii_case("v"))
+                    {
+                        if let Ok(text) = clipboard_read() {
+                            let available =
+                                128usize.saturating_sub(self.search_query.chars().count());
+                            self.search_query
+                                .extend(text.chars().filter(|c| !c.is_control()).take(available));
+                            self.search(1, false);
+                        }
+                        return;
+                    }
                     match &event.logical_key {
                         Key::Named(NamedKey::Escape) => self.end_search(),
                         Key::Named(NamedKey::Enter) => {
@@ -3015,10 +2754,10 @@ impl ApplicationHandler<UserEvent> for App {
                             self.search(1, false);
                         }
                         Key::Character(value) if !self.ctrl && !self.super_key => {
-                            if self.search_query.chars().count() < 128 {
-                                self.search_query.push_str(value);
-                                self.search(1, false);
-                            }
+                            let available =
+                                128usize.saturating_sub(self.search_query.chars().count());
+                            self.search_query.extend(value.chars().take(available));
+                            self.search(1, false);
                         }
                         _ => {}
                     }
@@ -3196,9 +2935,36 @@ impl ApplicationHandler<UserEvent> for App {
         }
     }
 
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let now = std::time::Instant::now();
+        let mut changed = false;
+        for session in &mut self.sessions {
+            changed |= session.term.finish_sync_if_expired(now);
+        }
+        if changed {
+            self.persist_sessions();
+            self.search_dirty = true;
+            self.update_window_title();
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+        if let Some(deadline) = self
+            .sessions
+            .iter()
+            .filter_map(|s| s.term.sync_deadline)
+            .min()
+        {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+    }
+
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::Output(id, bytes) => {
+            UserEvent::Output(id, bytes, ack) => {
+                let _ = ack.send(());
                 // Pass each PTY chunk to vte in one call instead of dispatching per byte.
                 let mut active_output = false;
                 let mut became_active = false;
@@ -3206,16 +2972,20 @@ impl ApplicationHandler<UserEvent> for App {
                 let active_id = self.sessions.get(self.active).map(|session| session.id);
                 if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
                     let previous_bell = session.term.bell;
+                    let previous_title = session.term.title.clone();
                     let previous_cwd = session.term.cwd.clone();
                     session.parser.advance(&mut session.term, &bytes);
                     cwd_changed = session.term.cwd != previous_cwd;
-                    became_active |= session.term.bell != previous_bell;
-                    for response in std::mem::take(&mut session.term.responses) {
-                        let _ = session.writer.write_all(&response);
+                    became_active |=
+                        session.term.bell != previous_bell || session.term.title != previous_title;
+                    if !session.term.responses.is_empty() {
+                        for response in std::mem::take(&mut session.term.responses) {
+                            let _ = session.writer.write_all(&response);
+                        }
+                        let _ = session.writer.flush();
                     }
-                    let _ = session.writer.flush();
                     if Some(id) == active_id {
-                        active_output = true;
+                        active_output = session.term.synchronized.is_none();
                         session.activity = false;
                     } else if !session.activity {
                         session.activity = true;
@@ -3227,7 +2997,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 if active_output {
                     if self.search_active {
-                        self.search(1, false);
+                        self.search_dirty = true;
                     }
                     self.update_window_title();
                 }
@@ -3249,6 +3019,14 @@ impl ApplicationHandler<UserEvent> for App {
 // ---- main --------------------------------------------------------------------
 
 fn main() -> Result<(), Box<dyn Error>> {
+    if let Some(argument) = env::args().nth(1) {
+        match argument.as_str() {
+            "--version" | "-V" => println!("poopterm {}", env!("CARGO_PKG_VERSION")),
+            "--help" | "-h" => println!("Poopterm {}\n\nUsage: poopterm [--version | --help]\n\nLaunches your login shell. Configure appearance and session restore with Settings.\nPOOPTERM_CONFIG overrides the config path; POOPTERM_THEME overrides the theme.", env!("CARGO_PKG_VERSION")),
+            _ => return Err(format!("unknown option: {argument}; try --help").into()),
+        }
+        return Ok(());
+    }
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
 
@@ -3310,6 +3088,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         selection: None,
         selecting: false,
         search_active: false,
+        search_dirty: false,
         search_query: String::new(),
         search_matches: Vec::new(),
         search_match_index: 0,
@@ -3393,3 +3172,6 @@ mod tests {
         assert!(layout.first_visible + layout.visible_count <= 20);
     }
 }
+
+#[cfg(test)]
+mod terminal_tests;

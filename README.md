@@ -12,7 +12,7 @@ implementation.
 - Starts the shell in `$SHELL`, falling back to `/bin/sh`.
 - Supports basic cursor movement, 16-color, 256-color, and truecolor SGR,
   alternate-screen switching, and common editing and function keys.
-- Keeps up to 5,000 lines of scrollback. Use the mouse wheel to browse it.
+- Configurable scrollback (5,000 lines by default). Use the mouse wheel to browse it.
 - Supports drag-to-select text and system clipboard copy/paste.
 - Opens independent shell sessions in tabs, with activity and bell indicators.
 - Searches scrollback with a highlighted match and next/previous navigation.
@@ -21,6 +21,9 @@ implementation.
 - Uses a compact tab bar and a status bar showing directory, grid size, and theme.
 - Supports bracketed paste and common SGR mouse reporting modes.
 - Resizes the shell along with the window.
+- Batches synchronized terminal updates (`?2026`) to avoid partial frames.
+- Displays bounded Sixel graphics and tracks OSC 133 shell markers.
+- Supports semicolon/colon TrueColor, DEC line drawing, and additional text styles.
 - Includes macOS Light and Dark, all four Catppuccin flavors, and signature Poop themes.
 - Includes a desktop launcher and icon for Linux and FreeBSD.
 
@@ -105,17 +108,22 @@ The default config path is `~/Library/Application Support/poopterm/config.toml`
 on macOS and `~/.config/poopterm/config.toml` on Linux and FreeBSD (or
 `$XDG_CONFIG_HOME/poopterm/config.toml` when `XDG_CONFIG_HOME` is set). Create
 the file or open **Settings** from the gear button in the tab bar. Settings
-opens in a separate window with a theme picker. Click **Save** to write the
-selection to the config:
+opens in a separate window with a theme picker, font-size and scrollback controls,
+and a session-restore toggle. Click **Save** to apply the preferences:
 
 ```toml
 theme = "catppuccin-mocha"
+font_size = 18           # Logical pixels, 10–32
+scrollback_lines = 5000 # 0–100000; 0 disables history
+restore_sessions = true
 ```
 
 `theme` accepts `macos-dark`, `macos-light`, `catppuccin-latte`,
 `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, or `poop`.
-Settings changes apply immediately after saving. Other config keys are preserved
-when Settings saves.
+Settings changes apply immediately after saving; session restore takes effect on
+the next launch. Reducing scrollback discards the oldest lines. Invalid numbers
+fall back to defaults or are clamped to supported limits. Other config keys and
+comments are preserved when Settings saves. Toolbar text keeps its own size.
 
 Set `POOPTERM_CONFIG` to use a config file at another path. `POOPTERM_THEME`
 can override the saved setting for a single launch, for example:
@@ -136,7 +144,9 @@ POOPTERM_THEME=catppuccin-latte poopterm
 - **Cmd+1–9** / **Ctrl+1–9**: jump directly to a tab.
 - **Cmd+F** / **Ctrl+Shift+F**: search the current tab's scrollback. Type a query,
   press **Enter** / **Shift+Enter** for next/previous, and **Esc** to close.
-  Search is case-insensitive for ASCII and matches within each displayed row.
+  Search is case-insensitive for ASCII and matches within each displayed row
+  (up to 10,000 matches per query).
+  The usual paste shortcut can paste a search query.
 - **Cmd-click** / **Ctrl-click** an HTTP(S) URL to open it in your browser, or
   a displayed path containing `/` to copy it. Mouse-reporting terminal programs
   retain their own click handling.
@@ -222,15 +232,60 @@ them may show missing characters.
 The shell is currently told that the terminal is `xterm-256color`; apps may
 therefore try features Poopterm does not support yet.
 
-For system monitoring, we recommend [btop](https://github.com/aristocratos/btop)
-instead of `htop`. `htop` can still have display issues in Poopterm, and advanced
-terminal features in either program may expose remaining compatibility gaps.
+The 0.4.0 private-mode and line-drawing fixes improve full-screen programs,
+including `htop`. Advanced features in `htop`, `btop`, and other TUIs may still
+expose compatibility gaps. Please include the program version and a minimal
+reproduction when reporting display problems.
 
 ## Font and license
 
 Poopterm bundles DejaVu Sans Mono for Powerline as `assets/font.ttf`. The font is
 distributed under the Bitstream Vera license, with public-domain changes. See
 the [DejaVu font license](https://dejavu-fonts.github.io/License.html). Nerd
-Font symbols are loaded from the system when available and are not bundled.
+Font symbols are not loaded from system fonts; automatic fallback is not implemented.
 
 Poopterm is MIT licensed; see [LICENSE](LICENSE).
+
+## Modern terminal protocols
+
+- **Synchronized output:** `ESC [ ? 2026 h` opens an update block; `ESC [ ? 2026 l`
+  commits it. Grid changes stay hidden until the commit. A 250 ms timeout prevents
+  a broken application from leaving the display frozen. `CSI ? 2026 $ p` queries
+  the mode. See the [protocol specification](https://github.com/contour-terminal/vt-extensions/blob/master/synchronized-output.md).
+- **Shell integration:** OSC 133 `A`, `B`, `C`, and `D;exit_code` mark the prompt,
+  command input, output, and completion. Poopterm retains the latest 256 markers
+  and shows running/exit status in the status bar. Your shell or wrapper must
+  emit these markers; Poopterm does not change startup files or inject scripts.
+  See [OSC 133 semantics](https://iterm2.com/documentation-escape-codes.html).
+- **Sixel:** DCS `q` images support RGB/HLS registers, repeated columns,
+  transparency, raster dimensions, and integer pixel aspect ratios. Images are
+  capped at 2,048 × 2,048 pixels and 1 MiB of encoded data. Each screen retains
+  at most 16 images within a 4-megapixel budget. Images are discarded on text
+  overwrite or scrolling out of view; image scrollback and partial bitmap
+  erasure are not implemented. See [DEC's Sixel reference](https://vt100.net/docs/vt3xx-gp/chapter14.html).
+
+## Development and releases
+
+```sh
+cargo fmt --check
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo build --release --locked
+./target/release/poopterm --version
+```
+
+The code is separated into `state.rs` (grid/history), `parser.rs` (vte callbacks),
+`osc.rs` (shell integration), `sixel.rs` (bounded image decoding), `config.rs`
+(preferences), and `main.rs` (windowing, PTYs, input, rendering).
+CI builds and checks macOS and Linux; BSD still needs testing on real systems.
+
+Poopterm follows [Semantic Versioning](https://semver.org/): patch releases fix
+bugs, minor releases add features, and major releases signal incompatible changes
+after 1.0. Before 1.0, incompatible changes advance the minor version and are
+listed in [CHANGELOG.md](CHANGELOG.md). Existing configuration keys, command-line
+flags, and documented shell integration behavior are the compatibility surface.
+
+Update `Cargo.toml`, the Poopterm entry in `Cargo.lock`, and the changelog together.
+Successful CI on `main` creates the matching `vX.Y.Z` tag and GitHub release only
+when the tag does not already exist. Published tags are never moved. Update the
+Homebrew formula after that tag exists, so installs never point at missing source.
