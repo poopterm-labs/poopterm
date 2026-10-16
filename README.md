@@ -1,9 +1,6 @@
 # poopterm 💩
 
-Poopterm is a lightweight terminal emulator written in Rust. It opens your
-default shell in a native window, with tabs, clipboard support, and seven built-in
-color themes. Terminal compatibility is growing and is not yet a complete xterm
-implementation.
+Poopterm is a lightweight, ultra-high-throughput terminal emulator written in Rust, optimized for gigabit rendering speeds. It opens your default shell in a native window, with tabs, clipboard support, and seven built-in color themes. Terminal compatibility is growing and is not yet a complete xterm implementation.
 
 ![Poopterm app icon](assets/icon.png)
 
@@ -26,11 +23,13 @@ implementation.
 - Supports semicolon/colon TrueColor, DEC line drawing, and additional text styles.
 - Includes macOS Light and Dark, all four Catppuccin flavors, and signature Poop themes.
 - Includes a desktop launcher and icon for Linux and FreeBSD.
+- **Gigabit-tier performance:** Utilizes portable SIMD (`std::simd::u32x4`) for vectorized rectangle fills and alpha channel blending, zero-allocation stack buffers for SGR escape sequences, and aggressive compiler optimizations targeting Rust 2024 edition.
 
 ## Build and run
 
-Install stable Rust with [rustup](https://rustup.rs), then build from the
-project directory:
+Poopterm requires the **Rust nightly toolchain** because it uses unstable portable SIMD features (`#![feature(portable_simd)]`). A `rust-toolchain.toml` file is included in the repository, so `cargo` will automatically use the correct nightly toolchain when building inside the project directory without modifying your global default.
+
+Build from the project directory:
 
 ```sh
 cargo run --release
