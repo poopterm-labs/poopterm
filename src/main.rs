@@ -1,3 +1,5 @@
+#![feature(portable_simd)]
+
 mod config;
 mod osc;
 mod parser;
@@ -22,6 +24,7 @@ use std::{
 
 use fontdue::{Font, FontSettings, Metrics};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use std::simd::u32x4;
 use vte::Parser;
 use winit::{
     application::ApplicationHandler,
@@ -2339,6 +2342,8 @@ impl App {
     }
 }
 
+// ---- SIMD Accelerated Graphics & Blending Utilities -------------------------
+
 #[allow(clippy::too_many_arguments)]
 fn fill_rect(
     px: &mut [u32],
@@ -2354,10 +2359,22 @@ fn fill_rect(
     if x >= x_end {
         return;
     }
-    for yy in y..y.saturating_add(rh).min(h) {
+    let color_array: [u32; 4] = [color; 4];
+    let height_end = y.saturating_add(rh).min(h);
+
+    for yy in y..height_end {
         let row_start = yy * w + x;
         let row_end = yy * w + x_end;
-        px[row_start..row_end].fill(color);
+        if row_end > px.len() {
+            break;
+        }
+        let row_slice = &mut px[row_start..row_end];
+
+        let mut chunks = row_slice.chunks_exact_mut(4);
+        for chunk in &mut chunks {
+            chunk.copy_from_slice(&color_array);
+        }
+        chunks.into_remainder().fill(color);
     }
 }
 
@@ -2581,13 +2598,45 @@ fn clipboard_read() -> std::io::Result<String> {
     ))
 }
 
+#[inline]
 fn blend(bg: u32, fg: u32, a: u32) -> u32 {
-    let mix = |shift: u32| {
-        let f = (fg >> shift) & 0xff;
-        let b = (bg >> shift) & 0xff;
-        ((f * a + b * (255 - a)) / 255) << shift
-    };
-    mix(16) | mix(8) | mix(0)
+    if a == 0 {
+        return bg;
+    }
+    if a == 255 {
+        return fg;
+    }
+    let bg_v = u32x4::from([bg, bg, bg, bg]);
+    let fg_v = u32x4::from([fg, fg, fg, fg]);
+    let res = blend_chunk(bg_v, fg_v, a);
+    res[0]
+}
+
+#[inline]
+fn blend_chunk(bg: u32x4, fg: u32x4, a: u32) -> u32x4 {
+    if a == 0 {
+        return bg;
+    }
+    if a == 255 {
+        return fg;
+    }
+    let a_v = u32x4::splat(a);
+    let inv_a_v = u32x4::splat(255 - a);
+    let max_a = u32x4::splat(255);
+
+    let fg_r = (fg >> u32x4::splat(16)) & u32x4::splat(0xff);
+    let bg_r = (bg >> u32x4::splat(16)) & u32x4::splat(0xff);
+    let r = ((fg_r * a_v + bg_r * inv_a_v) / max_a) << u32x4::splat(16);
+
+    let fg_g = (fg >> u32x4::splat(8)) & u32x4::splat(0xff);
+    let bg_g = (bg >> u32x4::splat(8)) & u32x4::splat(0xff);
+    let g = ((fg_g * a_v + bg_g * inv_a_v) / max_a) << u32x4::splat(8);
+
+    let fg_b = fg & u32x4::splat(0xff);
+    let bg_b = bg & u32x4::splat(0xff);
+    let b = (fg_b * a_v + bg_b * inv_a_v) / max_a;
+
+    r | g | b
 }
 
 fn glyph_cache_key(ch: char, px: f32) -> (char, u32) {
@@ -2733,7 +2782,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 if self.search_active {
                     if (self.super_key || (self.ctrl && self.shift))
-                        && matches!(&event.logical_key, Key::Character(value) if value.eq_ignore_ascii_case("v"))
+                        && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("v"))
                     {
                         if let Ok(text) = clipboard_read() {
                             let available =

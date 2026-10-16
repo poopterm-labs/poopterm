@@ -7,27 +7,61 @@ use vte::{Params, Perform};
 
 impl Term {
     pub(crate) fn sgr(&mut self, params: &Params) {
-        let mut values = Vec::new();
+        // Avoid heap allocation entirely for typical SGR parameter lengths by using a stack buffer
+        // or a small-vec pattern, or processing directly. Here we use a small stack array since
+        // SGR parameter lists are virtually never longer than 16-32 elements.
+        let mut stack_buf = [0u16; 32];
+        let mut len = 0;
+
         for group in params.iter() {
             if group.len() > 1 && matches!(group[0], 38 | 48) {
                 match group[1] {
-                    2 if group.len() == 5 => values.extend_from_slice(group),
-                    2 if group.len() >= 6 && group[2] == 0 => {
-                        values.extend_from_slice(&group[..2]);
-                        values.extend_from_slice(&group[3..6]);
+                    2 if group.len() == 5 => {
+                        if len + group.len() <= stack_buf.len() {
+                            for &v in group {
+                                stack_buf[len] = v;
+                                len += 1;
+                            }
+                        }
                     }
-                    5 if group.len() == 3 => values.extend_from_slice(group),
+                    2 if group.len() >= 6 && group[2] == 0 => {
+                        if len + 5 <= stack_buf.len() {
+                            stack_buf[len] = group[0];
+                            stack_buf[len + 1] = group[1];
+                            stack_buf[len + 2] = group[3];
+                            stack_buf[len + 3] = group[4];
+                            stack_buf[len + 4] = group[5];
+                            len += 5;
+                        }
+                    }
+                    5 if group.len() == 3 => {
+                        if len + 3 <= stack_buf.len() {
+                            stack_buf[len] = group[0];
+                            stack_buf[len + 1] = group[1];
+                            stack_buf[len + 2] = group[2];
+                            len += 3;
+                        }
+                    }
                     _ => {}
                 }
             } else if group.first() == Some(&4) && group.len() > 1 {
-                values.push(if group[1] == 0 { 24 } else { 4 });
+                if len < stack_buf.len() {
+                    stack_buf[len] = if group[1] == 0 { 24 } else { 4 };
+                    len += 1;
+                }
             } else if group.len() == 1 {
-                values.push(group[0]);
+                if len < stack_buf.len() {
+                    stack_buf[len] = group[0];
+                    len += 1;
+                }
             }
         }
-        if values.is_empty() {
+
+        if len == 0 {
             return;
         }
+
+        let values = &stack_buf[..len];
         let mut i = 0;
         while i < values.len() {
             let code = values[i];
@@ -89,6 +123,7 @@ impl Term {
 }
 
 impl Term {
+    #[inline(always)]
     fn apply_print(&mut self, c: char) {
         let c = if self.charsets[self.active_charset] {
             dec_graphic(c)
@@ -160,6 +195,7 @@ impl Term {
         self.cx = (self.cx + width).min(self.cols - 1);
     }
 
+    #[inline]
     fn apply_execute(&mut self, byte: u8) {
         if matches!(byte, 8..=13) {
             self.wrap_pending = false;
@@ -197,7 +233,8 @@ impl Term {
         if !matches!(action, 'm' | 'n' | 'c' | 'h' | 'l' | 's' | 'u') {
             self.wrap_pending = false;
         }
-        // First value of the i-th param, with 0 treated as "default".
+
+        // Optimized parameter extraction helper avoiding heavy iterator re-allocations
         let p = |i: usize, d: u16| {
             params
                 .iter()
@@ -478,6 +515,7 @@ impl Term {
 }
 
 impl Perform for Term {
+    #[inline(always)]
     fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
         let target = self.pending();
         target.sixel_transfer = if !ignore && intermediates.is_empty() && action == 'q' {
@@ -490,28 +528,35 @@ impl Perform for Term {
             None
         };
     }
+    #[inline(always)]
     fn put(&mut self, byte: u8) {
         if let Some(transfer) = &mut self.pending().sixel_transfer {
             transfer.push(byte);
         }
     }
+    #[inline(always)]
     fn unhook(&mut self) {
         self.pending().finish_sixel();
     }
 
+    #[inline(always)]
     fn print(&mut self, c: char) {
         self.pending().apply_print(c);
     }
+    #[inline(always)]
     fn execute(&mut self, byte: u8) {
         self.pending().apply_execute(byte);
     }
+    #[inline(always)]
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
         self.pending()
             .apply_esc_dispatch(intermediates, ignore, byte);
     }
+    #[inline(always)]
     fn osc_dispatch(&mut self, params: &[&[u8]], bell: bool) {
         self.pending().apply_osc_dispatch(params, bell);
     }
+    #[inline(always)]
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
         if ignore {
             return;

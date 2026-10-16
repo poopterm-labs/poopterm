@@ -139,6 +139,7 @@ impl Term {
     pub(crate) fn finish_sync_if_expired(&mut self, now: Instant) -> bool {
         self.sync_deadline.is_some_and(|deadline| now >= deadline) && self.finish_sync()
     }
+    #[inline(always)]
     pub(crate) fn pending(&mut self) -> &mut Self {
         match self.synchronized {
             Some(ref mut pending) => pending,
@@ -146,6 +147,7 @@ impl Term {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn row_cells(&self, row: usize) -> Option<&[Cell]> {
         if row < self.scrollback.len() {
             self.scrollback.get(row).map(|line| line.as_slice())
@@ -195,6 +197,7 @@ impl Term {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn blank(&self) -> Cell {
         Cell {
             attrs: 0,
@@ -204,6 +207,7 @@ impl Term {
             width: 1,
         }
     }
+
     pub(crate) fn new(cols: usize, rows: usize, theme: Theme, cwd: PathBuf) -> Self {
         let cols = cols.max(1);
         let rows = rows.max(1);
@@ -266,6 +270,7 @@ impl Term {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn idx(&self, x: usize, y: usize) -> usize {
         y * self.cols + x
     }
@@ -386,6 +391,7 @@ impl Term {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn linefeed(&mut self) {
         if self.cy == self.scroll_bottom {
             self.scroll_region_up(1);
@@ -513,16 +519,13 @@ impl Term {
         });
     }
 
+    #[inline]
     pub(crate) fn clear_range(&mut self, from: usize, to: usize) {
         self.erase_images(from, to);
-        for i in from..to.min(self.cells.len()) {
-            self.cells[i] = Cell {
-                attrs: 0,
-                ch: ' ',
-                fg: self.fg,
-                bg: self.bg,
-                width: 1,
-            };
+        let end = to.min(self.cells.len());
+        if from < end {
+            let blank = self.blank();
+            self.cells[from..end].fill(blank);
         }
     }
 }
