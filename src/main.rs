@@ -851,34 +851,23 @@ struct Selection {
     end: CellPoint,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SettingsField {
-    DiscordClient,
-    SymbolFont,
-}
-
 struct SettingsEditor {
     theme: ThemeKind,
     discord_enabled: bool,
     discord_client_id: Vec<char>,
-    symbol_font: Vec<char>,
     cursor: usize,
-    field: SettingsField,
     status: String,
 }
 
 impl SettingsEditor {
     fn load() -> Self {
         let discord_client_id = read_config_value("discord_client_id").unwrap_or_default();
-        let symbol_font = read_config_value("symbol_font").unwrap_or_default();
         Self {
             theme: read_config_theme().unwrap_or(ThemeKind::Poop),
             discord_enabled: read_config_bool("discord_enabled")
                 .unwrap_or_else(|| !discord_client_id.is_empty()),
             discord_client_id: discord_client_id.chars().collect(),
-            symbol_font: symbol_font.chars().collect(),
             cursor: 0,
-            field: SettingsField::DiscordClient,
             status: "Changes are saved to config.toml.".into(),
         }
     }
@@ -1100,85 +1089,6 @@ fn json_escape(value: &str) -> String {
     escaped
 }
 
-fn load_symbol_fallbacks() -> Vec<Font> {
-    let mut paths = Vec::new();
-    if let Some(path) = env::var_os("POOPTERM_SYMBOL_FONT")
-        .map(PathBuf::from)
-        .or_else(|| read_config_value("symbol_font").map(PathBuf::from))
-    {
-        paths.push(path);
-    }
-    let names = [
-        "SymbolsNerdFontMono-Regular.ttf",
-        "NotoSansMNerdFontMono-Regular.ttf",
-        "JetBrainsMonoNLNerdFontMono-Regular.ttf",
-        "HackNerdFontMono-Regular.ttf",
-    ];
-    let mut font_dirs = vec![
-        PathBuf::from("/Library/Fonts"),
-        PathBuf::from("/usr/share/fonts"),
-    ];
-    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        font_dirs.extend([
-            home.join("Library/Fonts"),
-            home.join(".local/share/fonts"),
-            home.join(".fonts"),
-        ]);
-    }
-    for dir in font_dirs {
-        for name in &names {
-            paths.push(dir.join(name));
-        }
-    }
-    #[cfg(unix)]
-    for executable in [
-        "fc-match",
-        "/opt/homebrew/bin/fc-match",
-        "/usr/local/bin/fc-match",
-        "/usr/bin/fc-match",
-    ] {
-        for family in ["Symbols Nerd Font Mono", "Noto Sans Mono Nerd Font"] {
-            if let Ok(output) = Command::new(executable)
-                .args(["--format=%{file}", family])
-                .output()
-            {
-                if output.status.success() {
-                    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-                    if !path.is_empty() {
-                        paths.push(PathBuf::from(path));
-                    }
-                }
-            }
-        }
-    }
-
-    let mut fonts = Vec::new();
-    for path in paths {
-        if fonts.len() >= 2 || !path.is_file() {
-            continue;
-        }
-        let Ok(bytes) = fs::read(path) else { continue };
-        let Ok(font) = Font::from_bytes(bytes, FontSettings::default()) else {
-            continue;
-        };
-        if font.lookup_glyph_index('\u{e0a0}') != 0 {
-            fonts.push(font);
-            break;
-        }
-    }
-    fonts
-}
-
-fn glyph_font_index(primary: &Font, fallbacks: &[Font], ch: char) -> usize {
-    if primary.lookup_glyph_index(ch) != 0 {
-        return 0;
-    }
-    fallbacks
-        .iter()
-        .position(|font| font.lookup_glyph_index(ch) != 0)
-        .map_or(0, |index| index + 1)
-}
-
 fn spawn_session(
     id: u64,
     cols: usize,
@@ -1238,8 +1148,7 @@ fn spawn_session(
 struct App {
     theme: Theme,
     font: Font,
-    glyphs: HashMap<(char, usize), (Metrics, Vec<u8>)>,
-    fallback_fonts: Vec<Font>,
+    glyphs: HashMap<(char, u32), (Metrics, Vec<u8>)>,
     px: f32,
     cw: usize,
     ch: usize,
@@ -1363,7 +1272,7 @@ impl App {
                 key.is_none_or(|(key, _)| {
                     !matches!(
                         key.trim(),
-                        "theme" | "discord_enabled" | "discord_client_id" | "symbol_font"
+                        "theme" | "discord_enabled" | "discord_client_id"
                     )
                 })
             })
@@ -1376,8 +1285,6 @@ impl App {
             "discord_enabled = {}",
             self.settings_editor.discord_enabled
         ));
-        let symbol_font: String = self.settings_editor.symbol_font.iter().collect();
-        lines.push(format!("symbol_font = {symbol_font:?}"));
         let text = format!("# Poopterm configuration\n{}\n", lines.join("\n"));
         let result = path
             .parent()
@@ -1387,7 +1294,6 @@ impl App {
         match result {
             Ok(()) => {
                 self.apply_theme(self.settings_editor.theme);
-                self.fallback_fonts = load_symbol_fallbacks();
                 self.glyphs.clear();
                 self.presence = start_discord_presence();
                 if let Some(presence) = &self.presence {
@@ -1442,7 +1348,6 @@ impl App {
         let x = 24 * scale;
         let content_w = width.saturating_sub(48 * scale);
         let font = &self.font;
-        let fallbacks = &self.fallback_fonts;
         let glyphs = &mut self.glyphs;
         draw_text(
             pixels,
@@ -1455,7 +1360,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         draw_text(
@@ -1469,7 +1373,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         draw_text(
@@ -1483,7 +1386,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         let theme_y = 106 * scale;
@@ -1514,7 +1416,6 @@ impl App {
                 ascent,
                 self.theme.fg,
                 font,
-                fallbacks,
                 glyphs,
             );
         }
@@ -1551,7 +1452,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         let section_y = 170 * scale;
@@ -1566,7 +1466,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         draw_text(
@@ -1580,7 +1479,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         let toggle_y = section_y + 52 * scale;
@@ -1614,7 +1512,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         draw_text(
@@ -1623,12 +1520,11 @@ impl App {
             height,
             x + toggle_w + 14 * scale,
             toggle_y + 8 * scale,
-            "Show the active terminal title in Discord.",
+            "Application ID: discord.com/developers/applications → General Information.",
             px * 0.68,
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
 
@@ -1644,106 +1540,66 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         let input_h = 36 * scale;
         let id_y = id_label_y + 21 * scale;
-        let font_label_y = id_y + 57 * scale;
-        draw_text(
+        let id_chars: Vec<char> = self
+            .settings_editor
+            .discord_client_id
+            .iter()
+            .copied()
+            .collect();
+        let max_chars = content_w.saturating_sub(24 * scale) / cell_width.max(1);
+        let start = self
+            .settings_editor
+            .cursor
+            .saturating_add(1)
+            .saturating_sub(max_chars);
+        let shown: String = id_chars.iter().skip(start).take(max_chars).collect();
+        draw_kde_button(
             pixels,
             width,
             height,
             x,
-            font_label_y,
-            "Symbol font (blank uses automatic detection)",
-            px * 0.7,
+            id_y,
+            content_w,
+            input_h,
+            scale,
+            self.theme.bg,
+            self.theme.palette[4],
+            self.theme.palette[4],
+            false,
+        );
+        draw_text(
+            pixels,
+            width,
+            height,
+            x + 10 * scale,
+            id_y + 7 * scale,
+            if shown.is_empty() {
+                "Click to type the Application ID…"
+            } else {
+                &shown
+            },
+            px * 0.74,
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
-        let font_y = font_label_y + 21 * scale;
-        let inputs = [
-            (
-                SettingsField::DiscordClient,
-                id_y,
-                self.settings_editor
-                    .discord_client_id
-                    .iter()
-                    .collect::<String>(),
-            ),
-            (
-                SettingsField::SymbolFont,
-                font_y,
-                self.settings_editor.symbol_font.iter().collect::<String>(),
-            ),
-        ];
-        for (field, y, value) in inputs {
-            let focused = self.settings_editor.field == field;
-            draw_kde_button(
-                pixels,
-                width,
-                height,
-                x,
-                y,
-                content_w,
-                input_h,
-                scale,
-                self.theme.bg,
-                if focused {
-                    self.theme.palette[4]
-                } else {
-                    self.theme.border
-                },
-                self.theme.palette[4],
-                false,
-            );
-            let max_chars = content_w.saturating_sub(24 * scale) / cell_width.max(1);
-            let chars: Vec<char> = value.chars().collect();
-            let start = if focused {
-                self.settings_editor
-                    .cursor
-                    .saturating_add(1)
-                    .saturating_sub(max_chars)
-            } else {
-                chars.len().saturating_sub(max_chars)
-            };
-            let shown: String = chars.iter().skip(start).take(max_chars).collect();
-            draw_text(
-                pixels,
-                width,
-                height,
-                x + 10 * scale,
-                y + 7 * scale,
-                if shown.is_empty() {
-                    "Click to type…"
-                } else {
-                    &shown
-                },
-                px * 0.74,
-                ascent,
-                self.theme.fg,
-                font,
-                fallbacks,
-                glyphs,
-            );
-            if focused {
-                let cursor_x =
-                    x + 10 * scale + self.settings_editor.cursor.saturating_sub(start) * cell_width;
-                fill_rect(
-                    pixels,
-                    width,
-                    height,
-                    cursor_x,
-                    y + 6 * scale,
-                    2 * scale,
-                    22 * scale,
-                    self.theme.fg,
-                );
-            }
-        }
+        let cursor_x =
+            x + 10 * scale + self.settings_editor.cursor.saturating_sub(start) * cell_width;
+        fill_rect(
+            pixels,
+            width,
+            height,
+            cursor_x,
+            id_y + 6 * scale,
+            2 * scale,
+            22 * scale,
+            self.theme.fg,
+        );
         draw_text(
             pixels,
             width,
@@ -1755,7 +1611,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         let save_x = width.saturating_sub(140 * scale);
@@ -1793,7 +1648,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallbacks,
             glyphs,
         );
         let _ = buffer.present();
@@ -1886,14 +1740,9 @@ impl App {
                             !self.settings_editor.discord_enabled;
                     } else {
                         let id_y = (170 + 52 + 52 + 21) * scale;
-                        let font_y = (170 + 52 + 52 + 21 + 57 + 21) * scale;
                         if y >= id_y && y < id_y + 36 * scale {
-                            self.settings_editor.field = SettingsField::DiscordClient;
                             self.settings_editor.cursor =
                                 self.settings_editor.discord_client_id.len();
-                        } else if y >= font_y && y < font_y + 36 * scale {
-                            self.settings_editor.field = SettingsField::SymbolFont;
-                            self.settings_editor.cursor = self.settings_editor.symbol_font.len();
                         }
                     }
                 }
@@ -1921,89 +1770,41 @@ impl App {
                     }
                     Key::Named(NamedKey::Tab)
                     | Key::Named(NamedKey::ArrowUp)
-                    | Key::Named(NamedKey::ArrowDown) => {
-                        self.settings_editor.field =
-                            if self.settings_editor.field == SettingsField::DiscordClient {
-                                SettingsField::SymbolFont
-                            } else {
-                                SettingsField::DiscordClient
-                            };
-                        self.settings_editor.cursor = match self.settings_editor.field {
-                            SettingsField::DiscordClient => {
-                                self.settings_editor.discord_client_id.len()
-                            }
-                            SettingsField::SymbolFont => self.settings_editor.symbol_font.len(),
-                        };
-                    }
+                    | Key::Named(NamedKey::ArrowDown) => {}
                     Key::Named(NamedKey::Backspace) => {
                         if self.settings_editor.cursor > 0 {
                             self.settings_editor.cursor -= 1;
-                            match self.settings_editor.field {
-                                SettingsField::DiscordClient => {
-                                    self.settings_editor
-                                        .discord_client_id
-                                        .remove(self.settings_editor.cursor);
-                                }
-                                SettingsField::SymbolFont => {
-                                    self.settings_editor
-                                        .symbol_font
-                                        .remove(self.settings_editor.cursor);
-                                }
-                            }
+                            self.settings_editor
+                                .discord_client_id
+                                .remove(self.settings_editor.cursor);
                         }
                     }
                     Key::Named(NamedKey::Delete) => {
                         let cursor = self.settings_editor.cursor;
-                        match self.settings_editor.field {
-                            SettingsField::DiscordClient => {
-                                if cursor < self.settings_editor.discord_client_id.len() {
-                                    self.settings_editor.discord_client_id.remove(cursor);
-                                }
-                            }
-                            SettingsField::SymbolFont => {
-                                if cursor < self.settings_editor.symbol_font.len() {
-                                    self.settings_editor.symbol_font.remove(cursor);
-                                }
-                            }
+                        if cursor < self.settings_editor.discord_client_id.len() {
+                            self.settings_editor.discord_client_id.remove(cursor);
                         }
                     }
                     Key::Named(NamedKey::ArrowLeft) => {
                         self.settings_editor.cursor = self.settings_editor.cursor.saturating_sub(1)
                     }
                     Key::Named(NamedKey::ArrowRight) => {
-                        let len = match self.settings_editor.field {
-                            SettingsField::DiscordClient => {
-                                self.settings_editor.discord_client_id.len()
-                            }
-                            SettingsField::SymbolFont => self.settings_editor.symbol_font.len(),
-                        };
+                        let len = self.settings_editor.discord_client_id.len();
                         self.settings_editor.cursor = (self.settings_editor.cursor + 1).min(len);
                     }
                     Key::Named(NamedKey::Home) => self.settings_editor.cursor = 0,
                     Key::Named(NamedKey::End) => {
-                        self.settings_editor.cursor = match self.settings_editor.field {
-                            SettingsField::DiscordClient => {
-                                self.settings_editor.discord_client_id.len()
-                            }
-                            SettingsField::SymbolFont => self.settings_editor.symbol_font.len(),
-                        }
+                        self.settings_editor.cursor = self.settings_editor.discord_client_id.len()
                     }
                     Key::Character(value) if !self.ctrl && !self.super_key => {
                         let chars: Vec<char> =
                             value.chars().filter(|ch| !ch.is_control()).collect();
                         let count = chars.len();
                         let cursor = self.settings_editor.cursor;
-                        match self.settings_editor.field {
-                            SettingsField::DiscordClient => self
-                                .settings_editor
-                                .discord_client_id
-                                .splice(cursor..cursor, chars),
-                            SettingsField::SymbolFont => self
-                                .settings_editor
-                                .symbol_font
-                                .splice(cursor..cursor, chars),
-                        }
-                        .for_each(drop);
+                        self.settings_editor
+                            .discord_client_id
+                            .splice(cursor..cursor, chars)
+                            .for_each(drop);
                         self.settings_editor.cursor += count;
                     }
                     _ => {}
@@ -2401,7 +2202,6 @@ impl App {
             self.ascent,
         );
         let font = &self.font;
-        let fallback_fonts = &self.fallback_fonts;
         let glyphs = &mut self.glyphs;
         let term = &self.sessions[self.active].term;
         let selected = self.selection.map(Selection::ordered);
@@ -2472,7 +2272,6 @@ impl App {
                 ascent,
                 self.theme.fg,
                 font,
-                fallback_fonts,
                 glyphs,
             );
             if self.sessions.len() > 1 {
@@ -2487,7 +2286,6 @@ impl App {
                     ascent,
                     self.theme.fg,
                     font,
-                    fallback_fonts,
                     glyphs,
                 );
             }
@@ -2532,7 +2330,6 @@ impl App {
                 ascent,
                 self.theme.fg,
                 font,
-                fallback_fonts,
                 glyphs,
             );
         }
@@ -2571,7 +2368,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallback_fonts,
             glyphs,
         );
         draw_kde_button(
@@ -2599,7 +2395,6 @@ impl App {
             ascent,
             self.theme.fg,
             font,
-            fallback_fonts,
             glyphs,
         );
         let history_len = term.scrollback.len();
@@ -2642,15 +2437,9 @@ impl App {
                 if cell.ch == ' ' || cell.width == 0 {
                     continue;
                 }
-                let font_index = glyph_font_index(font, fallback_fonts, cell.ch);
-                let glyph_font = if font_index == 0 {
-                    font
-                } else {
-                    &fallback_fonts[font_index - 1]
-                };
                 let (gm, bitmap) = glyphs
-                    .entry((cell.ch, font_index))
-                    .or_insert_with(|| glyph_font.rasterize(cell.ch, px));
+                    .entry(glyph_cache_key(cell.ch, px))
+                    .or_insert_with(|| font.rasterize(cell.ch, px));
 
                 let gx0 = x0 as i32 + gm.xmin;
                 let gy0 = y0 as i32 + ascent - gm.ymin - gm.height as i32;
@@ -2789,20 +2578,13 @@ fn draw_text(
     ascent: i32,
     color: u32,
     font: &Font,
-    fallback_fonts: &[Font],
-    glyphs: &mut HashMap<(char, usize), (Metrics, Vec<u8>)>,
+    glyphs: &mut HashMap<(char, u32), (Metrics, Vec<u8>)>,
 ) {
     let mut cursor_x = x as i32;
     for ch in text.chars() {
-        let font_index = glyph_font_index(font, fallback_fonts, ch);
-        let glyph_font = if font_index == 0 {
-            font
-        } else {
-            &fallback_fonts[font_index - 1]
-        };
         let (metrics, bitmap) = glyphs
-            .entry((ch, font_index))
-            .or_insert_with(|| glyph_font.rasterize(ch, px));
+            .entry(glyph_cache_key(ch, px))
+            .or_insert_with(|| font.rasterize(ch, px));
         let gx0 = cursor_x + metrics.xmin;
         let gy0 = y as i32 + ascent - metrics.ymin - metrics.height as i32;
         for gy in 0..metrics.height {
@@ -2910,6 +2692,10 @@ fn blend(bg: u32, fg: u32, a: u32) -> u32 {
         ((f * a + b * (255 - a)) / 255) << shift
     };
     mix(16) | mix(8) | mix(0)
+}
+
+fn glyph_cache_key(ch: char, px: f32) -> (char, u32) {
+    (ch, px.to_bits())
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -3230,7 +3016,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         include_bytes!("../assets/font.ttf") as &[u8],
         FontSettings::default(),
     )?;
-    let fallback_fonts = load_symbol_fallbacks();
 
     let theme = Theme::load();
     let session = spawn_session(1, 100, 30, theme, proxy.clone())?;
@@ -3238,7 +3023,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         theme,
         font,
         glyphs: HashMap::new(),
-        fallback_fonts,
         px: 18.0,
         cw: 10,
         ch: 20,
@@ -3282,7 +3066,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::tab_layout;
+    use super::{glyph_cache_key, tab_layout};
+
+    #[test]
+    fn glyphs_are_cached_separately_at_each_font_size() {
+        assert_ne!(glyph_cache_key('a', 12.0), glyph_cache_key('a', 18.0));
+        assert_eq!(glyph_cache_key('a', 12.0), glyph_cache_key('a', 12.0));
+    }
 
     #[test]
     fn tab_strip_can_reach_older_tabs() {

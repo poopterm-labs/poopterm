@@ -102,14 +102,13 @@ on macOS and `~/.config/poopterm/config.toml` on Linux and FreeBSD (or
 `$XDG_CONFIG_HOME/poopterm/config.toml` when `XDG_CONFIG_HOME` is set). Create
 the file or open **Settings** from the gear button in the tab bar. Settings
 opens in a separate window with buttons to cycle through themes, toggle Discord
-Rich Presence, enter its Application ID, and set a symbol font fallback. Click
-**Save** to write those controls to the config. The matching config keys are:
+Rich Presence, and enter its Application ID. Click **Save** to write those
+controls to the config. The matching config keys are:
 
 ```toml
 theme = "catppuccin-mocha"
 discord_enabled = false
 discord_client_id = "YOUR_DISCORD_APPLICATION_ID"
-symbol_font = "/path/to/SymbolsNerdFontMono-Regular.ttf"
 ```
 
 `theme` accepts `macos-dark`, `macos-light`, `catppuccin-latte`,
@@ -133,8 +132,12 @@ POOPTERM_THEME=catppuccin-latte poopterm
 ### Discord Rich Presence
 
 On macOS and Linux, Poopterm can show the active terminal window title in Discord
-Rich Presence. Create a Discord application and add its Application ID to the
-Poopterm config:
+Rich Presence. The Application ID is the public identifier for a Discord
+application, not your user ID or a secret token. Create an application in the
+[Discord Developer Portal](https://discord.com/developers/applications), open
+**General Information**, and copy **Application ID** into Poopterm Settings.
+Poopterm uses this identifier when it connects to Discord's local IPC socket; it
+does not grant access to your account. You can also add it to the config:
 
 ```toml
 discord_client_id = "YOUR_DISCORD_APPLICATION_ID"
@@ -208,9 +211,8 @@ and truecolor output, wide-character cell spacing, text selection, clipboard
 shortcuts, bracketed paste, and common mouse reporting. It remains a small emulator rather than a
 complete xterm implementation; advanced terminal applications may rely on
 sequences or input modes that are not supported yet. Combining marks are not
-rendered. Nerd Font symbols use an installed Symbols Nerd Font Mono fallback
-when one is available; set `POOPTERM_SYMBOL_FONT` to use a different fallback
-font file.
+rendered. Nerd Font icon glyphs are not bundled, so applications that rely on
+them may show missing characters.
 
 The shell is currently told that the terminal is `xterm-256color`; apps may
 therefore try features Poopterm does not support yet.
