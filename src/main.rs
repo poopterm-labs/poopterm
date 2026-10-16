@@ -209,14 +209,6 @@ fn read_config_value(key: &str) -> Option<String> {
         })
 }
 
-fn read_config_bool(key: &str) -> Option<bool> {
-    match read_config_value(key)?.to_ascii_lowercase().as_str() {
-        "true" | "yes" | "1" => Some(true),
-        "false" | "no" | "0" => Some(false),
-        _ => None,
-    }
-}
-
 fn save_config_theme(kind: ThemeKind) -> std::io::Result<()> {
     let path = config_path();
     if let Some(parent) = path.parent() {
@@ -229,7 +221,12 @@ fn save_config_theme(kind: ThemeKind) -> std::io::Result<()> {
             line.split('#')
                 .next()
                 .and_then(|s| s.split_once('='))
-                .is_none_or(|(key, _)| key.trim() != "theme")
+                .is_none_or(|(key, _)| {
+                    !matches!(
+                        key.trim(),
+                        "theme" | "discord_enabled" | "discord_client_id"
+                    )
+                })
         })
         .map(str::to_owned)
         .collect();
@@ -853,22 +850,14 @@ struct Selection {
 
 struct SettingsEditor {
     theme: ThemeKind,
-    discord_enabled: bool,
-    discord_client_id: Vec<char>,
-    cursor: usize,
     status: String,
 }
 
 impl SettingsEditor {
     fn load() -> Self {
-        let discord_client_id = read_config_value("discord_client_id").unwrap_or_default();
         Self {
             theme: read_config_theme().unwrap_or(ThemeKind::Poop),
-            discord_enabled: read_config_bool("discord_enabled")
-                .unwrap_or_else(|| !discord_client_id.is_empty()),
-            discord_client_id: discord_client_id.chars().collect(),
-            cursor: 0,
-            status: "Changes are saved to config.toml.".into(),
+            status: "Choose a theme and save your preference.".into(),
         }
     }
 }
@@ -943,150 +932,6 @@ fn tab_layout(
         settings_w,
         scale,
     }
-}
-
-fn start_discord_presence() -> Option<std::sync::mpsc::Sender<String>> {
-    #[cfg(unix)]
-    {
-        if read_config_bool("discord_enabled") == Some(false) {
-            return None;
-        }
-        let client_id = env::var("POOPTERM_DISCORD_CLIENT_ID")
-            .ok()
-            .or_else(|| read_config_value("discord_client_id"))?;
-        if client_id.trim().is_empty() {
-            return None;
-        }
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        thread::spawn(move || discord_presence_loop(client_id, rx));
-        Some(tx)
-    }
-    #[cfg(not(unix))]
-    {
-        None
-    }
-}
-
-#[cfg(unix)]
-fn discord_presence_loop(client_id: String, rx: std::sync::mpsc::Receiver<String>) {
-    use std::os::unix::net::UnixStream;
-    use std::time::Duration;
-
-    let mut stream: Option<UnixStream> = None;
-    let mut details = String::new();
-    let mut last_sent = String::new();
-    let mut nonce = 0u64;
-    loop {
-        match rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(latest) => details = latest,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-        }
-        while let Ok(latest) = rx.try_recv() {
-            details = latest;
-        }
-        details = details
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(120)
-            .collect();
-        if details.is_empty() {
-            continue;
-        }
-        if stream.is_none() {
-            stream = discord_connect(&client_id);
-        }
-        if let Some(connection) = stream.as_mut() {
-            if details == last_sent {
-                continue;
-            }
-            nonce = nonce.wrapping_add(1);
-            let activity = format!(
-                "{{\"cmd\":\"SET_ACTIVITY\",\"args\":{{\"pid\":{},\"activity\":{{\"details\":\"{}\",\"state\":\"In Poopterm\"}}}},\"nonce\":\"poopterm-{}-{}\"}}",
-                std::process::id(), json_escape(&details), std::process::id(), nonce
-            );
-            if write_rpc_frame(connection, 1, activity.as_bytes()).is_ok() {
-                last_sent.clone_from(&details);
-            } else {
-                stream = None;
-                last_sent.clear();
-            }
-        }
-    }
-    if let Some(connection) = stream.as_mut() {
-        let clear = format!(
-            "{{\"cmd\":\"SET_ACTIVITY\",\"args\":{{\"pid\":{},\"activity\":null}},\"nonce\":\"poopterm-clear\"}}",
-            std::process::id()
-        );
-        let _ = write_rpc_frame(connection, 1, clear.as_bytes());
-    }
-}
-
-#[cfg(unix)]
-fn discord_connect(client_id: &str) -> Option<std::os::unix::net::UnixStream> {
-    use std::{os::unix::net::UnixStream, time::Duration};
-
-    let mut dirs = Vec::new();
-    for key in ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"] {
-        if let Some(path) = env::var_os(key) {
-            dirs.push(PathBuf::from(path));
-        }
-    }
-    dirs.push(env::temp_dir());
-    dirs.push(PathBuf::from("/tmp"));
-    for dir in dirs {
-        for index in 0..10 {
-            let path = dir.join(format!("discord-ipc-{index}"));
-            let Ok(mut stream) = UnixStream::connect(path) else {
-                continue;
-            };
-            let _ = stream.set_read_timeout(Some(Duration::from_millis(400)));
-            let handshake = format!("{{\"v\":1,\"client_id\":\"{}\"}}", json_escape(client_id));
-            if write_rpc_frame(&mut stream, 0, handshake.as_bytes()).is_err() {
-                continue;
-            }
-            if read_rpc_frame(&mut stream).is_ok() {
-                let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-                return Some(stream);
-            }
-        }
-    }
-    None
-}
-
-#[cfg(unix)]
-fn write_rpc_frame(
-    stream: &mut std::os::unix::net::UnixStream,
-    opcode: u32,
-    payload: &[u8],
-) -> std::io::Result<()> {
-    stream.write_all(&opcode.to_le_bytes())?;
-    stream.write_all(&(payload.len() as u32).to_le_bytes())?;
-    stream.write_all(payload)
-}
-
-#[cfg(unix)]
-fn read_rpc_frame(stream: &mut std::os::unix::net::UnixStream) -> std::io::Result<(u32, Vec<u8>)> {
-    let mut header = [0u8; 8];
-    stream.read_exact(&mut header)?;
-    let opcode = u32::from_le_bytes(header[..4].try_into().unwrap());
-    let len = u32::from_le_bytes(header[4..].try_into().unwrap()).min(1024 * 1024) as usize;
-    let mut payload = vec![0; len];
-    stream.read_exact(&mut payload)?;
-    Ok((opcode, payload))
-}
-
-fn json_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            c if c.is_control() => escaped.push(' '),
-            c => escaped.push(c),
-        }
-    }
-    escaped
 }
 
 fn spawn_session(
@@ -1164,7 +1009,6 @@ struct App {
     tab_scroll: usize,
     next_session_id: u64,
     proxy: EventLoopProxy<UserEvent>,
-    presence: Option<std::sync::mpsc::Sender<String>>,
 
     window: Option<Arc<Window>>,
     reported_title: String,
@@ -1279,12 +1123,6 @@ impl App {
             .map(str::to_owned)
             .collect();
         lines.push(format!("theme = \"{}\"", self.settings_editor.theme.name()));
-        let client_id: String = self.settings_editor.discord_client_id.iter().collect();
-        lines.push(format!("discord_client_id = {client_id:?}"));
-        lines.push(format!(
-            "discord_enabled = {}",
-            self.settings_editor.discord_enabled
-        ));
         let text = format!("# Poopterm configuration\n{}\n", lines.join("\n"));
         let result = path
             .parent()
@@ -1295,10 +1133,6 @@ impl App {
             Ok(()) => {
                 self.apply_theme(self.settings_editor.theme);
                 self.glyphs.clear();
-                self.presence = start_discord_presence();
-                if let Some(presence) = &self.presence {
-                    let _ = presence.send(self.active_term().title.clone());
-                }
                 self.settings_editor = SettingsEditor::load();
                 self.settings_editor.status = "Saved. Settings applied.".into();
             }
@@ -1343,7 +1177,7 @@ impl App {
         let ascent = self
             .font
             .horizontal_line_metrics(px)
-            .map_or(self.ascent, |m| m.ascent.round() as i32);
+            .map_or(self.ascent, |metrics| metrics.ascent.round() as i32);
         let cell_width = self.font.metrics('M', px).advance_width.ceil() as usize;
         let x = 24 * scale;
         let content_w = width.saturating_sub(48 * scale);
@@ -1354,7 +1188,7 @@ impl App {
             width,
             height,
             x,
-            20 * scale,
+            24 * scale,
             "Poopterm Settings",
             px,
             ascent,
@@ -1367,7 +1201,7 @@ impl App {
             width,
             height,
             x,
-            55 * scale,
+            62 * scale,
             "Appearance",
             px * 0.82,
             ascent,
@@ -1380,16 +1214,29 @@ impl App {
             width,
             height,
             x,
-            82 * scale,
-            "Theme",
-            px * 0.75,
+            112 * scale,
+            "Color theme",
+            px * 0.76,
             ascent,
             self.theme.fg,
             font,
             glyphs,
         );
-        let theme_y = 106 * scale;
-        let button_w = 44 * scale;
+        let theme_y = 138 * scale;
+        let button_w = 48 * scale;
+        let themes = [
+            ThemeKind::MacOsDark,
+            ThemeKind::MacOsLight,
+            ThemeKind::CatppuccinLatte,
+            ThemeKind::CatppuccinFrappe,
+            ThemeKind::CatppuccinMacchiato,
+            ThemeKind::CatppuccinMocha,
+            ThemeKind::Poop,
+        ];
+        let index = themes
+            .iter()
+            .position(|theme| *theme == self.settings_editor.theme)
+            .unwrap_or(0);
         for (bx, label) in [(x, "‹"), (x + content_w - button_w, "›")] {
             draw_kde_button(
                 pixels,
@@ -1398,7 +1245,7 @@ impl App {
                 bx,
                 theme_y,
                 button_w,
-                36 * scale,
+                40 * scale,
                 scale,
                 self.theme.bg,
                 self.theme.border,
@@ -1409,8 +1256,8 @@ impl App {
                 pixels,
                 width,
                 height,
-                bx + 16 * scale,
-                theme_y + 5 * scale,
+                bx + 18 * scale,
+                theme_y + 7 * scale,
                 label,
                 px,
                 ascent,
@@ -1419,8 +1266,8 @@ impl App {
                 glyphs,
             );
         }
-        let theme_w = content_w.saturating_sub(2 * button_w + 12 * scale);
-        let theme_x = x + button_w + 6 * scale;
+        let theme_x = x + button_w + 8 * scale;
+        let theme_w = content_w.saturating_sub(2 * button_w + 16 * scale);
         draw_kde_button(
             pixels,
             width,
@@ -1428,7 +1275,7 @@ impl App {
             theme_x,
             theme_y,
             theme_w,
-            36 * scale,
+            40 * scale,
             scale,
             self.theme.bg,
             self.theme.border,
@@ -1446,7 +1293,7 @@ impl App {
             width,
             height,
             theme_x + 12 * scale,
-            theme_y + 7 * scale,
+            theme_y + 9 * scale,
             &theme_name,
             px * 0.82,
             ascent,
@@ -1454,160 +1301,15 @@ impl App {
             font,
             glyphs,
         );
-        let section_y = 170 * scale;
+        let _ = index;
         draw_text(
             pixels,
             width,
             height,
             x,
-            section_y,
-            "Integrations",
-            px * 0.82,
-            ascent,
-            self.theme.fg,
-            font,
-            glyphs,
-        );
-        draw_text(
-            pixels,
-            width,
-            height,
-            x,
-            section_y + 31 * scale,
-            "Discord Rich Presence",
-            px * 0.76,
-            ascent,
-            self.theme.fg,
-            font,
-            glyphs,
-        );
-        let toggle_y = section_y + 52 * scale;
-        let toggle_w = 122 * scale;
-        draw_kde_button(
-            pixels,
-            width,
-            height,
-            x,
-            toggle_y,
-            toggle_w,
-            34 * scale,
-            scale,
-            self.theme.bg,
-            self.theme.border,
-            self.theme.palette[4],
-            false,
-        );
-        draw_text(
-            pixels,
-            width,
-            height,
-            x + 12 * scale,
-            toggle_y + 6 * scale,
-            if self.settings_editor.discord_enabled {
-                "●  Enabled"
-            } else {
-                "○  Disabled"
-            },
-            px * 0.76,
-            ascent,
-            self.theme.fg,
-            font,
-            glyphs,
-        );
-        draw_text(
-            pixels,
-            width,
-            height,
-            x + toggle_w + 14 * scale,
-            toggle_y + 8 * scale,
-            "Application ID: discord.com/developers/applications → General Information.",
-            px * 0.68,
-            ascent,
-            self.theme.fg,
-            font,
-            glyphs,
-        );
-
-        let id_label_y = toggle_y + 52 * scale;
-        draw_text(
-            pixels,
-            width,
-            height,
-            x,
-            id_label_y,
-            "Discord Application ID",
-            px * 0.7,
-            ascent,
-            self.theme.fg,
-            font,
-            glyphs,
-        );
-        let input_h = 36 * scale;
-        let id_y = id_label_y + 21 * scale;
-        let id_chars: Vec<char> = self
-            .settings_editor
-            .discord_client_id
-            .iter()
-            .copied()
-            .collect();
-        let max_chars = content_w.saturating_sub(24 * scale) / cell_width.max(1);
-        let start = self
-            .settings_editor
-            .cursor
-            .saturating_add(1)
-            .saturating_sub(max_chars);
-        let shown: String = id_chars.iter().skip(start).take(max_chars).collect();
-        draw_kde_button(
-            pixels,
-            width,
-            height,
-            x,
-            id_y,
-            content_w,
-            input_h,
-            scale,
-            self.theme.bg,
-            self.theme.palette[4],
-            self.theme.palette[4],
-            false,
-        );
-        draw_text(
-            pixels,
-            width,
-            height,
-            x + 10 * scale,
-            id_y + 7 * scale,
-            if shown.is_empty() {
-                "Click to type the Application ID…"
-            } else {
-                &shown
-            },
-            px * 0.74,
-            ascent,
-            self.theme.fg,
-            font,
-            glyphs,
-        );
-        let cursor_x =
-            x + 10 * scale + self.settings_editor.cursor.saturating_sub(start) * cell_width;
-        fill_rect(
-            pixels,
-            width,
-            height,
-            cursor_x,
-            id_y + 6 * scale,
-            2 * scale,
-            22 * scale,
-            self.theme.fg,
-        );
-        draw_text(
-            pixels,
-            width,
-            height,
-            x,
-            height.saturating_sub(40 * scale),
-            &self.settings_editor.status,
-            px * 0.68,
+            210 * scale,
+            "Theme changes are saved to your config file.",
+            px * 0.72,
             ascent,
             self.theme.fg,
             font,
@@ -1617,12 +1319,10 @@ impl App {
         let save_y = height.saturating_sub(52 * scale);
         let save_w = 120 * scale;
         let save_h = 36 * scale;
-        let cursor_x = self.settings_cursor_pos.0;
-        let cursor_y = self.settings_cursor_pos.1;
-        let hovered = cursor_x >= save_x as f64
-            && cursor_x < (save_x + save_w) as f64
-            && cursor_y >= save_y as f64
-            && cursor_y < (save_y + save_h) as f64;
+        let hovered = self.settings_cursor_pos.0 >= save_x as f64
+            && self.settings_cursor_pos.0 < (save_x + save_w) as f64
+            && self.settings_cursor_pos.1 >= save_y as f64
+            && self.settings_cursor_pos.1 < (save_y + save_h) as f64;
         draw_kde_button(
             pixels,
             width,
@@ -1645,6 +1345,19 @@ impl App {
             save_y + (save_h.saturating_sub(self.ch)) / 2,
             "Save",
             px,
+            ascent,
+            self.theme.fg,
+            font,
+            glyphs,
+        );
+        draw_text(
+            pixels,
+            width,
+            height,
+            x,
+            height.saturating_sub(40 * scale),
+            &self.settings_editor.status,
+            px * 0.68,
             ascent,
             self.theme.fg,
             font,
@@ -1673,11 +1386,6 @@ impl App {
                 }
                 self.draw_settings();
             }
-            WindowEvent::ModifiersChanged(modifiers) => {
-                self.ctrl = modifiers.state().control_key();
-                self.shift = modifiers.state().shift_key();
-                self.super_key = modifiers.state().super_key();
-            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.settings_cursor_pos = (position.x, position.y);
                 if let Some(window) = &self.settings_window {
@@ -1694,10 +1402,10 @@ impl App {
                     .as_ref()
                     .map_or(1, |window| window.scale_factor().round() as usize)
                     .max(1);
-                let (mx, my) = self.settings_cursor_pos;
-                // Winit reports cursor positions in physical pixels here, matching the
-                // softbuffer surface dimensions and the scaled control coordinates.
-                let (x, y) = (mx.max(0.0) as usize, my.max(0.0) as usize);
+                let (x, y) = (
+                    self.settings_cursor_pos.0.max(0.0) as usize,
+                    self.settings_cursor_pos.1.max(0.0) as usize,
+                );
                 let save_x = (self.settings_width as usize).saturating_sub(140 * scale);
                 let save_y = (self.settings_height as usize).saturating_sub(52 * scale);
                 if x >= save_x && x < save_x + 120 * scale && y >= save_y && y < save_y + 36 * scale
@@ -1707,9 +1415,9 @@ impl App {
                 }
                 let content_x = 24 * scale;
                 let content_w = (self.settings_width as usize).saturating_sub(48 * scale);
-                let theme_y = 106 * scale;
-                let button_w = 44 * scale;
-                if y >= theme_y && y < theme_y + 36 * scale {
+                let theme_y = 138 * scale;
+                let button_w = 48 * scale;
+                if y >= theme_y && y < theme_y + 40 * scale {
                     let themes = [
                         ThemeKind::MacOsDark,
                         ThemeKind::MacOsLight,
@@ -1729,22 +1437,6 @@ impl App {
                     } else if x >= content_x + content_w - button_w {
                         self.settings_editor.theme = themes[(index + 1) % themes.len()];
                     }
-                } else {
-                    let toggle_y = (170 + 52) * scale;
-                    if y >= toggle_y
-                        && y < toggle_y + 34 * scale
-                        && x >= content_x
-                        && x < content_x + 122 * scale
-                    {
-                        self.settings_editor.discord_enabled =
-                            !self.settings_editor.discord_enabled;
-                    } else {
-                        let id_y = (170 + 52 + 52 + 21) * scale;
-                        if y >= id_y && y < id_y + 36 * scale {
-                            self.settings_editor.cursor =
-                                self.settings_editor.discord_client_id.len();
-                        }
-                    }
                 }
                 if let Some(window) = &self.settings_window {
                     window.request_redraw();
@@ -1753,59 +1445,36 @@ impl App {
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 let is_save = (self.ctrl || self.super_key)
                     && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("s"));
-                if is_save {
+                if is_save || matches!(&event.logical_key, Key::Named(NamedKey::Enter)) {
                     self.save_settings_config();
                     return;
                 }
+                if matches!(&event.logical_key, Key::Named(NamedKey::Escape)) {
+                    self.settings_window = None;
+                    self.settings_surface = None;
+                    self._settings_context = None;
+                    return;
+                }
+                let themes = [
+                    ThemeKind::MacOsDark,
+                    ThemeKind::MacOsLight,
+                    ThemeKind::CatppuccinLatte,
+                    ThemeKind::CatppuccinFrappe,
+                    ThemeKind::CatppuccinMacchiato,
+                    ThemeKind::CatppuccinMocha,
+                    ThemeKind::Poop,
+                ];
+                let index = themes
+                    .iter()
+                    .position(|theme| *theme == self.settings_editor.theme)
+                    .unwrap_or(0);
                 match &event.logical_key {
-                    Key::Named(NamedKey::Escape) => {
-                        self.settings_window = None;
-                        self.settings_surface = None;
-                        self._settings_context = None;
-                        return;
-                    }
-                    Key::Named(NamedKey::Enter) => {
-                        self.save_settings_config();
-                        return;
-                    }
-                    Key::Named(NamedKey::Tab)
-                    | Key::Named(NamedKey::ArrowUp)
-                    | Key::Named(NamedKey::ArrowDown) => {}
-                    Key::Named(NamedKey::Backspace) => {
-                        if self.settings_editor.cursor > 0 {
-                            self.settings_editor.cursor -= 1;
-                            self.settings_editor
-                                .discord_client_id
-                                .remove(self.settings_editor.cursor);
-                        }
-                    }
-                    Key::Named(NamedKey::Delete) => {
-                        let cursor = self.settings_editor.cursor;
-                        if cursor < self.settings_editor.discord_client_id.len() {
-                            self.settings_editor.discord_client_id.remove(cursor);
-                        }
-                    }
                     Key::Named(NamedKey::ArrowLeft) => {
-                        self.settings_editor.cursor = self.settings_editor.cursor.saturating_sub(1)
+                        self.settings_editor.theme =
+                            themes[(index + themes.len() - 1) % themes.len()]
                     }
                     Key::Named(NamedKey::ArrowRight) => {
-                        let len = self.settings_editor.discord_client_id.len();
-                        self.settings_editor.cursor = (self.settings_editor.cursor + 1).min(len);
-                    }
-                    Key::Named(NamedKey::Home) => self.settings_editor.cursor = 0,
-                    Key::Named(NamedKey::End) => {
-                        self.settings_editor.cursor = self.settings_editor.discord_client_id.len()
-                    }
-                    Key::Character(value) if !self.ctrl && !self.super_key => {
-                        let chars: Vec<char> =
-                            value.chars().filter(|ch| !ch.is_control()).collect();
-                        let count = chars.len();
-                        let cursor = self.settings_editor.cursor;
-                        self.settings_editor
-                            .discord_client_id
-                            .splice(cursor..cursor, chars)
-                            .for_each(drop);
-                        self.settings_editor.cursor += count;
+                        self.settings_editor.theme = themes[(index + 1) % themes.len()]
                     }
                     _ => {}
                 }
@@ -1893,9 +1562,6 @@ impl App {
             return;
         }
         self.reported_title.clone_from(&title);
-        if let Some(presence) = &self.presence {
-            let _ = presence.send(title.clone());
-        }
         if let Some(window) = &self.window {
             window.set_title(&format!("{title} — poopterm"));
         }
@@ -3037,7 +2703,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         tab_scroll: 0,
         next_session_id: 2,
         proxy,
-        presence: start_discord_presence(),
         window: None,
         reported_title: String::new(),
         _context: None,

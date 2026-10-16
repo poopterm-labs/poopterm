@@ -101,22 +101,17 @@ The default config path is `~/Library/Application Support/poopterm/config.toml`
 on macOS and `~/.config/poopterm/config.toml` on Linux and FreeBSD (or
 `$XDG_CONFIG_HOME/poopterm/config.toml` when `XDG_CONFIG_HOME` is set). Create
 the file or open **Settings** from the gear button in the tab bar. Settings
-opens in a separate window with buttons to cycle through themes, toggle Discord
-Rich Presence, and enter its Application ID. Click **Save** to write those
-controls to the config. The matching config keys are:
+opens in a separate window with a theme picker. Click **Save** to write the
+selection to the config:
 
 ```toml
 theme = "catppuccin-mocha"
-discord_enabled = false
-discord_client_id = "YOUR_DISCORD_APPLICATION_ID"
 ```
 
 `theme` accepts `macos-dark`, `macos-light`, `catppuccin-latte`,
 `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, or `poop`.
-`discord_enabled` controls whether Rich Presence runs; the Application ID stays
-saved when the integration is turned off.
-Settings changes apply immediately after saving; Discord presence reconnects
-with the saved client ID. Other config keys are preserved when Settings saves.
+Settings changes apply immediately after saving. Other config keys are preserved
+when Settings saves.
 
 Set `POOPTERM_CONFIG` to use a config file at another path. `POOPTERM_THEME`
 can override the saved setting for a single launch, for example:
@@ -129,26 +124,6 @@ POOPTERM_THEME=catppuccin-mocha cargo run --release
 POOPTERM_THEME=catppuccin-latte poopterm
 ```
 
-### Discord Rich Presence
-
-On macOS and Linux, Poopterm can show the active terminal window title in Discord
-Rich Presence. The Application ID is the public identifier for a Discord
-application, not your user ID or a secret token. Create an application in the
-[Discord Developer Portal](https://discord.com/developers/applications), open
-**General Information**, and copy **Application ID** into Poopterm Settings.
-Poopterm uses this identifier when it connects to Discord's local IPC socket; it
-does not grant access to your account. You can also add it to the config:
-
-```toml
-discord_client_id = "YOUR_DISCORD_APPLICATION_ID"
-```
-
-You can instead set `POOPTERM_DISCORD_CLIENT_ID` in the app's environment. The
-presence follows the active terminal title (including titles set by shell or
-terminal applications). It uses Discord's local IPC socket, so Vesktop works
-when it can access that socket; Vesktop installed as a sandboxed Flatpak may
-need host IPC access configured.
-
 ## Tabs and keyboard shortcuts
 
 - **Cmd+T** on macOS or **Ctrl+Shift+N** elsewhere: open a tab.
@@ -157,7 +132,7 @@ need host IPC access configured.
 - Click a tab to switch sessions, or click **+** to open one.
 - On macOS, tabs share the transparent titlebar beside the traffic lights. On
   Linux, they remain in the separate tab row.
-- Click **Settings** in the tab bar to open the config editor. Click a tab's
+- Click the gear button in the tab bar to open Settings. Click a tab's
   **×** to close it.
 - **Cmd+C / Cmd+V** on macOS, or **Ctrl+Shift+C / Ctrl+Shift+V** on Linux:
   copy a selection or paste clipboard text.
