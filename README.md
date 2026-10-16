@@ -165,11 +165,16 @@ user install:
 PREFIX="$HOME/.local" make uninstall
 ```
 
+## Login shell
+
+Poopterm launches the shell from `$SHELL` (falling back to `/bin/sh`) as a login
+shell on macOS, Linux, and BSD. For zsh, this loads both `~/.zprofile` and
+`~/.zshrc`.
+
 ## macOS app bundle
 
-`cargo run` launches the executable directly. App launches use a login shell,
-so zsh loads both `~/.zprofile` and `~/.zshrc`. Put Homebrew's `shellenv` setup in
-`~/.zprofile` so GUI-launched shells inherit its PATH. For Apple Silicon:
+Put Homebrew's `shellenv` setup in `~/.zprofile` so GUI-launched shells inherit
+its PATH. For Apple Silicon:
 
 ```sh
 eval "$(/opt/homebrew/bin/brew shellenv)"

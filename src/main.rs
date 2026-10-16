@@ -951,7 +951,6 @@ fn spawn_session(
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
     let mut cmd = CommandBuilder::new(shell);
     cmd.env("TERM", "xterm-256color");
-    #[cfg(target_os = "macos")]
     cmd.arg("-l");
     let child = pair.slave.spawn_command(cmd)?;
     drop(pair.slave);
