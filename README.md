@@ -229,14 +229,6 @@ sequences or input modes that are not supported yet. Combining marks are not
 rendered. Nerd Font icon glyphs are not bundled, so applications that rely on
 them may show missing characters.
 
-The shell is currently told that the terminal is `xterm-256color`; apps may
-therefore try features Poopterm does not support yet.
-
-The 0.4.0 private-mode and line-drawing fixes improve full-screen programs,
-including `htop`. Advanced features in `htop`, `btop`, and other TUIs may still
-expose compatibility gaps. Please include the program version and a minimal
-reproduction when reporting display problems.
-
 ## Font and license
 
 Poopterm bundles DejaVu Sans Mono for Powerline as `assets/font.ttf`. The font is
