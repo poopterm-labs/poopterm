@@ -2,11 +2,9 @@ class Poopterm < Formula
   desc "Small, poop-colored terminal emulator"
   homepage "https://github.com/poopterm-labs/poopterm"
   url "https://github.com/poopterm-labs/poopterm.git",
-      tag: "main",
-      revision: "90858e90bc223cb6ed67e5aaf5290c33847c6f91",
+      tag: "v0.3.2",
       using: :git
-  version "0.3.1"
-  revision 1
+  version "0.3.2"
   license "MIT"
 
   depends_on "rust" => :build

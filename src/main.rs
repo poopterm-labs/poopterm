@@ -2639,21 +2639,23 @@ impl ApplicationHandler<UserEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Output(id, bytes) => {
-                // vte's Parser consumes one byte at a time.
+                // Pass each PTY chunk to vte in one call instead of dispatching per byte.
+                let mut active_output = false;
                 if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
-                    for &b in bytes.iter() {
-                        session.parser.advance(&mut session.term, &[b]);
-                    }
+                    session.parser.advance(&mut session.term, &bytes);
                     for response in std::mem::take(&mut session.term.responses) {
                         let _ = session.writer.write_all(&response);
                     }
                     let _ = session.writer.flush();
                     if id == self.sessions[self.active].id {
                         self.update_window_title();
+                        active_output = true;
                     }
                 }
-                if let Some(win) = &self.window {
-                    win.request_redraw();
+                if active_output {
+                    if let Some(win) = &self.window {
+                        win.request_redraw();
+                    }
                 }
             }
             UserEvent::Closed(id) => {
