@@ -5,7 +5,7 @@ default shell in a native window, with tabs, clipboard support, and seven built-
 color themes. Terminal compatibility is growing and is not yet a complete xterm
 implementation.
 
-![Poopterm app icon](assets/icon.png)
+![Poopterm logo](assets/logo.png)
 
 ## Features
 
