@@ -2642,7 +2642,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // vte's Parser consumes one byte at a time.
                 if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
                     for &b in bytes.iter() {
-                        session.parser.advance(&mut session.term, b);
+                        session.parser.advance(&mut session.term, &[b]);
                     }
                     for response in std::mem::take(&mut session.term.responses) {
                         let _ = session.writer.write_all(&response);
