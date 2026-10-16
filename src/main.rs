@@ -209,6 +209,14 @@ fn read_config_value(key: &str) -> Option<String> {
         })
 }
 
+fn read_config_bool(key: &str) -> Option<bool> {
+    match read_config_value(key)?.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "1" => Some(true),
+        "false" | "no" | "0" => Some(false),
+        _ => None,
+    }
+}
+
 fn save_config_theme(kind: ThemeKind) -> std::io::Result<()> {
     let path = config_path();
     if let Some(parent) = path.parent() {
@@ -843,32 +851,36 @@ struct Selection {
     end: CellPoint,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsField {
+    DiscordClient,
+    SymbolFont,
+}
+
 struct SettingsEditor {
-    text: Vec<char>,
+    theme: ThemeKind,
+    discord_enabled: bool,
+    discord_client_id: Vec<char>,
+    symbol_font: Vec<char>,
     cursor: usize,
-    scroll: usize,
+    field: SettingsField,
     status: String,
 }
 
 impl SettingsEditor {
     fn load() -> Self {
-        let text = fs::read_to_string(config_path()).unwrap_or_else(|_| {
-            format!(
-                "# Poopterm configuration\ntheme = \"{}\"\n",
-                ThemeKind::Poop.name()
-            )
-        });
-        let cursor = text.chars().count();
+        let discord_client_id = read_config_value("discord_client_id").unwrap_or_default();
+        let symbol_font = read_config_value("symbol_font").unwrap_or_default();
         Self {
-            text: text.chars().collect(),
-            cursor,
-            scroll: 0,
-            status: "Edit config.toml. Save to apply changes.".into(),
+            theme: read_config_theme().unwrap_or(ThemeKind::Poop),
+            discord_enabled: read_config_bool("discord_enabled")
+                .unwrap_or_else(|| !discord_client_id.is_empty()),
+            discord_client_id: discord_client_id.chars().collect(),
+            symbol_font: symbol_font.chars().collect(),
+            cursor: 0,
+            field: SettingsField::DiscordClient,
+            status: "Changes are saved to config.toml.".into(),
         }
-    }
-
-    fn string(&self) -> String {
-        self.text.iter().collect()
     }
 }
 
@@ -910,7 +922,7 @@ fn tab_layout(
     let left_arrow_x = left_reserve + 8 * scale;
     let start = left_arrow_x + arrow_w + 6 * scale;
     let plus_w = 52 * scale;
-    let settings_w = 112 * scale;
+    let settings_w = 42 * scale;
     let controls_gap = 8 * scale;
     let right = 12 * scale;
     let settings_x = width.saturating_sub(right + settings_w);
@@ -947,6 +959,9 @@ fn tab_layout(
 fn start_discord_presence() -> Option<std::sync::mpsc::Sender<String>> {
     #[cfg(unix)]
     {
+        if read_config_bool("discord_enabled") == Some(false) {
+            return None;
+        }
         let client_id = env::var("POOPTERM_DISCORD_CLIENT_ID")
             .ok()
             .or_else(|| read_config_value("discord_client_id"))?;
@@ -1338,43 +1353,32 @@ impl App {
         window.request_redraw();
     }
 
-    fn settings_cursor_line_col(&self) -> (usize, usize) {
-        let before = &self.settings_editor.text[..self.settings_editor.cursor];
-        let line = before.iter().filter(|&&ch| ch == '\n').count();
-        let col = before.iter().rev().take_while(|&&ch| ch != '\n').count();
-        (line, col)
-    }
-
-    fn keep_settings_cursor_visible(&mut self, visible_lines: usize) {
-        let (line, _) = self.settings_cursor_line_col();
-        if line < self.settings_editor.scroll {
-            self.settings_editor.scroll = line;
-        } else if line >= self.settings_editor.scroll + visible_lines {
-            self.settings_editor.scroll = line + 1 - visible_lines.max(1);
-        }
-    }
-
-    fn move_settings_cursor_vertical(&mut self, direction: isize) {
-        let (line, col) = self.settings_cursor_line_col();
-        let lines: Vec<Vec<char>> = self
-            .settings_editor
-            .text
-            .split(|&ch| ch == '\n')
-            .map(<[char]>::to_vec)
-            .collect();
-        let target_line =
-            (line as isize + direction).clamp(0, lines.len().saturating_sub(1) as isize) as usize;
-        let mut cursor = 0;
-        for prior in lines.iter().take(target_line) {
-            cursor += prior.len() + 1;
-        }
-        cursor += col.min(lines[target_line].len());
-        self.settings_editor.cursor = cursor.min(self.settings_editor.text.len());
-    }
-
     fn save_settings_config(&mut self) {
-        let text = self.settings_editor.string();
         let path = config_path();
+        let previous = fs::read_to_string(&path).unwrap_or_default();
+        let mut lines: Vec<String> = previous
+            .lines()
+            .filter(|line| {
+                let key = line.split('#').next().unwrap_or_default().split_once('=');
+                key.is_none_or(|(key, _)| {
+                    !matches!(
+                        key.trim(),
+                        "theme" | "discord_enabled" | "discord_client_id" | "symbol_font"
+                    )
+                })
+            })
+            .map(str::to_owned)
+            .collect();
+        lines.push(format!("theme = \"{}\"", self.settings_editor.theme.name()));
+        let client_id: String = self.settings_editor.discord_client_id.iter().collect();
+        lines.push(format!("discord_client_id = {client_id:?}"));
+        lines.push(format!(
+            "discord_enabled = {}",
+            self.settings_editor.discord_enabled
+        ));
+        let symbol_font: String = self.settings_editor.symbol_font.iter().collect();
+        lines.push(format!("symbol_font = {symbol_font:?}"));
+        let text = format!("# Poopterm configuration\n{}\n", lines.join("\n"));
         let result = path
             .parent()
             .map(fs::create_dir_all)
@@ -1382,9 +1386,7 @@ impl App {
             .and_then(|_| fs::write(&path, text));
         match result {
             Ok(()) => {
-                if let Some(kind) = read_config_theme() {
-                    self.apply_theme(kind);
-                }
+                self.apply_theme(self.settings_editor.theme);
                 self.fallback_fonts = load_symbol_fallbacks();
                 self.glyphs.clear();
                 self.presence = start_discord_presence();
@@ -1392,7 +1394,7 @@ impl App {
                     let _ = presence.send(self.active_term().title.clone());
                 }
                 self.settings_editor = SettingsEditor::load();
-                self.settings_editor.status = "Saved. Changes are applied.".into();
+                self.settings_editor.status = "Saved. Settings applied.".into();
             }
             Err(error) => {
                 self.settings_editor.status = format!("Could not save: {error}");
@@ -1407,7 +1409,6 @@ impl App {
     }
 
     fn draw_settings(&mut self) {
-        let cursor_line_col = self.settings_cursor_line_col();
         let scale = self
             .settings_window
             .as_ref()
@@ -1433,37 +1434,13 @@ impl App {
             self.theme.bg,
         );
         let px = 18.0 * scale as f32;
-        let line_height = 25 * scale;
         let ascent = self
             .font
             .horizontal_line_metrics(px)
-            .map_or(self.ascent, |metrics| metrics.ascent.round() as i32);
+            .map_or(self.ascent, |m| m.ascent.round() as i32);
         let cell_width = self.font.metrics('M', px).advance_width.ceil() as usize;
-        let editor_x = 20 * scale;
-        let editor_y = 100 * scale;
-        let editor_w = width.saturating_sub(40 * scale);
-        let save_y = height.saturating_sub(52 * scale);
-        let editor_h = save_y.saturating_sub(editor_y + 16 * scale);
-        fill_rect(
-            pixels,
-            width,
-            height,
-            editor_x,
-            editor_y,
-            editor_w,
-            editor_h,
-            self.theme.border,
-        );
-        fill_rect(
-            pixels,
-            width,
-            height,
-            editor_x + scale,
-            editor_y + scale,
-            editor_w.saturating_sub(2 * scale),
-            editor_h.saturating_sub(2 * scale),
-            self.theme.bg,
-        );
+        let x = 24 * scale;
+        let content_w = width.saturating_sub(48 * scale);
         let font = &self.font;
         let fallbacks = &self.fallback_fonts;
         let glyphs = &mut self.glyphs;
@@ -1471,7 +1448,7 @@ impl App {
             pixels,
             width,
             height,
-            editor_x,
+            x,
             20 * scale,
             "Poopterm Settings",
             px,
@@ -1485,10 +1462,10 @@ impl App {
             pixels,
             width,
             height,
-            editor_x,
+            x,
             55 * scale,
-            &format!("Config: {}", config_path().display()),
-            px * 0.75,
+            "Appearance",
+            px * 0.82,
             ascent,
             self.theme.fg,
             font,
@@ -1499,9 +1476,9 @@ impl App {
             pixels,
             width,
             height,
-            editor_x,
-            78 * scale,
-            "Edit any config keys here. Ctrl/Cmd+S saves; changes apply immediately where possible.",
+            x,
+            82 * scale,
+            "Theme",
             px * 0.75,
             ascent,
             self.theme.fg,
@@ -1509,28 +1486,30 @@ impl App {
             fallbacks,
             glyphs,
         );
-
-        let editor_line_height = line_height.max(self.ch + 2 * scale);
-        let visible_lines = (editor_h / editor_line_height).max(1);
-        let lines: Vec<String> = self
-            .settings_editor
-            .string()
-            .split('\n')
-            .map(str::to_owned)
-            .collect();
-        for (visible_row, line) in lines
-            .iter()
-            .skip(self.settings_editor.scroll)
-            .take(visible_lines)
-            .enumerate()
-        {
+        let theme_y = 106 * scale;
+        let button_w = 44 * scale;
+        for (bx, label) in [(x, "‹"), (x + content_w - button_w, "›")] {
+            draw_kde_button(
+                pixels,
+                width,
+                height,
+                bx,
+                theme_y,
+                button_w,
+                36 * scale,
+                scale,
+                self.theme.bg,
+                self.theme.border,
+                self.theme.palette[4],
+                false,
+            );
             draw_text(
                 pixels,
                 width,
                 height,
-                editor_x + 10 * scale,
-                editor_y + 8 * scale + visible_row * editor_line_height,
-                line,
+                bx + 16 * scale,
+                theme_y + 5 * scale,
+                label,
                 px,
                 ascent,
                 self.theme.fg,
@@ -1539,33 +1518,240 @@ impl App {
                 glyphs,
             );
         }
-        let (cursor_line, cursor_col) = cursor_line_col;
-        if cursor_line >= self.settings_editor.scroll
-            && cursor_line < self.settings_editor.scroll + visible_lines
-        {
-            let x = editor_x + 10 * scale + cursor_col * cell_width;
-            let y = editor_y
-                + 7 * scale
-                + (cursor_line - self.settings_editor.scroll) * editor_line_height;
-            fill_rect(
+        let theme_w = content_w.saturating_sub(2 * button_w + 12 * scale);
+        let theme_x = x + button_w + 6 * scale;
+        draw_kde_button(
+            pixels,
+            width,
+            height,
+            theme_x,
+            theme_y,
+            theme_w,
+            36 * scale,
+            scale,
+            self.theme.bg,
+            self.theme.border,
+            self.theme.palette[4],
+            false,
+        );
+        let theme_name = self
+            .settings_editor
+            .theme
+            .name()
+            .replace("catppuccin-", "Catppuccin ")
+            .replace("macos-", "macOS ");
+        draw_text(
+            pixels,
+            width,
+            height,
+            theme_x + 12 * scale,
+            theme_y + 7 * scale,
+            &theme_name,
+            px * 0.82,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        let section_y = 170 * scale;
+        draw_text(
+            pixels,
+            width,
+            height,
+            x,
+            section_y,
+            "Integrations",
+            px * 0.82,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        draw_text(
+            pixels,
+            width,
+            height,
+            x,
+            section_y + 31 * scale,
+            "Discord Rich Presence",
+            px * 0.76,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        let toggle_y = section_y + 52 * scale;
+        let toggle_w = 122 * scale;
+        draw_kde_button(
+            pixels,
+            width,
+            height,
+            x,
+            toggle_y,
+            toggle_w,
+            34 * scale,
+            scale,
+            self.theme.bg,
+            self.theme.border,
+            self.theme.palette[4],
+            false,
+        );
+        draw_text(
+            pixels,
+            width,
+            height,
+            x + 12 * scale,
+            toggle_y + 6 * scale,
+            if self.settings_editor.discord_enabled {
+                "●  Enabled"
+            } else {
+                "○  Disabled"
+            },
+            px * 0.76,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        draw_text(
+            pixels,
+            width,
+            height,
+            x + toggle_w + 14 * scale,
+            toggle_y + 8 * scale,
+            "Show the active terminal title in Discord.",
+            px * 0.68,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+
+        let id_label_y = toggle_y + 52 * scale;
+        draw_text(
+            pixels,
+            width,
+            height,
+            x,
+            id_label_y,
+            "Discord Application ID",
+            px * 0.7,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        let input_h = 36 * scale;
+        let id_y = id_label_y + 21 * scale;
+        let font_label_y = id_y + 57 * scale;
+        draw_text(
+            pixels,
+            width,
+            height,
+            x,
+            font_label_y,
+            "Symbol font (blank uses automatic detection)",
+            px * 0.7,
+            ascent,
+            self.theme.fg,
+            font,
+            fallbacks,
+            glyphs,
+        );
+        let font_y = font_label_y + 21 * scale;
+        let inputs = [
+            (
+                SettingsField::DiscordClient,
+                id_y,
+                self.settings_editor
+                    .discord_client_id
+                    .iter()
+                    .collect::<String>(),
+            ),
+            (
+                SettingsField::SymbolFont,
+                font_y,
+                self.settings_editor.symbol_font.iter().collect::<String>(),
+            ),
+        ];
+        for (field, y, value) in inputs {
+            let focused = self.settings_editor.field == field;
+            draw_kde_button(
                 pixels,
                 width,
                 height,
                 x,
                 y,
-                2 * scale,
-                self.ch,
-                self.theme.fg,
+                content_w,
+                input_h,
+                scale,
+                self.theme.bg,
+                if focused {
+                    self.theme.palette[4]
+                } else {
+                    self.theme.border
+                },
+                self.theme.palette[4],
+                false,
             );
+            let max_chars = content_w.saturating_sub(24 * scale) / cell_width.max(1);
+            let chars: Vec<char> = value.chars().collect();
+            let start = if focused {
+                self.settings_editor
+                    .cursor
+                    .saturating_add(1)
+                    .saturating_sub(max_chars)
+            } else {
+                chars.len().saturating_sub(max_chars)
+            };
+            let shown: String = chars.iter().skip(start).take(max_chars).collect();
+            draw_text(
+                pixels,
+                width,
+                height,
+                x + 10 * scale,
+                y + 7 * scale,
+                if shown.is_empty() {
+                    "Click to type…"
+                } else {
+                    &shown
+                },
+                px * 0.74,
+                ascent,
+                self.theme.fg,
+                font,
+                fallbacks,
+                glyphs,
+            );
+            if focused {
+                let cursor_x =
+                    x + 10 * scale + self.settings_editor.cursor.saturating_sub(start) * cell_width;
+                fill_rect(
+                    pixels,
+                    width,
+                    height,
+                    cursor_x,
+                    y + 6 * scale,
+                    2 * scale,
+                    22 * scale,
+                    self.theme.fg,
+                );
+            }
         }
         draw_text(
             pixels,
             width,
             height,
-            editor_x,
-            save_y - 20 * scale,
+            x,
+            height.saturating_sub(40 * scale),
             &self.settings_editor.status,
-            px * 0.75,
+            px * 0.68,
             ascent,
             self.theme.fg,
             font,
@@ -1573,12 +1759,15 @@ impl App {
             glyphs,
         );
         let save_x = width.saturating_sub(140 * scale);
+        let save_y = height.saturating_sub(52 * scale);
         let save_w = 120 * scale;
         let save_h = 36 * scale;
-        let hovered = self.settings_cursor_pos.0 >= save_x as f64
-            && self.settings_cursor_pos.0 < (save_x + save_w) as f64
-            && self.settings_cursor_pos.1 >= save_y as f64
-            && self.settings_cursor_pos.1 < (save_y + save_h) as f64;
+        let cursor_x = self.settings_cursor_pos.0;
+        let cursor_y = self.settings_cursor_pos.1;
+        let hovered = cursor_x >= save_x as f64
+            && cursor_x < (save_x + save_w) as f64
+            && cursor_y >= save_y as f64
+            && cursor_y < (save_y + save_h) as f64;
         draw_kde_button(
             pixels,
             width,
@@ -1641,24 +1830,6 @@ impl App {
                     window.request_redraw();
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let amount = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => y.round() as isize,
-                    MouseScrollDelta::PixelDelta(p) => (p.y / 24.0).round() as isize,
-                };
-                if amount > 0 {
-                    self.settings_editor.scroll =
-                        self.settings_editor.scroll.saturating_sub(amount as usize);
-                } else if amount < 0 {
-                    self.settings_editor.scroll = self
-                        .settings_editor
-                        .scroll
-                        .saturating_add(amount.unsigned_abs());
-                }
-                if let Some(window) = &self.settings_window {
-                    window.request_redraw();
-                }
-            }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
@@ -1669,41 +1840,65 @@ impl App {
                     .as_ref()
                     .map_or(1, |window| window.scale_factor().round() as usize)
                     .max(1);
-                let (x, y) = self.settings_cursor_pos;
-                let save_y = (self.settings_height as usize).saturating_sub(52 * scale);
+                let (mx, my) = self.settings_cursor_pos;
+                // Winit reports cursor positions in physical pixels here, matching the
+                // softbuffer surface dimensions and the scaled control coordinates.
+                let (x, y) = (mx.max(0.0) as usize, my.max(0.0) as usize);
                 let save_x = (self.settings_width as usize).saturating_sub(140 * scale);
-                if x >= save_x as f64 && x < (save_x + 120 * scale) as f64 && y >= save_y as f64 {
+                let save_y = (self.settings_height as usize).saturating_sub(52 * scale);
+                if x >= save_x && x < save_x + 120 * scale && y >= save_y && y < save_y + 36 * scale
+                {
                     self.save_settings_config();
                     return;
                 }
-                let editor_x = 20 * scale;
-                let editor_y = 100 * scale;
-                let line_height = (25 * scale).max(self.ch + 2 * scale);
-                if x >= editor_x as f64 && y >= editor_y as f64 && y < save_y as f64 {
-                    let line = self.settings_editor.scroll
-                        + (y as usize).saturating_sub(editor_y + 8 * scale) / line_height;
-                    let col = (x as usize).saturating_sub(editor_x + 10 * scale) / self.cw.max(1);
-                    let chars = &self.settings_editor.text;
-                    let mut index = 0;
-                    let mut current_line = 0;
-                    while current_line < line && index < chars.len() {
-                        if chars[index] == '\n' {
-                            current_line += 1;
+                let content_x = 24 * scale;
+                let content_w = (self.settings_width as usize).saturating_sub(48 * scale);
+                let theme_y = 106 * scale;
+                let button_w = 44 * scale;
+                if y >= theme_y && y < theme_y + 36 * scale {
+                    let themes = [
+                        ThemeKind::MacOsDark,
+                        ThemeKind::MacOsLight,
+                        ThemeKind::CatppuccinLatte,
+                        ThemeKind::CatppuccinFrappe,
+                        ThemeKind::CatppuccinMacchiato,
+                        ThemeKind::CatppuccinMocha,
+                        ThemeKind::Poop,
+                    ];
+                    let index = themes
+                        .iter()
+                        .position(|theme| *theme == self.settings_editor.theme)
+                        .unwrap_or(0);
+                    if x < content_x + button_w {
+                        self.settings_editor.theme =
+                            themes[(index + themes.len() - 1) % themes.len()];
+                    } else if x >= content_x + content_w - button_w {
+                        self.settings_editor.theme = themes[(index + 1) % themes.len()];
+                    }
+                } else {
+                    let toggle_y = (170 + 52) * scale;
+                    if y >= toggle_y
+                        && y < toggle_y + 34 * scale
+                        && x >= content_x
+                        && x < content_x + 122 * scale
+                    {
+                        self.settings_editor.discord_enabled =
+                            !self.settings_editor.discord_enabled;
+                    } else {
+                        let id_y = (170 + 52 + 52 + 21) * scale;
+                        let font_y = (170 + 52 + 52 + 21 + 57 + 21) * scale;
+                        if y >= id_y && y < id_y + 36 * scale {
+                            self.settings_editor.field = SettingsField::DiscordClient;
+                            self.settings_editor.cursor =
+                                self.settings_editor.discord_client_id.len();
+                        } else if y >= font_y && y < font_y + 36 * scale {
+                            self.settings_editor.field = SettingsField::SymbolFont;
+                            self.settings_editor.cursor = self.settings_editor.symbol_font.len();
                         }
-                        index += 1;
                     }
-                    let mut current_col = 0;
-                    while current_line == line && index < chars.len() && chars[index] != '\n' {
-                        if current_col >= col {
-                            break;
-                        }
-                        index += 1;
-                        current_col += 1;
-                    }
-                    self.settings_editor.cursor = index;
-                    if let Some(window) = &self.settings_window {
-                        window.request_redraw();
-                    }
+                }
+                if let Some(window) = &self.settings_window {
+                    window.request_redraw();
                 }
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
@@ -1718,89 +1913,101 @@ impl App {
                         self.settings_window = None;
                         self.settings_surface = None;
                         self._settings_context = None;
+                        return;
                     }
                     Key::Named(NamedKey::Enter) => {
-                        self.settings_editor
-                            .text
-                            .insert(self.settings_editor.cursor, '\n');
-                        self.settings_editor.cursor += 1;
+                        self.save_settings_config();
+                        return;
+                    }
+                    Key::Named(NamedKey::Tab)
+                    | Key::Named(NamedKey::ArrowUp)
+                    | Key::Named(NamedKey::ArrowDown) => {
+                        self.settings_editor.field =
+                            if self.settings_editor.field == SettingsField::DiscordClient {
+                                SettingsField::SymbolFont
+                            } else {
+                                SettingsField::DiscordClient
+                            };
+                        self.settings_editor.cursor = match self.settings_editor.field {
+                            SettingsField::DiscordClient => {
+                                self.settings_editor.discord_client_id.len()
+                            }
+                            SettingsField::SymbolFont => self.settings_editor.symbol_font.len(),
+                        };
                     }
                     Key::Named(NamedKey::Backspace) => {
                         if self.settings_editor.cursor > 0 {
                             self.settings_editor.cursor -= 1;
-                            self.settings_editor
-                                .text
-                                .remove(self.settings_editor.cursor);
+                            match self.settings_editor.field {
+                                SettingsField::DiscordClient => {
+                                    self.settings_editor
+                                        .discord_client_id
+                                        .remove(self.settings_editor.cursor);
+                                }
+                                SettingsField::SymbolFont => {
+                                    self.settings_editor
+                                        .symbol_font
+                                        .remove(self.settings_editor.cursor);
+                                }
+                            }
                         }
                     }
                     Key::Named(NamedKey::Delete) => {
-                        if self.settings_editor.cursor < self.settings_editor.text.len() {
-                            self.settings_editor
-                                .text
-                                .remove(self.settings_editor.cursor);
+                        let cursor = self.settings_editor.cursor;
+                        match self.settings_editor.field {
+                            SettingsField::DiscordClient => {
+                                if cursor < self.settings_editor.discord_client_id.len() {
+                                    self.settings_editor.discord_client_id.remove(cursor);
+                                }
+                            }
+                            SettingsField::SymbolFont => {
+                                if cursor < self.settings_editor.symbol_font.len() {
+                                    self.settings_editor.symbol_font.remove(cursor);
+                                }
+                            }
                         }
                     }
                     Key::Named(NamedKey::ArrowLeft) => {
-                        self.settings_editor.cursor = self.settings_editor.cursor.saturating_sub(1);
+                        self.settings_editor.cursor = self.settings_editor.cursor.saturating_sub(1)
                     }
                     Key::Named(NamedKey::ArrowRight) => {
-                        self.settings_editor.cursor =
-                            (self.settings_editor.cursor + 1).min(self.settings_editor.text.len());
+                        let len = match self.settings_editor.field {
+                            SettingsField::DiscordClient => {
+                                self.settings_editor.discord_client_id.len()
+                            }
+                            SettingsField::SymbolFont => self.settings_editor.symbol_font.len(),
+                        };
+                        self.settings_editor.cursor = (self.settings_editor.cursor + 1).min(len);
                     }
-                    Key::Named(NamedKey::ArrowUp) => self.move_settings_cursor_vertical(-1),
-                    Key::Named(NamedKey::ArrowDown) => self.move_settings_cursor_vertical(1),
-                    Key::Named(NamedKey::Home) => {
-                        self.settings_editor.cursor = self.settings_editor.text
-                            [..self.settings_editor.cursor]
-                            .iter()
-                            .rposition(|&ch| ch == '\n')
-                            .map_or(0, |index| index + 1);
-                    }
+                    Key::Named(NamedKey::Home) => self.settings_editor.cursor = 0,
                     Key::Named(NamedKey::End) => {
-                        if let Some(offset) = self.settings_editor.text
-                            [self.settings_editor.cursor..]
-                            .iter()
-                            .position(|&ch| ch == '\n')
-                        {
-                            self.settings_editor.cursor += offset;
-                        } else {
-                            self.settings_editor.cursor = self.settings_editor.text.len();
+                        self.settings_editor.cursor = match self.settings_editor.field {
+                            SettingsField::DiscordClient => {
+                                self.settings_editor.discord_client_id.len()
+                            }
+                            SettingsField::SymbolFont => self.settings_editor.symbol_font.len(),
                         }
                     }
-                    Key::Named(NamedKey::PageUp) => {
-                        self.settings_editor.scroll =
-                            self.settings_editor.scroll.saturating_sub(10);
-                    }
-                    Key::Named(NamedKey::PageDown) => {
-                        self.settings_editor.scroll =
-                            self.settings_editor.scroll.saturating_add(10);
-                    }
-                    Key::Named(NamedKey::Tab) => {
-                        self.settings_editor
-                            .text
-                            .insert(self.settings_editor.cursor, '\t');
-                        self.settings_editor.cursor += 1;
-                    }
                     Key::Character(value) if !self.ctrl && !self.super_key => {
-                        let text: Vec<char> = value.chars().filter(|ch| !ch.is_control()).collect();
-                        let count = text.len();
-                        self.settings_editor.text.splice(
-                            self.settings_editor.cursor..self.settings_editor.cursor,
-                            text,
-                        );
+                        let chars: Vec<char> =
+                            value.chars().filter(|ch| !ch.is_control()).collect();
+                        let count = chars.len();
+                        let cursor = self.settings_editor.cursor;
+                        match self.settings_editor.field {
+                            SettingsField::DiscordClient => self
+                                .settings_editor
+                                .discord_client_id
+                                .splice(cursor..cursor, chars),
+                            SettingsField::SymbolFont => self
+                                .settings_editor
+                                .symbol_font
+                                .splice(cursor..cursor, chars),
+                        }
+                        .for_each(drop);
                         self.settings_editor.cursor += count;
                     }
                     _ => {}
                 }
-                let scale = self
-                    .settings_window
-                    .as_ref()
-                    .map_or(1, |window| window.scale_factor().round() as usize)
-                    .max(1);
-                let save_y = (self.settings_height as usize).saturating_sub(52 * scale);
-                let editor_h = save_y.saturating_sub(100 * scale + 16 * scale);
-                let visible = (editor_h / (25 * scale).max(self.ch + 2 * scale)).max(1);
-                self.keep_settings_cursor_visible(visible);
                 if let Some(window) = &self.settings_window {
                     window.request_redraw();
                 }
@@ -2385,9 +2592,9 @@ impl App {
             pixels,
             w,
             h,
-            layout.settings_x + 10 * scale,
+            layout.settings_x + (layout.settings_w.saturating_sub(self.cw)) / 2,
             button_y + (button_h.saturating_sub(ch)) / 2,
-            "Settings",
+            "⚙",
             px,
             ascent,
             self.theme.fg,

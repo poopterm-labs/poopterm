@@ -100,21 +100,24 @@ selection is saved to a config file and restored on the next launch.
 The default config path is `~/Library/Application Support/poopterm/config.toml`
 on macOS and `~/.config/poopterm/config.toml` on Linux and FreeBSD (or
 `$XDG_CONFIG_HOME/poopterm/config.toml` when `XDG_CONFIG_HOME` is set). Create
-the file or open **Settings** from the tab bar to edit it. Settings opens a
-separate window with the complete config file; click **Save** or press
-**Cmd+S**/**Ctrl+S**. The currently supported keys are:
+the file or open **Settings** from the gear button in the tab bar. Settings
+opens in a separate window with buttons to cycle through themes, toggle Discord
+Rich Presence, enter its Application ID, and set a symbol font fallback. Click
+**Save** to write those controls to the config. The matching config keys are:
 
 ```toml
 theme = "catppuccin-mocha"
+discord_enabled = false
 discord_client_id = "YOUR_DISCORD_APPLICATION_ID"
 symbol_font = "/path/to/SymbolsNerdFontMono-Regular.ttf"
 ```
 
 `theme` accepts `macos-dark`, `macos-light`, `catppuccin-latte`,
 `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, or `poop`.
-Theme and symbol-font changes apply immediately; Discord presence reconnects
-with the saved client ID. Unknown TOML keys are preserved when the theme is
-changed but currently have no effect.
+`discord_enabled` controls whether Rich Presence runs; the Application ID stays
+saved when the integration is turned off.
+Settings changes apply immediately after saving; Discord presence reconnects
+with the saved client ID. Other config keys are preserved when Settings saves.
 
 Set `POOPTERM_CONFIG` to use a config file at another path. `POOPTERM_THEME`
 can override the saved setting for a single launch, for example:
