@@ -1,10 +1,13 @@
 name: Build, test and release
+
 on:
   push:
     branches: [main]
   pull_request:
+
 permissions:
   contents: read
+
 jobs:
   check:
     strategy:
@@ -13,17 +16,30 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
       - name: Install Linux libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev
-      - name: Install stable Rust
-        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      - run: cargo +stable fmt --check
-      - run: cargo +stable test --locked
-      - run: cargo +stable clippy --locked --all-targets -- -D warnings
-      - run: cargo +stable build --release --locked
-      - run: ./target/release/poopterm --version
+
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal --component rustfmt --component clippy
+
+      - name: Run fmt
+        run: cargo +nightly fmt --check
+
+      - name: Run tests
+        run: cargo +nightly test --locked
+
+      - name: Run clippy
+        run: cargo +nightly clippy --locked --all-targets -- -D warnings
+
+      - name: Build release binary
+        run: cargo +nightly build --release --locked
+
+      - name: Verify binary execution
+        run: ./target/release/poopterm --version
+
   release:
     needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -34,7 +50,8 @@ jobs:
       group: poopterm-release
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
       - name: Publish a new version only when its tag does not exist
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,12 +61,15 @@ jobs:
           set -euo pipefail
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
           tag="v${version}"
+          
           if gh api "repos/${GH_REPO}/git/ref/tags/${tag}" > /tmp/tag.json 2> /tmp/tag-error; then
             echo "${tag} already exists; published versions are immutable."
             exit 0
           fi
+          
           if ! grep -q 'HTTP 404' /tmp/tag-error; then
             cat /tmp/tag-error
             exit 1
           fi
+          
           gh release create "$tag" --target "$GITHUB_SHA" --title "Poopterm ${version}" --notes-file CHANGELOG.md
