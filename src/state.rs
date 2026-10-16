@@ -289,8 +289,8 @@ impl Term {
 		}
 		self.cells = new;
 		self.tab_stops.resize_with(cols, || false);
-		for col in old_cols..cols {
-			self.tab_stops[col] = col > 0 && col % 8 == 0;
+		for (col, val) in self.tab_stops.iter_mut().enumerate().skip(old_cols) {
+			*val = col > 0 && col % 8 == 0;
 		}
 		for line in &mut self.scrollback {
 			let line = Arc::make_mut(line);
@@ -372,23 +372,21 @@ impl Term {
 			self.cx = 0;
 			self.cy = 0;
 			self.scroll_offset = 0;
-		} else if !enabled {
-			if let Some((cells, cx, cy, fg, bg)) = self.primary_screen.take() {
-				self.images = std::mem::take(&mut self.primary_images);
-				self.cells = cells;
-				self.cx = cx;
-				self.cy = cy;
-				self.fg = fg;
-				self.bg = bg;
-				if let Some((top, bottom, origin, wrap)) = self.primary_modes.take() {
-					self.scroll_top = top.min(self.rows - 1);
-					self.scroll_bottom = bottom.min(self.rows - 1).max(self.scroll_top);
-					self.origin_mode = origin;
-					self.wrap_pending = wrap;
-				}
-				self.scroll_offset = 0;
-				self.repair_wide_cells();
+		} else if !enabled && let Some((cells, cx, cy, fg, bg)) = self.primary_screen.take() {
+			self.images = std::mem::take(&mut self.primary_images);
+			self.cells = cells;
+			self.cx = cx;
+			self.cy = cy;
+			self.fg = fg;
+			self.bg = bg;
+			if let Some((top, bottom, origin, wrap)) = self.primary_modes.take() {
+				self.scroll_top = top.min(self.rows - 1);
+				self.scroll_bottom = bottom.min(self.rows - 1).max(self.scroll_top);
+				self.origin_mode = origin;
+				self.wrap_pending = wrap;
 			}
+			self.scroll_offset = 0;
+			self.repair_wide_cells();
 		}
 	}
 

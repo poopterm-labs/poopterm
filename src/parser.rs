@@ -34,13 +34,11 @@ impl Term {
 							len += 5;
 						}
 					}
-					5 if group.len() == 3 => {
-						if len + 3 <= stack_buf.len() {
-							stack_buf[len] = group[0];
-							stack_buf[len + 1] = group[1];
-							stack_buf[len + 2] = group[2];
-							len += 3;
-						}
+					5 if group.len() == 3 && len + 3 <= stack_buf.len() => {
+						stack_buf[len] = group[0];
+						stack_buf[len + 1] = group[1];
+						stack_buf[len + 2] = group[2];
+						len += 3;
 					}
 					_ => {}
 				}
@@ -49,11 +47,9 @@ impl Term {
 					stack_buf[len] = if group[1] == 0 { 24 } else { 4 };
 					len += 1;
 				}
-			} else if group.len() == 1 {
-				if len < stack_buf.len() {
-					stack_buf[len] = group[0];
-					len += 1;
-				}
+			} else if group.len() == 1 && len < stack_buf.len() {
+				stack_buf[len] = group[0];
+				len += 1;
 			}
 		}
 
@@ -161,10 +157,10 @@ impl Term {
 		}
 		let mut fg = self.fg;
 		let mut bg = self.bg;
-		if self.bold {
-			if let Some(index) = self.palette.iter().position(|&color| color == fg) {
-				fg = bright_color(index);
-			}
+		if self.bold
+			&& let Some(index) = self.palette.iter().position(|&color| color == fg)
+		{
+			fg = bright_color(index);
 		}
 		if self.reverse {
 			std::mem::swap(&mut fg, &mut bg);
@@ -500,17 +496,15 @@ impl Term {
 		} else if params.len() >= 2 && matches!(params[0], b"0" | b"2") {
 			let title = String::from_utf8_lossy(params[1]);
 			self.title = title.chars().filter(|c| !c.is_control()).take(64).collect();
-		} else if params.len() >= 2 && params[0] == b"7" {
-			if let Ok(uri) = std::str::from_utf8(params[1]) {
-				if let Some(path) = uri.strip_prefix("file://") {
-					if let Some(path) = path
-						.find('/')
-						.and_then(|index| decode_uri_path(&path[index..]))
-					{
-						self.cwd = path;
-					}
-				}
-			}
+		} else if params.len() >= 2
+			&& params[0] == b"7"
+			&& let Ok(uri) = std::str::from_utf8(params[1])
+			&& let Some(path) = uri.strip_prefix("file://")
+			&& let Some(path) = path
+				.find('/')
+				.and_then(|index| decode_uri_path(&path[index..]))
+		{
+			self.cwd = path;
 		}
 	}
 }

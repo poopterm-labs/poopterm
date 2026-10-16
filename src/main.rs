@@ -1136,13 +1136,12 @@ impl App {
 			WindowEvent::Resized(size) => {
 				self.settings_width = size.width.max(1);
 				self.settings_height = size.height.max(1);
-				if let Some(surface) = self.settings_surface.as_mut() {
-					if let (Some(width), Some(height)) = (
+				if let Some(surface) = self.settings_surface.as_mut()
+					&& let (Some(width), Some(height)) = (
 						NonZeroU32::new(self.settings_width),
 						NonZeroU32::new(self.settings_height),
 					) {
-						let _ = surface.resize(width, height);
-					}
+					let _ = surface.resize(width, height);
 				}
 				self.draw_settings();
 			}
@@ -1481,10 +1480,10 @@ impl App {
 	}
 
 	fn copy_selection(&self) {
-		if let Some(text) = self.selected_text() {
-			if let Err(error) = clipboard_write(&text) {
-				eprintln!("poopterm: clipboard copy failed: {error}");
-			}
+		if let Some(text) = self.selected_text()
+			&& let Err(error) = clipboard_write(&text)
+		{
+			eprintln!("poopterm: clipboard copy failed: {error}");
 		}
 	}
 
@@ -1687,10 +1686,10 @@ impl App {
 			}
 		}
 
-		if let Some(s) = self.surface.as_mut() {
-			if let (Some(nw), Some(nh)) = (NonZeroU32::new(self.width), NonZeroU32::new(self.height)) {
-				let _ = s.resize(nw, nh);
-			}
+		if let Some(s) = self.surface.as_mut()
+			&& let (Some(nw), Some(nh)) = (NonZeroU32::new(self.width), NonZeroU32::new(self.height))
+		{
+			let _ = s.resize(nw, nh);
 		}
 		if let Some(win) = &self.window {
 			win.request_redraw();
@@ -2358,11 +2357,11 @@ fn fill_rect(
 		}
 		let row_slice = &mut px[row_start..row_end];
 
-		let mut chunks = row_slice.chunks_exact_mut(4);
-		for chunk in &mut chunks {
-			chunk.copy_from_slice(&color_array);
+		let (chunks, rem) = row_slice.as_chunks_mut::<4>();
+		for chunk in chunks {
+			*chunk = color_array;
 		}
-		chunks.into_remainder().fill(color);
+		rem.fill(color);
 	}
 }
 
@@ -2547,10 +2546,10 @@ fn clipboard_read() -> std::io::Result<String> {
 
 #[cfg(target_os = "linux")]
 fn clipboard_write(text: &str) -> std::io::Result<()> {
-	if env::var_os("WAYLAND_DISPLAY").is_some() {
-		if let Ok(()) = clipboard_write_with("wl-copy", &[], text) {
-			return Ok(());
-		}
+	if env::var_os("WAYLAND_DISPLAY").is_some()
+		&& let Ok(()) = clipboard_write_with("wl-copy", &[], text)
+	{
+		return Ok(());
 	}
 	clipboard_write_with("xclip", &["-selection", "clipboard"], text)
 		.or_else(|_| clipboard_write_with("xsel", &["--clipboard", "--input"], text))
@@ -2558,10 +2557,10 @@ fn clipboard_write(text: &str) -> std::io::Result<()> {
 
 #[cfg(target_os = "linux")]
 fn clipboard_read() -> std::io::Result<String> {
-	if env::var_os("WAYLAND_DISPLAY").is_some() {
-		if let Ok(text) = clipboard_read_with("wl-paste", &["--no-newline"]) {
-			return Ok(text);
-		}
+	if env::var_os("WAYLAND_DISPLAY").is_some()
+		&& let Ok(text) = clipboard_read_with("wl-paste", &["--no-newline"])
+	{
+		return Ok(text);
 	}
 	clipboard_read_with("xclip", &["-selection", "clipboard", "-o"])
 		.or_else(|_| clipboard_read_with("xsel", &["--clipboard", "--output"]))
@@ -2829,17 +2828,16 @@ impl ApplicationHandler<UserEvent> for App {
 					self.switch_tab(if self.shift { -1 } else { 1 });
 					return;
 				}
-				if (self.super_key || self.ctrl) && !self.shift {
-					if let Key::Character(value) = &event.logical_key {
-						if value.len() == 1 {
-							if let Some(index) = value.chars().next().and_then(|ch| ch.to_digit(10)) {
-								if (1..=9).contains(&index) && (index as usize) <= self.sessions.len() {
-									self.activate_tab(index as usize - 1);
-									return;
-								}
-							}
-						}
-					}
+				if (self.super_key || self.ctrl)
+					&& !self.shift
+					&& let Key::Character(value) = &event.logical_key
+					&& value.len() == 1
+					&& let Some(index) = value.chars().next().and_then(|ch| ch.to_digit(10))
+					&& (1..=9).contains(&index)
+					&& (index as usize) <= self.sessions.len()
+				{
+					self.activate_tab(index as usize - 1);
+					return;
 				}
 				if (self.super_key || (self.ctrl && self.shift))
 					&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("w"))
@@ -2863,10 +2861,10 @@ impl ApplicationHandler<UserEvent> for App {
 				{
 					// Motion reporting is enabled by the running terminal application.
 				}
-				if previous.1 < self.top as f64 || position.y < self.top as f64 {
-					if let Some(window) = &self.window {
-						window.request_redraw();
-					}
+				if (previous.1 < self.top as f64 || position.y < self.top as f64)
+					&& let Some(window) = &self.window
+				{
+					window.request_redraw();
 				}
 			}
 			WindowEvent::MouseInput { state, button, .. } => {
@@ -3019,10 +3017,10 @@ impl ApplicationHandler<UserEvent> for App {
 					}
 					self.update_window_title();
 				}
-				if active_output || became_active {
-					if let Some(win) = &self.window {
-						win.request_redraw();
-					}
+				if (active_output || became_active)
+					&& let Some(win) = &self.window
+				{
+					win.request_redraw();
 				}
 			}
 			UserEvent::Closed(id) => {
