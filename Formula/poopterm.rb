@@ -1,10 +1,9 @@
 class Poopterm < Formula
   desc "Small, poop-colored terminal emulator"
   homepage "https://github.com/poopterm-labs/poopterm"
-  url "https://github.com/poopterm-labs/poopterm/archive/b937a79.tar.gz"
-  version "0.2.0"
-  revision 2
-  sha256 "04076ae729bd9f76dc7a7409084f71f7218ea67f02541871eab66be87231f63e"
+  url "https://github.com/poopterm-labs/poopterm/archive/cac4ca5.tar.gz"
+  version "0.3.1"
+  sha256 "012cf7884c864fcb05fdff6547e6fae8b887ad86a46c6670fca1431c3534a78a"
   license "MIT"
 
   depends_on "rust" => :build
