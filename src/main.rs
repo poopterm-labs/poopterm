@@ -198,6 +198,72 @@ fn read_config_theme() -> Option<ThemeKind> {
     ThemeKind::parse(&read_config_value("theme")?)
 }
 
+// Session state is separate from user settings; hex encoding preserves unusual paths.
+fn read_session_dirs() -> Vec<PathBuf> {
+    fs::read_to_string(config_path().with_file_name("sessions.txt"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(decode_session_path)
+        .take(12)
+        .collect()
+}
+
+fn decode_session_path(line: &str) -> Option<PathBuf> {
+    if line.len() % 2 != 0 {
+        return None;
+    }
+    let bytes = line
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let text = std::str::from_utf8(pair).ok()?;
+            u8::from_str_radix(text, 16).ok()
+        })
+        .collect::<Option<Vec<_>>>()?;
+    String::from_utf8(bytes).ok().map(PathBuf::from)
+}
+
+fn save_session_dirs(dirs: &[PathBuf]) -> std::io::Result<()> {
+    let path = config_path().with_file_name("sessions.txt");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let text = dirs
+        .iter()
+        .take(12)
+        .map(|dir| {
+            dir.to_string_lossy()
+                .as_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let temp = path.with_extension("tmp");
+    fs::write(&temp, text)?;
+    fs::rename(temp, path)
+}
+
+fn default_cwd() -> PathBuf {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+fn restored_session_dirs() -> Vec<PathBuf> {
+    let dirs: Vec<_> = read_session_dirs()
+        .into_iter()
+        .filter(|dir| dir.is_dir())
+        .collect();
+    if dirs.is_empty() {
+        vec![default_cwd()]
+    } else {
+        dirs
+    }
+}
+
 fn read_config_value(key: &str) -> Option<String> {
     fs::read_to_string(config_path())
         .ok()?
@@ -297,9 +363,23 @@ struct Term {
     reverse: bool,
     responses: Vec<Vec<u8>>,
     title: String,
+    cwd: PathBuf,
+    bell: bool,
 }
 
 impl Term {
+    fn row_cells(&self, row: usize) -> Option<&[Cell]> {
+        if row < self.scrollback.len() {
+            self.scrollback.get(row).map(Vec::as_slice)
+        } else {
+            let row = row - self.scrollback.len();
+            (row < self.rows).then(|| {
+                let start = row * self.cols;
+                &self.cells[start..start + self.cols]
+            })
+        }
+    }
+
     fn set_theme(&mut self, theme: Theme) {
         let (old_fg, old_bg) = (self.default_fg, self.default_bg);
         let recolor = |cells: &mut [Cell]| {
@@ -344,7 +424,7 @@ impl Term {
             width: 1,
         }
     }
-    fn new(cols: usize, rows: usize, theme: Theme) -> Self {
+    fn new(cols: usize, rows: usize, theme: Theme, cwd: PathBuf) -> Self {
         Self {
             cols,
             rows,
@@ -381,6 +461,8 @@ impl Term {
             reverse: false,
             responses: Vec::new(),
             title: "Shell".into(),
+            cwd,
+            bell: false,
         }
     }
 
@@ -631,6 +713,7 @@ impl Perform for Term {
 
     fn execute(&mut self, byte: u8) {
         match byte {
+            7 => self.bell = true,
             b'\n' | 0x0b | 0x0c => self.linefeed(),
             b'\r' => self.cx = 0,
             0x08 => self.cx = self.cx.saturating_sub(1),
@@ -815,6 +898,15 @@ impl Perform for Term {
         if params.len() >= 2 && matches!(params[0], b"0" | b"2") {
             let title = String::from_utf8_lossy(params[1]);
             self.title = title.chars().filter(|c| !c.is_control()).take(64).collect();
+        } else if params.len() >= 2 && params[0] == b"7" {
+            if let Ok(uri) = std::str::from_utf8(params[1]) {
+                if let Some(path) = uri.strip_prefix("file://") {
+                    let path = path.find('/').map(|index| &path[index..]).unwrap_or(path);
+                    if !path.is_empty() {
+                        self.cwd = PathBuf::from(path.replace("%20", " "));
+                    }
+                }
+            }
         }
     }
 }
@@ -834,6 +926,7 @@ struct Session {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     _child: Box<dyn Child + Send + Sync>,
+    activity: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -940,6 +1033,7 @@ fn spawn_session(
     rows: usize,
     theme: Theme,
     proxy: EventLoopProxy<UserEvent>,
+    cwd: PathBuf,
 ) -> Result<Session, Box<dyn Error>> {
     let pty = native_pty_system();
     let pair = pty.openpty(PtySize {
@@ -952,6 +1046,8 @@ fn spawn_session(
     let mut cmd = CommandBuilder::new(shell);
     cmd.env("TERM", "xterm-256color");
     cmd.arg("-l");
+    let cwd = if cwd.is_dir() { cwd } else { default_cwd() };
+    cmd.cwd(&cwd);
     let child = pair.slave.spawn_command(cmd)?;
     drop(pair.slave);
 
@@ -979,11 +1075,12 @@ fn spawn_session(
 
     Ok(Session {
         id,
-        term: Term::new(cols, rows, theme),
+        term: Term::new(cols, rows, theme, cwd),
         parser: Parser::new(),
         master: pair.master,
         writer,
         _child: child,
+        activity: false,
     })
 }
 
@@ -1001,6 +1098,7 @@ struct App {
     top: usize,
     titlebar_height: usize,
     tab_height: usize,
+    status_height: usize,
     border: usize,
 
     sessions: Vec<Session>,
@@ -1029,9 +1127,84 @@ struct App {
     mouse_button_down: bool,
     selection: Option<Selection>,
     selecting: bool,
+    search_active: bool,
+    search_query: String,
+    search_matches: Vec<Selection>,
+    search_match_index: usize,
+}
+
+fn find_matches(term: &Term, query: &str) -> Vec<Selection> {
+    let query = query.to_ascii_lowercase();
+    let mut matches = Vec::new();
+    if !query.is_empty() {
+        let needle: Vec<char> = query.chars().collect();
+        let total_rows = term.scrollback.len() + term.rows;
+        for row in 0..total_rows {
+            let Some(cells) = term.row_cells(row) else {
+                continue;
+            };
+            let chars: Vec<(char, usize)> = cells
+                .iter()
+                .enumerate()
+                .filter(|(_, cell)| cell.width != 0)
+                .map(|(col, cell)| (cell.ch.to_ascii_lowercase(), col))
+                .collect();
+            if needle.len() > chars.len() {
+                continue;
+            }
+            for start in 0..=chars.len() - needle.len() {
+                if chars[start..start + needle.len()]
+                    .iter()
+                    .map(|(ch, _)| *ch)
+                    .eq(needle.iter().copied())
+                {
+                    matches.push(Selection {
+                        start: CellPoint {
+                            row,
+                            col: chars[start].1,
+                        },
+                        end: CellPoint {
+                            row,
+                            col: chars[start + needle.len() - 1].1,
+                        },
+                    });
+                }
+            }
+        }
+    }
+    matches
 }
 
 impl App {
+    fn search(&mut self, direction: isize, advance: bool) {
+        let matches = find_matches(self.active_term(), &self.search_query);
+        self.search_matches = matches;
+        if self.search_matches.is_empty() {
+            self.search_match_index = 0;
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            return;
+        }
+        let len = self.search_matches.len();
+        if advance {
+            self.search_match_index =
+                (self.search_match_index as isize + direction).rem_euclid(len as isize) as usize;
+        } else {
+            self.search_match_index = 0;
+        }
+        let match_range = self.search_matches[self.search_match_index];
+        let term = &mut self.active_session_mut().term;
+        let visible_top = match_range.start.row.saturating_sub(term.rows / 2);
+        term.scroll_offset = term
+            .scrollback
+            .len()
+            .saturating_sub(visible_top.min(term.scrollback.len()));
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
     fn tab_left_reserve(&self) -> usize {
         if cfg!(target_os = "macos") {
             (80.0
@@ -1040,7 +1213,11 @@ impl App {
                     .as_ref()
                     .map_or(1.0, |window| window.scale_factor())) as usize
         } else {
-            0
+            (112.0
+                * self
+                    .window
+                    .as_ref()
+                    .map_or(1.0, |window| window.scale_factor())) as usize
         }
     }
 
@@ -1495,16 +1672,21 @@ impl App {
     }
 
     fn add_tab(&mut self) {
+        self.refresh_directories();
         let id = self.next_session_id;
         self.next_session_id += 1;
         let cols = self.active_term().cols;
         let rows = self.active_term().rows;
-        match spawn_session(id, cols, rows, self.theme, self.proxy.clone()) {
+        let cwd = self.active_term().cwd.clone();
+        match spawn_session(id, cols, rows, self.theme, self.proxy.clone(), cwd) {
             Ok(session) => {
                 self.sessions.push(session);
                 self.active = self.sessions.len() - 1;
                 self.ensure_active_tab_visible();
                 self.selection = None;
+                self.end_search();
+                self.sessions[self.active].activity = false;
+                self.persist_sessions();
                 self.update_window_title();
                 if let Some(window) = &self.window {
                     window.request_redraw();
@@ -1519,12 +1701,27 @@ impl App {
         if count == 0 {
             return;
         }
-        self.active = (self.active as isize + offset).rem_euclid(count as isize) as usize;
+        let index = (self.active as isize + offset).rem_euclid(count as isize) as usize;
+        self.activate_tab(index);
+    }
+
+    fn activate_tab(&mut self, index: usize) {
+        if index >= self.sessions.len() {
+            return;
+        }
+        self.active = index;
+        self.sessions[self.active].activity = false;
+        self.sessions[self.active].term.bell = false;
         self.ensure_active_tab_visible();
         self.selection = None;
         self.update_window_title();
+        self.search_matches.clear();
+        self.search_match_index = 0;
         if let Some(window) = &self.window {
             window.request_redraw();
+        }
+        if self.search_active {
+            self.search(1, false);
         }
     }
 
@@ -1536,7 +1733,10 @@ impl App {
         if index >= self.sessions.len() {
             return;
         }
+        let _ = self.sessions[index]._child.kill();
         self.sessions.remove(index);
+        self.persist_sessions();
+        self.search_matches.clear();
         self.selection = None;
         if self.sessions.is_empty() {
             event_loop.exit();
@@ -1549,6 +1749,7 @@ impl App {
         }
         self.tab_scroll = self.tab_scroll.min(self.sessions.len().saturating_sub(1));
         self.ensure_active_tab_visible();
+        self.persist_sessions();
         self.update_window_title();
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -1566,9 +1767,46 @@ impl App {
         }
     }
 
+    fn refresh_directories(&mut self) {
+        for session in &mut self.sessions {
+            if let Some(pid) = session._child.process_id() {
+                #[cfg(target_os = "linux")]
+                if let Ok(path) = fs::read_link(format!("/proc/{pid}/cwd")) {
+                    session.term.cwd = path;
+                }
+                #[cfg(target_os = "macos")]
+                if let Ok(output) = Command::new("/usr/sbin/lsof")
+                    .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+                    .output()
+                {
+                    if let Some(path) = String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .find_map(|line| line.strip_prefix('n'))
+                    {
+                        session.term.cwd = PathBuf::from(path);
+                    }
+                }
+            }
+        }
+    }
+
+    fn persist_sessions(&self) {
+        let dirs: Vec<_> = self
+            .sessions
+            .iter()
+            .map(|session| session.term.cwd.clone())
+            .collect();
+        if let Err(error) = save_session_dirs(&dirs) {
+            eprintln!("poopterm: could not save sessions: {error}");
+        }
+    }
+
     fn point_at(&self, x: f64, y: f64) -> Option<CellPoint> {
         let term = self.active_term();
-        if x < self.margin as f64 || y < self.top as f64 {
+        if x < self.margin as f64
+            || y < self.top as f64
+            || y >= (self.height as usize).saturating_sub(self.status_height + self.margin) as f64
+        {
             return None;
         }
         let col = ((x as usize - self.margin) / self.cw.max(1)).min(term.cols - 1);
@@ -1622,6 +1860,75 @@ impl App {
             if let Err(error) = clipboard_write(&text) {
                 eprintln!("poopterm: clipboard copy failed: {error}");
             }
+        }
+    }
+
+    fn token_at(&self, point: CellPoint) -> Option<String> {
+        let cells = self.active_term().row_cells(point.row)?;
+        if point.col >= cells.len() || cells[point.col].ch.is_whitespace() {
+            return None;
+        }
+        let is_token_char = |ch: char| !ch.is_whitespace() && !matches!(ch, '"' | '\'' | '<' | '>');
+        let mut start = point.col;
+        let mut end = point.col + 1;
+        while start > 0 && is_token_char(cells[start - 1].ch) {
+            start -= 1;
+        }
+        while end < cells.len() && is_token_char(cells[end].ch) {
+            end += 1;
+        }
+        Some(
+            cells[start..end]
+                .iter()
+                .filter(|cell| cell.width != 0)
+                .map(|cell| cell.ch)
+                .collect::<String>()
+                .trim_matches(|ch: char| matches!(ch, ')' | ']' | '}' | ',' | '.' | ';' | ':'))
+                .to_owned(),
+        )
+    }
+
+    fn open_or_copy_token(&self, x: f64, y: f64) -> bool {
+        let Some(point) = self.point_at(x, y) else {
+            return false;
+        };
+        let Some(token) = self.token_at(point) else {
+            return false;
+        };
+        if token.starts_with("https://") || token.starts_with("http://") {
+            if let Err(error) = open_external(&token) {
+                eprintln!("poopterm: could not open link: {error}");
+            }
+            return true;
+        }
+        if token.starts_with('/')
+            || token.starts_with("~/")
+            || token.starts_with("./")
+            || token.starts_with("../")
+            || token.contains('/')
+        {
+            if let Err(error) = clipboard_write(&token) {
+                eprintln!("poopterm: could not copy path: {error}");
+            }
+            return true;
+        }
+        false
+    }
+
+    fn begin_search(&mut self) {
+        self.search_active = true;
+        self.search_query.clear();
+        self.search_matches.clear();
+        self.search_match_index = 0;
+        self.search(1, false);
+    }
+
+    fn end_search(&mut self) {
+        self.search_active = false;
+        self.search_matches.clear();
+        self.search_query.clear();
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 
@@ -1740,8 +2047,10 @@ impl App {
         self.ensure_active_tab_visible();
 
         let cols = ((self.width as usize).saturating_sub(2 * self.margin) / self.cw.max(1)).max(2);
-        let rows =
-            ((self.height as usize).saturating_sub(self.top + self.margin) / self.ch.max(1)).max(2);
+        let rows = ((self.height as usize)
+            .saturating_sub(self.top + self.margin + self.status_height)
+            / self.ch.max(1))
+        .max(2);
 
         for session in &mut self.sessions {
             if cols != session.term.cols || rows != session.term.rows {
@@ -1873,6 +2182,31 @@ impl App {
         let layout = tab_layout(w, session_count, scale, left_reserve, tab_scroll);
         let accent = self.theme.palette[4];
         fill_rect(pixels, w, h, 0, tab_y, w, self.tab_height, self.theme.bg);
+        if !cfg!(target_os = "macos") {
+            draw_text(
+                pixels,
+                w,
+                h,
+                16 * scale,
+                tab_y + (self.tab_height.saturating_sub(ch)) / 2,
+                "poopterm",
+                px * 0.82,
+                ascent,
+                self.theme.fg,
+                font,
+                glyphs,
+            );
+        }
+        fill_rect(
+            pixels,
+            w,
+            h,
+            0,
+            tab_y + self.tab_height.saturating_sub(scale),
+            w,
+            scale,
+            blend(self.theme.bg, self.theme.border, 90),
+        );
         for index in
             layout.first_visible..session_count.min(layout.first_visible + layout.visible_count)
         {
@@ -1908,7 +2242,7 @@ impl App {
                     w,
                     h,
                     x + 8 * scale,
-                    top.saturating_sub(4 * scale),
+                    tab_y + self.tab_height.saturating_sub(5 * scale),
                     layout.width.saturating_sub(16 * scale),
                     3 * scale,
                     scale,
@@ -1926,15 +2260,34 @@ impl App {
                 label.pop();
                 label.push('…');
             }
+            if session.activity || session.term.bell {
+                draw_text(
+                    pixels,
+                    w,
+                    h,
+                    x + 10 * scale,
+                    tab_y + (self.tab_height.saturating_sub(ch)) / 2,
+                    if session.term.bell { "!" } else { "•" },
+                    px * 0.62,
+                    ascent,
+                    accent,
+                    font,
+                    glyphs,
+                );
+            }
             draw_text(
                 pixels,
                 w,
                 h,
-                x + 12 * scale,
+                x + if session.activity {
+                    22 * scale
+                } else {
+                    12 * scale
+                },
                 tab_y + (self.tab_height.saturating_sub(ch)) / 2,
                 &label,
-                px,
-                ascent,
+                px * 0.82,
+                (ascent as f32 * 0.82) as i32,
                 self.theme.fg,
                 font,
                 glyphs,
@@ -1947,8 +2300,8 @@ impl App {
                     x + layout.width.saturating_sub(28 * scale),
                     tab_y + (self.tab_height.saturating_sub(ch)) / 2,
                     "×",
-                    px,
-                    ascent,
+                    px * 0.82,
+                    (ascent as f32 * 0.82) as i32,
                     self.theme.fg,
                     font,
                     glyphs,
@@ -1991,8 +2344,8 @@ impl App {
                 x + (layout.arrow_w.saturating_sub(self.cw)) / 2,
                 arrow_y + (arrow_h.saturating_sub(ch)) / 2,
                 label,
-                px,
-                ascent,
+                px * 0.82,
+                (ascent as f32 * 0.82) as i32,
                 self.theme.fg,
                 font,
                 glyphs,
@@ -2064,6 +2417,10 @@ impl App {
         );
         let history_len = term.scrollback.len();
         let screen_start = history_len.saturating_sub(term.scroll_offset);
+        let active_search_match = self
+            .search_matches
+            .get(self.search_match_index)
+            .map(|selection| selection.ordered());
 
         for row in 0..term.rows {
             let absolute_row = screen_start + row;
@@ -2075,6 +2432,13 @@ impl App {
             };
             for (col, &cell) in row_cells.iter().enumerate() {
                 let is_selected = selected.is_some_and(|(start, end)| {
+                    let point = CellPoint {
+                        row: absolute_row,
+                        col,
+                    };
+                    point >= start && point <= end
+                });
+                let is_search_match = active_search_match.is_some_and(|(start, end)| {
                     let point = CellPoint {
                         row: absolute_row,
                         col,
@@ -2093,6 +2457,9 @@ impl App {
                 if is_selected {
                     fg = 0x1E1E2E;
                     bg = 0x89B4FA;
+                } else if is_search_match {
+                    fg = self.theme.bg;
+                    bg = self.theme.palette[3];
                 }
 
                 let x0 = m + col * cw;
@@ -2130,6 +2497,129 @@ impl App {
                 }
             }
         }
+
+        if self.search_active {
+            let box_w = (500 * scale).min(w.saturating_sub(24 * scale));
+            let box_h = 42 * scale;
+            let x = w.saturating_sub(box_w + 16 * scale);
+            let y = top + 12 * scale;
+            fill_round_rect(
+                pixels,
+                w,
+                h,
+                x,
+                y,
+                box_w,
+                box_h,
+                8 * scale,
+                self.theme.border,
+            );
+            fill_round_rect(
+                pixels,
+                w,
+                h,
+                x + scale,
+                y + scale,
+                box_w.saturating_sub(2 * scale),
+                box_h.saturating_sub(2 * scale),
+                7 * scale,
+                self.theme.bg,
+            );
+            let status = if self.search_matches.is_empty() {
+                "0 matches".to_owned()
+            } else {
+                format!(
+                    "{}/{}",
+                    self.search_match_index + 1,
+                    self.search_matches.len()
+                )
+            };
+            let available = (box_w / cw.max(1)).saturating_sub(25);
+            let query: String = self
+                .search_query
+                .chars()
+                .rev()
+                .take(available)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            let label = format!("Find: {query}  {status}  Enter / Esc");
+            draw_text(
+                pixels,
+                w,
+                h,
+                x + 12 * scale,
+                y + (box_h.saturating_sub(ch)) / 2,
+                &label,
+                px * 0.82,
+                ascent,
+                self.theme.fg,
+                font,
+                glyphs,
+            );
+        }
+
+        let status_y = h.saturating_sub(self.status_height + self.border);
+        fill_rect(
+            pixels,
+            w,
+            h,
+            0,
+            status_y,
+            w,
+            self.status_height,
+            blend(self.theme.bg, self.theme.border, 28),
+        );
+        fill_rect(
+            pixels,
+            w,
+            h,
+            0,
+            status_y,
+            w,
+            scale,
+            blend(self.theme.bg, self.theme.border, 100),
+        );
+        let cwd = term
+            .cwd
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("~");
+        let status_left: String = cwd.chars().take(w / cw.max(1) / 3).collect();
+        let status_right = format!(
+            "{} × {}   ·   {}",
+            term.cols,
+            term.rows,
+            self.theme.kind.name()
+        );
+        draw_text(
+            pixels,
+            w,
+            h,
+            16 * scale,
+            status_y + (self.status_height.saturating_sub(ch)) / 2,
+            &status_left,
+            px * 0.72,
+            ascent,
+            self.theme.fg,
+            font,
+            glyphs,
+        );
+        let status_width = status_right.chars().count() * (cw * 3 / 4);
+        draw_text(
+            pixels,
+            w,
+            h,
+            w.saturating_sub(status_width + 16 * scale),
+            status_y + (self.status_height.saturating_sub(ch)) / 2,
+            &status_right,
+            px * 0.72,
+            ascent,
+            self.theme.fg,
+            font,
+            glyphs,
+        );
 
         let _ = buf.present();
     }
@@ -2213,7 +2703,12 @@ fn draw_kde_button(
     accent: u32,
     hovered: bool,
 ) {
-    fill_round_rect(pixels, width, height, x, y, w, h, 5 * scale, border);
+    let outline = if hovered {
+        accent
+    } else {
+        blend(background, border, 90)
+    };
+    fill_round_rect(pixels, width, height, x, y, w, h, 7 * scale, outline);
     let face = if hovered {
         blend(background, accent, 52)
     } else {
@@ -2227,7 +2722,7 @@ fn draw_kde_button(
         y + scale,
         w.saturating_sub(2 * scale),
         h.saturating_sub(2 * scale),
-        4 * scale,
+        6 * scale,
         face,
     );
 }
@@ -2302,6 +2797,16 @@ fn clipboard_read_with(program: &str, args: &[&str]) -> std::io::Result<String> 
             output.status
         )))
     }
+}
+
+#[cfg(target_os = "macos")]
+fn open_external(target: &str) -> std::io::Result<()> {
+    Command::new("open").arg(target).spawn().map(|_| ())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_external(target: &str) -> std::io::Result<()> {
+    Command::new("xdg-open").arg(target).spawn().map(|_| ())
 }
 
 #[cfg(target_os = "macos")]
@@ -2390,16 +2895,16 @@ impl ApplicationHandler<UserEvent> for App {
         let scale = window.scale_factor() as f32;
         self.px = 18.0 * scale;
         self.margin = (8.0 * scale) as usize;
-        self.border = (scale * 3.0) as usize;
+        self.border = scale as usize;
         self.titlebar_height = if cfg!(target_os = "macos") {
-            (28.0 * scale) as usize
+            (44.0 * scale) as usize
         } else {
             0
         };
         self.tab_height = (if cfg!(target_os = "macos") {
-            34.0
+            40.0
         } else {
-            46.0
+            44.0
         } * scale) as usize;
         self.top = self.titlebar_height
             + if cfg!(target_os = "macos") {
@@ -2408,6 +2913,7 @@ impl ApplicationHandler<UserEvent> for App {
                 self.tab_height
             }
             + self.margin;
+        self.status_height = (26.0 * scale) as usize;
 
         let lm = self
             .font
@@ -2419,7 +2925,8 @@ impl ApplicationHandler<UserEvent> for App {
 
         let size = PhysicalSize::new(
             (self.cw * self.active_term().cols + 2 * self.margin) as u32,
-            (self.ch * self.active_term().rows + self.top + self.margin) as u32,
+            (self.ch * self.active_term().rows + self.top + self.margin + self.status_height)
+                as u32,
         );
         let _ = window.request_inner_size(size);
 
@@ -2445,7 +2952,11 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.refresh_directories();
+                self.persist_sessions();
+                event_loop.exit();
+            }
             WindowEvent::ModifiersChanged(m) => {
                 self.ctrl = m.state().control_key();
                 self.shift = m.state().shift_key();
@@ -2484,6 +2995,35 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                let search_shortcut = (self.super_key
+                    && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("f")))
+                    || (self.ctrl
+                        && self.shift
+                        && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("f")));
+                if search_shortcut {
+                    self.begin_search();
+                    return;
+                }
+                if self.search_active {
+                    match &event.logical_key {
+                        Key::Named(NamedKey::Escape) => self.end_search(),
+                        Key::Named(NamedKey::Enter) => {
+                            self.search(if self.shift { -1 } else { 1 }, true)
+                        }
+                        Key::Named(NamedKey::Backspace) => {
+                            self.search_query.pop();
+                            self.search(1, false);
+                        }
+                        Key::Character(value) if !self.ctrl && !self.super_key => {
+                            if self.search_query.chars().count() < 128 {
+                                self.search_query.push_str(value);
+                                self.search(1, false);
+                            }
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
                 if self.ctrl
                     && self.shift
                     && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("t"))
@@ -2524,7 +3064,22 @@ impl ApplicationHandler<UserEvent> for App {
                     self.switch_tab(if self.shift { -1 } else { 1 });
                     return;
                 }
-                if self.super_key
+                if (self.super_key || self.ctrl) && !self.shift {
+                    if let Key::Character(value) = &event.logical_key {
+                        if value.len() == 1 {
+                            if let Some(index) = value.chars().next().and_then(|ch| ch.to_digit(10))
+                            {
+                                if (1..=9).contains(&index)
+                                    && (index as usize) <= self.sessions.len()
+                                {
+                                    self.activate_tab(index as usize - 1);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (self.super_key || (self.ctrl && self.shift))
                     && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("w"))
                 {
                     self.close_active_tab(event_loop);
@@ -2556,7 +3111,10 @@ impl ApplicationHandler<UserEvent> for App {
                 let (x, y) = self.cursor_pos;
                 self.mouse_button_down = state == ElementState::Pressed;
                 let tab_y = self.tab_y() as f64;
-                if state == ElementState::Pressed && button == MouseButton::Left {
+                if state == ElementState::Pressed
+                    && button == MouseButton::Left
+                    && y < self.top as f64
+                {
                     let layout = self.tab_layout();
                     let in_tabbar = y >= tab_y && y < self.top as f64;
                     if in_tabbar
@@ -2594,10 +3152,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 {
                                     self.close_tab(index, event_loop);
                                 } else {
-                                    self.active = index;
-                                    self.ensure_active_tab_visible();
-                                    self.selection = None;
-                                    self.update_window_title();
+                                    self.activate_tab(index);
                                 }
                                 break;
                             }
@@ -2623,7 +3178,12 @@ impl ApplicationHandler<UserEvent> for App {
                     let handled =
                         self.send_mouse_report(code, x, y, state == ElementState::Released, false);
                     if state == ElementState::Pressed && button == MouseButton::Left && !handled {
-                        self.begin_selection(x, y);
+                        let link_click = (self.ctrl || self.super_key)
+                            && self.active_term().mouse_tracking == 0
+                            && self.open_or_copy_token(x, y);
+                        if !link_click {
+                            self.begin_selection(x, y);
+                        }
                     }
                     if state == ElementState::Released {
                         self.selecting = false;
@@ -2641,18 +3201,37 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Output(id, bytes) => {
                 // Pass each PTY chunk to vte in one call instead of dispatching per byte.
                 let mut active_output = false;
+                let mut became_active = false;
+                let mut cwd_changed = false;
+                let active_id = self.sessions.get(self.active).map(|session| session.id);
                 if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
+                    let previous_bell = session.term.bell;
+                    let previous_cwd = session.term.cwd.clone();
                     session.parser.advance(&mut session.term, &bytes);
+                    cwd_changed = session.term.cwd != previous_cwd;
+                    became_active |= session.term.bell != previous_bell;
                     for response in std::mem::take(&mut session.term.responses) {
                         let _ = session.writer.write_all(&response);
                     }
                     let _ = session.writer.flush();
-                    if id == self.sessions[self.active].id {
-                        self.update_window_title();
+                    if Some(id) == active_id {
                         active_output = true;
+                        session.activity = false;
+                    } else if !session.activity {
+                        session.activity = true;
+                        became_active = true;
                     }
                 }
+                if cwd_changed {
+                    self.persist_sessions();
+                }
                 if active_output {
+                    if self.search_active {
+                        self.search(1, false);
+                    }
+                    self.update_window_title();
+                }
+                if active_output || became_active {
                     if let Some(win) = &self.window {
                         win.request_redraw();
                     }
@@ -2660,13 +3239,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
             UserEvent::Closed(id) => {
                 if let Some(index) = self.sessions.iter().position(|s| s.id == id) {
-                    self.sessions.remove(index);
-                    if self.sessions.is_empty() {
-                        event_loop.exit();
-                    } else {
-                        self.active = self.active.min(self.sessions.len() - 1);
-                        self.update_window_title();
-                    }
+                    self.close_tab(index, event_loop);
                 }
             }
         }
@@ -2685,7 +3258,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
 
     let theme = Theme::load();
-    let session = spawn_session(1, 100, 30, theme, proxy.clone())?;
+    let mut sessions = Vec::new();
+    for (index, cwd) in restored_session_dirs().into_iter().enumerate() {
+        sessions.push(spawn_session(
+            index as u64 + 1,
+            100,
+            30,
+            theme,
+            proxy.clone(),
+            cwd,
+        )?);
+    }
+    let next_session_id = sessions.len() as u64 + 1;
     let mut app = App {
         theme,
         font,
@@ -2698,11 +3282,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         top: 8,
         titlebar_height: 0,
         tab_height: 46,
+        status_height: 26,
         border: 1,
-        sessions: vec![session],
+        sessions,
         active: 0,
         tab_scroll: 0,
-        next_session_id: 2,
+        next_session_id,
         proxy,
         window: None,
         reported_title: String::new(),
@@ -2724,6 +3309,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         mouse_button_down: false,
         selection: None,
         selecting: false,
+        search_active: false,
+        search_query: String::new(),
+        search_matches: Vec::new(),
+        search_match_index: 0,
     };
 
     event_loop.run_app(&mut app)?;
@@ -2733,6 +3322,50 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{glyph_cache_key, tab_layout};
+
+    #[test]
+    fn search_handles_wide_cells_and_long_queries() {
+        let mut term = super::Term::new(
+            20,
+            2,
+            super::Theme::from_kind(super::ThemeKind::Poop),
+            "/tmp".into(),
+        );
+        let mut parser = super::Parser::new();
+        parser.advance(&mut term, "猫 hello HELLO".as_bytes());
+        let found = super::find_matches(&term, "hello");
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].start.col, 3);
+        assert_eq!(found[0].end.col, 7);
+        assert!(super::find_matches(&term, &"x".repeat(100)).is_empty());
+        assert!(super::find_matches(&term, "").is_empty());
+    }
+
+    #[test]
+    fn session_paths_preserve_punctuation() {
+        let path = "/tmp/a,b#c \"quoted\"/猫";
+        let encoded = path
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        assert_eq!(super::decode_session_path(&encoded), Some(path.into()));
+        assert!(super::decode_session_path("xyz").is_none());
+    }
+
+    #[test]
+    fn osc_directory_and_bell_are_tracked() {
+        let mut term = super::Term::new(
+            20,
+            2,
+            super::Theme::from_kind(super::ThemeKind::Poop),
+            "/tmp".into(),
+        );
+        let mut parser = super::Parser::new();
+        parser.advance(&mut term, b"\x1b]7;file://localhost/tmp/my%20dir\x07\x07");
+        assert_eq!(term.cwd, std::path::PathBuf::from("/tmp/my dir"));
+        assert!(term.bell);
+    }
 
     #[test]
     fn glyphs_are_cached_separately_at_each_font_size() {

@@ -14,7 +14,11 @@ implementation.
   alternate-screen switching, and common editing and function keys.
 - Keeps up to 5,000 lines of scrollback. Use the mouse wheel to browse it.
 - Supports drag-to-select text and system clipboard copy/paste.
-- Opens multiple independent shell sessions in tabs.
+- Opens independent shell sessions in tabs, with activity and bell indicators.
+- Searches scrollback with a highlighted match and next/previous navigation.
+- Restores up to 12 tabs and their directories when reopening the window.
+- Opens HTTP(S) links and copies displayed file paths with a modifier-click.
+- Uses a compact tab bar and a status bar showing directory, grid size, and theme.
 - Supports bracketed paste and common SGR mouse reporting modes.
 - Resizes the shell along with the window.
 - Includes macOS Light and Dark, all four Catppuccin flavors, and signature Poop themes.
@@ -128,7 +132,14 @@ POOPTERM_THEME=catppuccin-latte poopterm
 
 - **Cmd+T** on macOS or **Ctrl+Shift+N** elsewhere: open a tab.
 - **Ctrl+Tab** / **Ctrl+Shift+Tab**: move to the next or previous tab.
-- **Cmd+W** on macOS: close the active tab. Closing the last tab exits.
+- **Cmd+W** on macOS or **Ctrl+Shift+W** elsewhere: close the active tab.
+- **Cmd+1–9** / **Ctrl+1–9**: jump directly to a tab.
+- **Cmd+F** / **Ctrl+Shift+F**: search the current tab's scrollback. Type a query,
+  press **Enter** / **Shift+Enter** for next/previous, and **Esc** to close.
+  Search is case-insensitive for ASCII and matches within each displayed row.
+- **Cmd-click** / **Ctrl-click** an HTTP(S) URL to open it in your browser, or
+  a displayed path containing `/` to copy it. Mouse-reporting terminal programs
+  retain their own click handling.
 - Click a tab to switch sessions, or click **+** to open one.
 - On macOS, tabs share the transparent titlebar beside the traffic lights. On
   Linux, they remain in the separate tab row.
@@ -142,6 +153,20 @@ POOPTERM_THEME=catppuccin-latte poopterm
 
 On Linux, clipboard shortcuts need a clipboard command-line tool: `wl-clipboard`
 for Wayland (`wl-copy` and `wl-paste`), or `xclip`/`xsel` for X11.
+
+### Working directories and session restore
+
+New tabs inherit the active shell's directory. macOS and Linux discover the
+shell directory when opening a tab or closing the window. Shells can also report
+it using OSC 7; BSD requires this for directory changes to be tracked.
+Close the window to save its tabs; reopening starts fresh login shells in the
+saved directories. Running programs and terminal output are not restored.
+Closing a tab removes it from the saved list, including the last tab.
+State is stored in `sessions.txt` next to the config file, with a limit of 12
+restored tabs. Missing directories fall back to the home directory.
+
+A dot marks unseen background output; `!` marks a terminal bell. Switching to a
+tab clears its indicator.
 
 ## Install on Linux or FreeBSD
 
