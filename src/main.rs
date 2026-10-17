@@ -1814,7 +1814,7 @@ impl App {
 			.filter(|uri| !uri.is_empty());
 		let token = explicit.map(String::as_str).unwrap_or(&token);
 		if token.starts_with("https://") || token.starts_with("http://") {
-			if let Err(error) = open_external(&token) {
+			if let Err(error) = open_external(token) {
 				eprintln!("poopterm: could not open link: {error}");
 			}
 			return true;
@@ -1839,7 +1839,7 @@ impl App {
 			|| token.starts_with("../")
 			|| token.contains('/')
 		{
-			if let Err(error) = clipboard_write(&token) {
+			if let Err(error) = clipboard_write(token) {
 				eprintln!("poopterm: could not copy path: {error}");
 			}
 			return true;
