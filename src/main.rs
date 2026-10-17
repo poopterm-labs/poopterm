@@ -4,8 +4,8 @@ mod config;
 mod osc;
 mod parser;
 use osc::decode_uri_path;
-mod sixel;
 mod ansi;
+mod sixel;
 use ansi::{Cell, Term};
 use config::Preferences;
 
@@ -2987,9 +2987,9 @@ impl ApplicationHandler<UserEvent> for App {
 					let previous_bell = session.term.bell;
 					let previous_title = session.term.title.clone();
 					let previous_cwd = session.term.cwd.clone();
-					
+
 					// Use our custom SIMD parser instead of vte
-                                        session.term.parse_bytes(&bytes);
+					session.term.parse_bytes(&bytes);
 
 					cwd_changed = session.term.cwd != previous_cwd;
 					became_active |=
