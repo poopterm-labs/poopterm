@@ -672,11 +672,10 @@ impl Term {
 					&& let Some(path) = path
 						.find('/')
 						.and_then(|index| decode_uri_path(&path[index..]))
+					&& self.cwd != path
 				{
-					if self.cwd != path {
-						self.cwd = path;
-						self.cwd_generation = self.cwd_generation.wrapping_add(1);
-					}
+					self.cwd = path;
+					self.cwd_generation = self.cwd_generation.wrapping_add(1);
 				}
 			}
 			b"10" | b"11" if params.len() >= 2 => {
@@ -743,7 +742,7 @@ fn decode_base64(input: &[u8]) -> Option<Vec<u8>> {
 		return None;
 	}
 	let mut output = Vec::with_capacity(input.len() / 4 * 3);
-	for (index, chunk) in input.chunks_exact(4).enumerate() {
+	for (index, chunk) in input.as_chunks::<4>().0.iter().enumerate() {
 		let last = index + 1 == input.len() / 4;
 		let value = |byte| match byte {
 			b'A'..=b'Z' => Some(byte - b'A'),
