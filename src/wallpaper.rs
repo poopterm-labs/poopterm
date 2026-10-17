@@ -1,0 +1,111 @@
+//! Static terminal background image loading and resize caching.
+
+use std::path::Path;
+
+use image::{RgbaImage, imageops::FilterType};
+
+pub(crate) struct Wallpaper {
+	image: RgbaImage,
+	cache: Vec<u32>,
+	cache_size: (u32, u32),
+	cache_background: u32,
+	cache_strength: usize,
+}
+
+impl Wallpaper {
+	pub(crate) fn load(path: &Path) -> Result<Self, String> {
+		let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
+		if metadata.len() > 128 * 1024 * 1024 {
+			return Err("Wallpaper image must be smaller than 128 MiB.".into());
+		}
+		let mut reader = image::ImageReader::open(path)
+			.map_err(|error| error.to_string())?
+			.with_guessed_format()
+			.map_err(|error| error.to_string())?;
+		let mut limits = image::Limits::default();
+		limits.max_image_width = Some(16_384);
+		limits.max_image_height = Some(16_384);
+		limits.max_alloc = Some(256 * 1024 * 1024);
+		reader.limits(limits);
+		let image = reader.decode().map_err(|error| error.to_string())?;
+		let (width, height) = (image.width(), image.height());
+		if width == 0 || height == 0 || width > 16_384 || height > 16_384 {
+			return Err("Wallpaper dimensions must be between 1 and 16,384 pixels.".into());
+		}
+		if (width as u64) * (height as u64) > 50_000_000 {
+			return Err("Wallpaper image exceeds the 50-megapixel limit.".into());
+		}
+		Ok(Self {
+			image: image.into_rgba8(),
+			cache: Vec::new(),
+			cache_size: (0, 0),
+			cache_background: 0,
+			cache_strength: usize::MAX,
+		})
+	}
+
+	pub(crate) fn pixels(
+		&mut self,
+		width: u32,
+		height: u32,
+		background: u32,
+		strength: usize,
+	) -> &[u32] {
+		let width = width.max(1);
+		let height = height.max(1);
+		let strength = strength.min(100);
+		if self.cache_size != (width, height)
+			|| self.cache_background != background
+			|| self.cache_strength != strength
+		{
+			let (source_width, source_height) = self.image.dimensions();
+			let (crop_width, crop_height) =
+				if source_width as u64 * height as u64 > source_height as u64 * width as u64 {
+					(
+						(source_height as u64 * width as u64 / height as u64) as u32,
+						source_height,
+					)
+				} else {
+					(
+						source_width,
+						(source_width as u64 * height as u64 / width as u64) as u32,
+					)
+				};
+			let crop_x = source_width.saturating_sub(crop_width) / 2;
+			let crop_y = source_height.saturating_sub(crop_height) / 2;
+			let cropped = image::imageops::crop_imm(
+				&self.image,
+				crop_x,
+				crop_y,
+				crop_width.max(1),
+				crop_height.max(1),
+			)
+			.to_image();
+			let scaled = image::imageops::resize(&cropped, width, height, FilterType::Triangle);
+			self.cache.clear();
+			self.cache.reserve(width as usize * height as usize);
+			self.cache.extend(
+				scaled
+					.pixels()
+					.map(|pixel| blend_over(pixel.0, background, strength)),
+			);
+			self.cache_size = (width, height);
+			self.cache_background = background;
+			self.cache_strength = strength;
+		}
+		&self.cache
+	}
+}
+
+fn blend_over(pixel: [u8; 4], background: u32, strength: usize) -> u32 {
+	let alpha = (pixel[3] as usize * strength + 50) / 100;
+	let bg = [
+		((background >> 16) & 0xff) as usize,
+		((background >> 8) & 0xff) as usize,
+		(background & 0xff) as usize,
+	];
+	let channel = |src: u8, dst: usize| (src as usize * alpha + dst * (255 - alpha) + 127) / 255;
+	(channel(pixel[0], bg[0]) as u32) << 16
+		| (channel(pixel[1], bg[1]) as u32) << 8
+		| channel(pixel[2], bg[2]) as u32
+}

@@ -56,8 +56,26 @@ pub fn value(text: &str, key: &str) -> Option<String> {
 			}
 			let raw = raw.trim();
 			if let Some(quoted) = raw.strip_prefix('"') {
-				let end = quoted.find('"')?;
-				Some(quoted[..end].to_owned())
+				let mut value = String::new();
+				let mut chars = quoted.chars();
+				while let Some(ch) = chars.next() {
+					match ch {
+						'"' => return Some(value),
+						'\\' => match chars.next()? {
+							'"' => value.push('"'),
+							'\\' => value.push('\\'),
+							'n' => value.push('\n'),
+							'r' => value.push('\r'),
+							't' => value.push('\t'),
+							other => {
+								value.push('\\');
+								value.push(other);
+							}
+						},
+						other => value.push(other),
+					}
+				}
+				None
 			} else {
 				Some(raw.split('#').next()?.trim().to_owned())
 			}

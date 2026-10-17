@@ -7,8 +7,10 @@ use osc::decode_uri_path;
 use parser::Parser;
 mod ansi;
 mod sixel;
+mod wallpaper;
 use ansi::{Cell, Term};
 use config::Preferences;
+use wallpaper::Wallpaper;
 
 use std::{
 	collections::HashMap,
@@ -29,7 +31,7 @@ use std::simd::u32x4;
 use winit::{
 	application::ApplicationHandler,
 	dpi::{LogicalSize, PhysicalSize},
-	event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
+	event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
 	event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
 	keyboard::{Key, NamedKey},
 	window::{Window, WindowId},
@@ -321,7 +323,17 @@ fn read_config_value(key: &str) -> Option<String> {
 	config::value(&fs::read_to_string(config_path()).ok()?, key)
 }
 
-fn load_fonts() -> (Font, Option<Font>) {
+fn quote_config_string(value: &str) -> String {
+	let escaped = value
+		.replace('\\', "\\\\")
+		.replace('"', "\\\"")
+		.replace('\n', "\\n")
+		.replace('\r', "\\r")
+		.replace('\t', "\\t");
+	format!("\"{escaped}\"")
+}
+
+fn load_fonts() -> (Font, Vec<Font>) {
 	let bundled = Font::from_bytes(
 		include_bytes!("../assets/font.ttf") as &[u8],
 		FontSettings::default(),
@@ -330,26 +342,100 @@ fn load_fonts() -> (Font, Option<Font>) {
 	let configured = env::var("POOPTERM_FONT")
 		.ok()
 		.or_else(|| read_config_value("font_path"));
-	let Some(path) = configured else {
-		return (bundled, None);
+	let (font, mut fallback_fonts) = if let Some(path) = configured {
+		let path = path
+			.strip_prefix("~/")
+			.map_or(PathBuf::from(&path), |tail| default_cwd().join(tail));
+		match fs::read(&path)
+			.map_err(|error| error.to_string())
+			.and_then(|bytes| {
+				Font::from_bytes(bytes, FontSettings::default()).map_err(|error| error.to_string())
+			}) {
+			Ok(font) => (font, vec![bundled]),
+			Err(error) => {
+				eprintln!(
+					"poopterm: couldn't load font {}: {error}; using bundled font",
+					path.display()
+				);
+				(bundled, Vec::new())
+			}
+		}
+	} else {
+		(bundled, Vec::new())
 	};
-	let path = path
-		.strip_prefix("~/")
-		.map_or(PathBuf::from(&path), |tail| default_cwd().join(tail));
-	match fs::read(&path)
-		.map_err(|error| error.to_string())
-		.and_then(|bytes| {
-			Font::from_bytes(bytes, FontSettings::default()).map_err(|error| error.to_string())
-		}) {
-		Ok(font) => (font, Some(bundled)),
-		Err(error) => {
-			eprintln!(
-				"poopterm: couldn't load font {}: {error}; using bundled font",
-				path.display()
-			);
-			(bundled, None)
+
+	for path in installed_symbol_font_paths().into_iter().take(8) {
+		let Ok(bytes) = fs::read(&path) else {
+			continue;
+		};
+		if bytes.len() > 64 * 1024 * 1024 {
+			continue;
+		}
+		if let Ok(font) = Font::from_bytes(bytes, FontSettings::default()) {
+			fallback_fonts.push(font);
 		}
 	}
+	(font, fallback_fonts)
+}
+
+fn installed_symbol_font_paths() -> Vec<PathBuf> {
+	fn scan(path: &PathBuf, depth: usize, budget: &mut usize, out: &mut Vec<PathBuf>) {
+		if depth > 5 || *budget == 0 {
+			return;
+		}
+		let Ok(entries) = fs::read_dir(path) else {
+			return;
+		};
+		for entry in entries.flatten() {
+			if *budget == 0 {
+				break;
+			}
+			*budget -= 1;
+			let path = entry.path();
+			if path.is_dir() {
+				scan(&path, depth + 1, budget, out);
+				continue;
+			}
+			let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+				continue;
+			};
+			let filename = filename.to_ascii_lowercase();
+			let symbol_font =
+				filename.contains("nerd") || filename.contains("symbol") || filename.contains("awesome");
+			if symbol_font
+				&& path
+					.extension()
+					.is_some_and(|ext| ext.eq_ignore_ascii_case("ttf"))
+			{
+				out.push(path);
+			}
+		}
+	}
+
+	let mut roots = vec![
+		PathBuf::from("/usr/share/fonts"),
+		PathBuf::from("/usr/local/share/fonts"),
+		PathBuf::from("/Library/Fonts"),
+		PathBuf::from("/System/Library/Fonts"),
+	];
+	if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+		roots.extend([
+			home.join(".local/share/fonts"),
+			home.join(".fonts"),
+			home.join("Library/Fonts"),
+		]);
+	}
+	let mut out = Vec::new();
+	let mut budget = 2048;
+	for root in roots {
+		scan(&root, 0, &mut budget, &mut out);
+		if budget == 0 {
+			break;
+		}
+	}
+	out.sort();
+	out.dedup();
+	out
 }
 
 fn save_config_theme(kind: ThemeKind) -> std::io::Result<()> {
@@ -445,6 +531,8 @@ struct Selection {
 struct SettingsEditor {
 	theme: ThemeKind,
 	preferences: Preferences,
+	wallpaper_path: Option<PathBuf>,
+	wallpaper_strength: usize,
 	status: String,
 	about: bool,
 }
@@ -454,6 +542,13 @@ impl SettingsEditor {
 		Self {
 			theme: Theme::load().kind,
 			preferences: Preferences::load(),
+			wallpaper_path: read_config_value("wallpaper")
+				.filter(|path| !path.is_empty())
+				.map(PathBuf::from),
+			wallpaper_strength: read_config_value("wallpaper_strength")
+				.and_then(|value| value.parse().ok())
+				.unwrap_or(35)
+				.clamp(0, 100),
 			status: "Change preferences, then click Save.".into(),
 			about: false,
 		}
@@ -540,6 +635,7 @@ fn spawn_session(
 	proxy: EventLoopProxy<UserEvent>,
 	cwd: PathBuf,
 ) -> Result<Session, Box<dyn Error>> {
+	let cwd = if cwd.is_dir() { cwd } else { default_cwd() };
 	let pty = native_pty_system();
 	let pair = pty.openpty(PtySize {
 		rows: rows as u16,
@@ -550,8 +646,8 @@ fn spawn_session(
 	let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
 	let mut cmd = CommandBuilder::new(shell);
 	cmd.env("TERM", "xterm-256color");
+	cmd.env("TERM_PROGRAM", "poopterm");
 	cmd.arg("-l");
-	let cwd = if cwd.is_dir() { cwd } else { default_cwd() };
 	cmd.cwd(&cwd);
 	let child = pair.slave.spawn_command(cmd)?;
 	drop(pair.slave);
@@ -601,9 +697,12 @@ fn spawn_session(
 
 struct App {
 	theme: Theme,
+	wallpaper: Option<Wallpaper>,
+	wallpaper_strength: usize,
 	font: Font,
-	fallback_font: Option<Font>,
-	glyphs: HashMap<(char, u32, bool), (Metrics, Vec<u8>)>,
+	fallback_fonts: Vec<Font>,
+	font_choices: HashMap<char, usize>,
+	glyphs: HashMap<(char, u32, usize), (Metrics, Vec<u8>)>,
 	px: f32,
 	cw: usize,
 	ch: usize,
@@ -786,8 +885,8 @@ impl App {
 		self.settings_editor = SettingsEditor::load();
 		let attributes = Window::default_attributes()
 			.with_title("Poopterm Settings")
-			.with_inner_size(LogicalSize::new(760.0, 560.0))
-			.with_min_inner_size(LogicalSize::new(680.0, 520.0));
+			.with_inner_size(LogicalSize::new(760.0, 640.0))
+			.with_min_inner_size(LogicalSize::new(680.0, 600.0));
 		let window = Arc::new(
 			event_loop
 				.create_window(attributes)
@@ -812,6 +911,10 @@ impl App {
 
 	fn save_settings_config(&mut self) {
 		let preferences = self.settings_editor.preferences;
+		let wallpaper_path = self.settings_editor.wallpaper_path.as_ref().map_or_else(
+			|| "\"\"".to_owned(),
+			|path| quote_config_string(&path.to_string_lossy()),
+		);
 		let result = config::save(
 			&config_path(),
 			&[
@@ -823,11 +926,28 @@ impl App {
 				("scrollback_lines", preferences.scrollback_lines.to_string()),
 				("restore_sessions", preferences.restore_sessions.to_string()),
 				("opacity", preferences.opacity.to_string()),
+				("wallpaper", wallpaper_path),
+				(
+					"wallpaper_strength",
+					self.settings_editor.wallpaper_strength.to_string(),
+				),
 			],
 		);
 		match result {
 			Ok(()) => {
 				self.theme = Theme::load();
+				self.wallpaper_strength = self.settings_editor.wallpaper_strength;
+				self.wallpaper = self
+					.settings_editor
+					.wallpaper_path
+					.as_ref()
+					.and_then(|path| match Wallpaper::load(path) {
+						Ok(wallpaper) => Some(wallpaper),
+						Err(error) => {
+							self.settings_editor.status = format!("Wallpaper could not be loaded: {error}");
+							None
+						}
+					});
 				#[cfg(target_os = "macos")]
 				if let Some(window) = &self.window {
 					set_window_opacity(window, preferences.opacity);
@@ -855,8 +975,13 @@ impl App {
 				self.end_search();
 				self.resize(self.width, self.height);
 				self.glyphs.clear();
+				let status = if self.settings_editor.wallpaper_path.is_some() && self.wallpaper.is_none() {
+					self.settings_editor.status.clone()
+				} else {
+					"Saved. Settings applied.".into()
+				};
 				self.settings_editor = SettingsEditor::load();
-				self.settings_editor.status = "Saved. Settings applied.".into();
+				self.settings_editor.status = status;
 			}
 			Err(error) => {
 				self.settings_editor.status = format!("Could not save: {error}");
@@ -1133,8 +1258,61 @@ impl App {
 			height,
 			x,
 			210 * scale,
-			"Preferences are saved to your config file.",
-			px * 0.72,
+			"Background wallpaper",
+			px * 0.76,
+			ascent,
+			self.theme.fg,
+			font,
+			glyphs,
+		);
+		for (bx, bw, label) in [
+			(x, 152 * scale, "Choose image…"),
+			(x + 164 * scale, 96 * scale, "Clear"),
+		] {
+			draw_kde_button(
+				pixels,
+				width,
+				height,
+				bx,
+				228 * scale,
+				bw,
+				32 * scale,
+				scale,
+				self.theme.bg,
+				self.theme.border,
+				self.theme.palette[4],
+				false,
+			);
+			draw_text(
+				pixels,
+				width,
+				height,
+				bx + 12 * scale,
+				234 * scale,
+				label,
+				px * 0.68,
+				ascent,
+				self.theme.fg,
+				font,
+				glyphs,
+			);
+		}
+		let wallpaper_name = self
+			.settings_editor
+			.wallpaper_path
+			.as_ref()
+			.and_then(|path| path.file_name())
+			.and_then(|name| name.to_str())
+			.unwrap_or("No image selected");
+		let wallpaper_name: String = wallpaper_name.chars().take(32).collect();
+		draw_text(
+			pixels,
+			width,
+			height,
+			x + 272 * scale,
+			234 * scale,
+			&wallpaper_name,
+			px * 0.66,
 			ascent,
 			self.theme.fg,
 			font,
@@ -1259,9 +1437,70 @@ impl App {
 				glyphs,
 			);
 		}
-		#[cfg(target_os = "macos")]
 		{
 			let row = 438;
+			draw_text(
+				pixels,
+				width,
+				height,
+				x,
+				(row + 8) * scale,
+				"Wallpaper strength",
+				px * 0.82,
+				ascent,
+				self.theme.fg,
+				font,
+				glyphs,
+			);
+			for (bx, text) in [
+				(width.saturating_sub(240 * scale), "−"),
+				(width.saturating_sub(72 * scale), "+"),
+			] {
+				draw_kde_button(
+					pixels,
+					width,
+					height,
+					bx,
+					row * scale,
+					48 * scale,
+					40 * scale,
+					scale,
+					self.theme.bg,
+					self.theme.border,
+					self.theme.palette[4],
+					false,
+				);
+				draw_text(
+					pixels,
+					width,
+					height,
+					bx + 16 * scale,
+					(row + 7) * scale,
+					text,
+					px,
+					ascent,
+					self.theme.fg,
+					font,
+					glyphs,
+				);
+			}
+			draw_text(
+				pixels,
+				width,
+				height,
+				width.saturating_sub(180 * scale),
+				(row + 8) * scale,
+				&format!("{}%", self.settings_editor.wallpaper_strength),
+				px * 0.82,
+				ascent,
+				self.theme.fg,
+				font,
+				glyphs,
+			);
+		}
+		#[cfg(target_os = "macos")]
+		{
+			let row = 494;
 			draw_text(
 				pixels,
 				width,
@@ -1433,6 +1672,38 @@ impl App {
 					self.save_settings_config();
 					return;
 				}
+				if (228 * scale..260 * scale).contains(&y) && (24 * scale..176 * scale).contains(&x) {
+					let picked = self.settings_window.as_ref().and_then(|window| {
+						rfd::FileDialog::new()
+							.set_title("Choose a terminal wallpaper")
+							.add_filter("Wallpaper images", &["png", "jpg", "jpeg", "webp"])
+							.set_parent(window.as_ref())
+							.pick_file()
+					});
+					if let Some(path) = picked {
+						match Wallpaper::load(&path) {
+							Ok(_) => {
+								self.settings_editor.wallpaper_path = Some(path);
+								self.settings_editor.status = "Wallpaper selected. Click Save to apply.".into();
+							}
+							Err(error) => {
+								self.settings_editor.status = format!("Could not use wallpaper: {error}");
+							}
+						}
+					}
+					if let Some(window) = &self.settings_window {
+						window.request_redraw();
+					}
+					return;
+				}
+				if (228 * scale..260 * scale).contains(&y) && (188 * scale..284 * scale).contains(&x) {
+					self.settings_editor.wallpaper_path = None;
+					self.settings_editor.status = "Wallpaper cleared. Click Save to apply.".into();
+					if let Some(window) = &self.settings_window {
+						window.request_redraw();
+					}
+					return;
+				}
 				let width = self.settings_width as usize;
 				if (382 * scale..422 * scale).contains(&y)
 					&& x >= width.saturating_sub(240 * scale)
@@ -1465,7 +1736,13 @@ impl App {
 						};
 					} else if (382 * scale..422 * scale).contains(&y) {
 						prefs.restore_sessions = !prefs.restore_sessions;
-					} else if cfg!(target_os = "macos") && (438 * scale..478 * scale).contains(&y) {
+					} else if (438 * scale..478 * scale).contains(&y) {
+						self.settings_editor.wallpaper_strength = if increase {
+							(self.settings_editor.wallpaper_strength + 5).min(100)
+						} else {
+							self.settings_editor.wallpaper_strength.saturating_sub(5)
+						};
+					} else if cfg!(target_os = "macos") && (494 * scale..534 * scale).contains(&y) {
 						prefs.opacity = if increase {
 							(prefs.opacity + 5).min(100)
 						} else {
@@ -1672,14 +1949,14 @@ impl App {
 			if only_active && index != self.active {
 				continue;
 			}
-			if let Some(pid) = session._child.process_id() {
+			if let Some(_pid) = session._child.process_id() {
 				#[cfg(target_os = "linux")]
-				if let Ok(path) = fs::read_link(format!("/proc/{pid}/cwd")) {
+				if let Ok(path) = fs::read_link(format!("/proc/{_pid}/cwd")) {
 					session.term.cwd = path;
 				}
 				#[cfg(target_os = "macos")]
 				if let Ok(output) = Command::new("/usr/sbin/lsof")
-					.args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+					.args(["-a", "-p", &_pid.to_string(), "-d", "cwd", "-Fn"])
 					.output()
 					&& let Some(path) = String::from_utf8_lossy(&output.stdout)
 						.lines()
@@ -2275,6 +2552,15 @@ impl App {
 		let left_reserve = self.tab_left_reserve();
 		let session_count = self.sessions.len();
 		let tab_scroll = self.tab_scroll;
+		let inner_width = self.width.saturating_sub((2 * self.border) as u32);
+		let inner_height = self.height.saturating_sub((2 * self.border) as u32);
+		let background = self.theme.bg;
+		let wallpaper_strength = self.wallpaper_strength;
+		let border = self.border;
+		let wallpaper_pixels = self
+			.wallpaper
+			.as_mut()
+			.map(|wallpaper| wallpaper.pixels(inner_width, inner_height, background, wallpaper_strength));
 		let Some(surface) = self.surface.as_mut() else {
 			return;
 		};
@@ -2284,21 +2570,32 @@ impl App {
 		let pixels: &mut [u32] = &mut buf;
 		let (w, h) = (self.width as usize, self.height as usize);
 		let font = &self.font;
-		let fallback_font = self.fallback_font.as_ref();
+		let fallback_fonts = &self.fallback_fonts;
+		let font_choices = &mut self.font_choices;
 		let glyphs = &mut self.glyphs;
 
 		// Caramel rim, then chocolate interior.
 		pixels.fill(self.theme.border);
-		fill_rect(
-			pixels,
-			w,
-			h,
-			self.border,
-			self.border,
-			w.saturating_sub(2 * self.border),
-			h.saturating_sub(2 * self.border),
-			self.theme.bg,
-		);
+		if let Some(wallpaper_pixels) = wallpaper_pixels {
+			let inner_width = inner_width as usize;
+			let inner_height = inner_height as usize;
+			for row in 0..inner_height {
+				let src = row * inner_width;
+				let dst = (row + border) * w + border;
+				pixels[dst..dst + inner_width].copy_from_slice(&wallpaper_pixels[src..src + inner_width]);
+			}
+		} else {
+			fill_rect(
+				pixels,
+				w,
+				h,
+				self.border,
+				self.border,
+				w.saturating_sub(2 * self.border),
+				h.saturating_sub(2 * self.border),
+				self.theme.bg,
+			);
+		}
 
 		let (m, top) = (self.margin, self.top);
 		let ui_px = 18.0 * scale as f32;
@@ -2637,16 +2934,22 @@ impl App {
 				if (cell.ch == ' ' && cell.combining_len == 0) || cell.width == 0 {
 					continue;
 				}
-				let use_fallback = fallback_font.is_some_and(|fallback| {
-					font.lookup_glyph_index(cell.ch) == 0 && fallback.lookup_glyph_index(cell.ch) != 0
-				});
-				let glyph_font = if use_fallback {
-					fallback_font.unwrap()
+				let font_index = if font.lookup_glyph_index(cell.ch) == 0 {
+					*font_choices.entry(cell.ch).or_insert_with(|| {
+						fallback_fonts
+							.iter()
+							.position(|fallback| fallback.lookup_glyph_index(cell.ch) != 0)
+							.map_or(0, |index| index + 1)
+					})
 				} else {
-					font
+					0
 				};
+				let glyph_font = font_index
+					.checked_sub(1)
+					.and_then(|index| fallback_fonts.get(index))
+					.unwrap_or(font);
 				let (gm, bitmap) = glyphs
-					.entry(glyph_cache_key_for(cell.ch, px, use_fallback))
+					.entry(glyph_cache_key_for(cell.ch, px, font_index))
 					.or_insert_with(|| glyph_font.rasterize(cell.ch, px));
 
 				let gx0 = x0 as i32 + gm.xmin;
@@ -2698,16 +3001,22 @@ impl App {
 					if mark == '\u{200d}' || mark == '\u{fe0f}' {
 						continue;
 					}
-					let use_fallback = fallback_font.is_some_and(|fallback| {
-						font.lookup_glyph_index(mark) == 0 && fallback.lookup_glyph_index(mark) != 0
-					});
-					let glyph_font = if use_fallback {
-						fallback_font.unwrap()
+					let font_index = if font.lookup_glyph_index(mark) == 0 {
+						*font_choices.entry(mark).or_insert_with(|| {
+							fallback_fonts
+								.iter()
+								.position(|fallback| fallback.lookup_glyph_index(mark) != 0)
+								.map_or(0, |index| index + 1)
+						})
 					} else {
-						font
+						0
 					};
+					let glyph_font = font_index
+						.checked_sub(1)
+						.and_then(|index| fallback_fonts.get(index))
+						.unwrap_or(font);
 					let (mark_metrics, mark_bitmap) = glyphs
-						.entry(glyph_cache_key_for(mark, px, use_fallback))
+						.entry(glyph_cache_key_for(mark, px, font_index))
 						.or_insert_with(|| glyph_font.rasterize(mark, px));
 					let mark_x = x0 as i32 + (cw as i32 - mark_metrics.width as i32) / 2;
 					let mark_y = y0 as i32 + ascent - mark_metrics.ymin - mark_metrics.height as i32;
@@ -2969,7 +3278,6 @@ impl App {
 			font,
 			glyphs,
 		);
-
 		let _ = buf.present();
 	}
 }
@@ -3105,7 +3413,7 @@ fn draw_text(
 	ascent: i32,
 	color: u32,
 	font: &Font,
-	glyphs: &mut HashMap<(char, u32, bool), (Metrics, Vec<u8>)>,
+	glyphs: &mut HashMap<(char, u32, usize), (Metrics, Vec<u8>)>,
 ) {
 	let mut cursor_x = x as i32;
 	for ch in text.chars() {
@@ -3282,12 +3590,12 @@ fn blend_chunk(bg: u32x4, fg: u32x4, a: u32x4) -> u32x4 {
 	r | g | b
 }
 
-fn glyph_cache_key(ch: char, px: f32) -> (char, u32, bool) {
-	glyph_cache_key_for(ch, px, false)
+fn glyph_cache_key(ch: char, px: f32) -> (char, u32, usize) {
+	glyph_cache_key_for(ch, px, 0)
 }
 
-fn glyph_cache_key_for(ch: char, px: f32, fallback: bool) -> (char, u32, bool) {
-	(ch, px.to_bits(), fallback)
+fn glyph_cache_key_for(ch: char, px: f32, font_index: usize) -> (char, u32, usize) {
+	(ch, px.to_bits(), font_index)
 }
 
 #[cfg(target_os = "macos")]
@@ -3434,6 +3742,12 @@ impl ApplicationHandler<UserEvent> for App {
 				if let Some(win) = &self.window {
 					win.request_redraw();
 				}
+			}
+			WindowEvent::Ime(Ime::Commit(text)) => {
+				let bytes = text.into_bytes();
+				let session = self.active_session_mut();
+				let _ = session.writer.write_all(&bytes);
+				let _ = session.writer.flush();
 			}
 			WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
 				if self.shortcut_matches(
@@ -3796,6 +4110,11 @@ impl ApplicationHandler<UserEvent> for App {
 					let previous_cwd_generation = session.term.cwd_generation;
 
 					session.parser.advance(&mut session.term, &bytes);
+					if let Some(text) = session.term.clipboard_write.take()
+						&& let Err(error) = clipboard_write(&text)
+					{
+						eprintln!("poopterm: OSC 52 clipboard write failed: {error}");
+					}
 
 					cwd_changed = session.term.cwd_generation != previous_cwd_generation;
 					became_active |= session.term.bell != previous_bell
@@ -3842,29 +4161,58 @@ impl ApplicationHandler<UserEvent> for App {
 // ---- main --------------------------------------------------------------------
 
 fn main() -> Result<(), Box<dyn Error>> {
-	if let Some(argument) = env::args().nth(1) {
+	let mut args = env::args().skip(1);
+	if let Some(argument) = args.next() {
 		match argument.as_str() {
 			"--version" | "-V" => println!("poopterm {}", env!("CARGO_PKG_VERSION")),
 			"--help" | "-h" => println!(
-				"Poopterm {}\n\nUsage: poopterm [--version | --help]\n\nLaunches your login shell. Configure appearance and session restore with Settings.\nPOOPTERM_CONFIG overrides the config path; POOPTERM_THEME overrides the theme.",
+				"Poopterm {}\n\nUsage: poopterm [--version | --help | --print-shell-integration SHELL]\n\nLaunches your login shell. Configure appearance and session restore with Settings.\nPOOPTERM_CONFIG overrides the config path; POOPTERM_THEME overrides the theme.\n\nPrint shell hooks with --print-shell-integration zsh|bash|fish.",
 				env!("CARGO_PKG_VERSION")
 			),
+			"--print-shell-integration" => {
+				let shell = args
+					.next()
+					.ok_or("missing shell name; choose zsh, bash, or fish")?;
+				let script = match shell.as_str() {
+					"zsh" => include_str!("../shell-integration/zsh.zsh"),
+					"bash" => include_str!("../shell-integration/bash.sh"),
+					"fish" => include_str!("../shell-integration/fish.fish"),
+					_ => return Err(format!("unsupported shell: {shell}; choose zsh, bash, or fish").into()),
+				};
+				print!("{script}");
+			}
 			_ => return Err(format!("unknown option: {argument}; try --help").into()),
 		}
 		return Ok(());
 	}
 	let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+	run_with_event_loop(event_loop)
+}
+
+fn run_with_event_loop(event_loop: EventLoop<UserEvent>) -> Result<(), Box<dyn Error>> {
 	let proxy = event_loop.create_proxy();
 
-	let (font, fallback_font) = load_fonts();
+	let (font, fallback_fonts) = load_fonts();
 
 	let theme = Theme::load();
+	let settings_editor = SettingsEditor::load();
+	let wallpaper_strength = settings_editor.wallpaper_strength;
+	let wallpaper = read_config_value("wallpaper")
+		.filter(|path| !path.is_empty())
+		.and_then(|path| match Wallpaper::load(&PathBuf::from(path)) {
+			Ok(wallpaper) => Some(wallpaper),
+			Err(error) => {
+				eprintln!("poopterm: wallpaper ignored: {error}");
+				None
+			}
+		});
 	let mut sessions = Vec::new();
+	let (initial_cols, initial_rows) = (100, 30);
 	for (index, cwd) in restored_session_dirs().into_iter().enumerate() {
 		sessions.push(spawn_session(
 			index as u64 + 1,
-			100,
-			30,
+			initial_cols,
+			initial_rows,
 			theme,
 			proxy.clone(),
 			cwd,
@@ -3873,8 +4221,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let next_session_id = sessions.len() as u64 + 1;
 	let mut app = App {
 		theme,
+		wallpaper,
+		wallpaper_strength,
 		font,
-		fallback_font,
+		fallback_fonts,
+		font_choices: HashMap::new(),
 		glyphs: HashMap::new(),
 		px: 18.0,
 		cw: 10,
@@ -3901,7 +4252,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 		settings_width: 0,
 		settings_height: 0,
 		settings_cursor_pos: (0.0, 0.0),
-		settings_editor: SettingsEditor::load(),
+		settings_editor,
 		width: 0,
 		height: 0,
 		ctrl: false,

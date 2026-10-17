@@ -25,6 +25,7 @@ Poopterm is a lightweight, ultra-high-throughput terminal emulator written in Ru
 - Supports semicolon/colon TrueColor, DEC line drawing, and additional text styles.
 - Includes Dark Mode, Light Mode, all four Catppuccin flavors, signature Poop, and a configurable Custom theme.
 - Includes an **About poopterm** page in Settings.
+- Supports PNG, JPEG, and WebP terminal wallpapers with adjustable strength in Settings.
 - Lets macOS users adjust main-window opacity from Settings.
 - Includes a desktop launcher and icon for Linux and FreeBSD.
 - **Gigabit-tier performance:** Utilizes portable SIMD (`std::simd::u32x4`) for vectorized rectangle fills and alpha channel blending, zero-allocation stack buffers for SGR escape sequences, and aggressive compiler optimizations targeting Rust 2024 edition.
@@ -111,8 +112,9 @@ The default config path is `~/Library/Application Support/poopterm/config.toml`
 on macOS and `~/.config/poopterm/config.toml` on Linux and FreeBSD (or
 `$XDG_CONFIG_HOME/poopterm/config.toml` when `XDG_CONFIG_HOME` is set). Create
 the file or open **Settings** from the gear button in the tab bar. Settings
-opens in a separate window with a theme picker, font-size and scrollback controls,
-and a session-restore toggle. Click **Save** to apply the preferences:
+opens in a separate window with a theme picker, wallpaper chooser and strength
+control, font-size and scrollback controls, and a session-restore toggle. Click
+**Save** to apply the preferences:
 
 ```toml
 theme = "catppuccin-mocha"
@@ -120,6 +122,8 @@ font_size = 18           # Logical pixels, 10–32
 scrollback_lines = 5000 # 0–100000; 0 disables history
 restore_sessions = true
 opacity = 100           # macOS main window opacity, 60–100
+wallpaper = "/Users/you/Pictures/terminal.webp" # optional PNG, JPEG, or WebP
+wallpaper_strength = 35 # 0–100; 0 hides the image, 100 shows it at full strength
 shortcut_new_tab = "super+t"
 shortcut_command_palette = "ctrl+shift+p"
 shortcut_cycle_theme = "ctrl+shift+t"
@@ -149,9 +153,11 @@ font_path = "/path/to/YourNerdFontMono-Regular.ttf"
 ```
 
 `font_path` or the `POOPTERM_FONT` environment variable selects a TrueType font
-file; the bundled font supplies glyphs missing from that font. Use a monospaced
-font for predictable terminal cell alignment. `POOPTERM_FONT` takes precedence
-over `font_path`.
+file; glyphs missing from a custom font fall back to the bundled DejaVu Sans Mono
+for Powerline font. Poopterm does not search system fonts automatically. For
+complete htop or other Nerd Font icon coverage, set `font_path` to a Nerd Font
+Mono file. Use a monospaced font for predictable cell alignment.
+`POOPTERM_FONT` takes precedence over `font_path`.
 The older `macos-dark` and `macos-light` values remain accepted for existing configs.
 Settings changes apply immediately after saving; session restore takes effect on
 the next launch. Reducing scrollback discards the oldest lines. Invalid numbers
@@ -161,7 +167,7 @@ comments are preserved when Settings saves. Toolbar text keeps its own size.
 On macOS, use the **Window opacity** controls in Settings and save to make the
 main window translucent. This applies to the entire terminal window; the separate
 Settings window stays opaque. The default is 100%. This setting currently works
-on macOS only. Catppuccin palette attribution and license terms are included in
+on macOS only; blur is not implemented. Catppuccin palette attribution and license terms are included in
 `THIRD_PARTY_NOTICES` and in packaged app resources.
 
 Set `POOPTERM_CONFIG` to use a config file at another path. `POOPTERM_THEME`
@@ -211,11 +217,29 @@ shortcuts; the sample values above are for macOS.
 On Linux, clipboard shortcuts need a clipboard command-line tool: `wl-clipboard`
 for Wayland (`wl-copy` and `wl-paste`), or `xclip`/`xsel` for X11.
 
+### Shell integration
+
+Poopterm can print optional hooks that report command start/exit and the current
+working directory. Review the output, then append it to the startup file for the
+shell you use:
+
+```sh
+poopterm --print-shell-integration zsh >> ~/.zshrc
+poopterm --print-shell-integration bash >> ~/.bashrc
+poopterm --print-shell-integration fish >> ~/.config/fish/config.fish
+```
+
+Use only the command matching your shell. Restart the shell after adding it.
+Remove the generated block between the `poopterm shell integration` comments to
+disable the hooks. Without them, Poopterm still launches the
+shell and tracks OSC 7/133 markers emitted by other integrations.
+
 ### Working directories and session restore
 
 New tabs inherit the active shell's directory. macOS and Linux discover the
 shell directory when opening a tab or closing the window. Shells can also report
-it using OSC 7; BSD requires this for directory changes to be tracked.
+it using OSC 7. On BSD, install the optional shell hooks above to report
+directory changes.
 Close the window to save its tabs; reopening starts fresh login shells in the
 saved directories. Running programs and terminal output are not restored.
 Closing a tab removes it from the saved list, including the last tab.
@@ -269,19 +293,22 @@ must be installed and available on the PATH in that login shell.
 
 Poopterm supports alternate-screen programs such as `nano` and `btop`, common
 cursor and editing sequences, device status replies, scroll regions, 256-color
-and truecolor output, wide-character cell spacing, text selection, clipboard
-shortcuts, bracketed paste, and common mouse reporting. It remains a small emulator rather than a
-complete xterm implementation; advanced terminal applications may rely on
-sequences or input modes that are not supported yet. Combining marks are not
-rendered. Nerd Font icon glyphs are not bundled, so applications that rely on
-them may show missing characters.
+and truecolor output, wide-character cell spacing, combining marks, text selection,
+clipboard shortcuts, bracketed paste, and common mouse reporting. It remains a
+small emulator rather than a complete xterm implementation; advanced terminal
+applications may rely on sequences or input modes that are not supported yet.
+Nerd Font icon glyphs are not bundled, but you can select a Nerd Font Mono file
+with `font_path` or `POOPTERM_FONT`.
 
 ## Font and license
 
 Poopterm bundles DejaVu Sans Mono for Powerline as `assets/font.ttf`. The font is
 distributed under the Bitstream Vera license, with public-domain changes. See
-the [DejaVu font license](https://dejavu-fonts.github.io/License.html). Nerd
-Font symbols are not loaded from system fonts; automatic fallback is not implemented.
+the [DejaVu font license](https://dejavu-fonts.github.io/License.html). A custom
+font falls back to the bundled font for missing glyphs; Poopterm also searches
+common system font directories for up to eight TTF fonts with Nerd Font, Symbol,
+or Awesome in their filenames. For the broadest htop icon coverage, set
+`font_path` to a Nerd Font Mono file.
 
 Poopterm is MIT licensed; see [LICENSE](LICENSE).
 
@@ -293,13 +320,19 @@ Poopterm is MIT licensed; see [LICENSE](LICENSE).
   the mode. See the [protocol specification](https://github.com/contour-terminal/vt-extensions/blob/master/synchronized-output.md).
 - **Shell integration:** OSC 133 `A`, `B`, `C`, and `D;exit_code` mark the prompt,
   command input, output, and completion. Poopterm retains the latest 256 markers
-  and shows running/exit status in the status bar. Your shell or wrapper must
-  emit these markers; Poopterm does not change startup files or inject scripts.
+  and shows running/exit status in the status bar. Optional hooks are available
+  for zsh, Bash, and fish; install them explicitly with the instructions below.
+  The hooks also emit OSC 7 so BSD shells can report their working directory.
   See [OSC 133 semantics](https://iterm2.com/documentation-escape-codes.html).
+- **OSC 52:** Clipboard writes to the `c` selection are supported up to 1 MiB.
+  Clipboard read requests are ignored so shell programs cannot read clipboard
+  contents without consent.
 - **Sixel:** DCS `q` images support RGB/HLS registers, repeated columns,
-  transparency, raster dimensions, and integer pixel aspect ratios. Images are
-  capped at 2,048 × 2,048 pixels and 1 MiB of encoded data. Each screen retains
-  at most 16 images within a 4-megapixel budget. Images are discarded on text
+  transparency, raster dimensions, and integer pixel aspect ratios. Defensive
+  limits cap an image at 4,096 × 4,096 pixels, 16 megapixels, and 4 MiB encoded.
+  Each screen retains at most 16 images and evicts older images to keep its
+  retained bitmap budget near 4 megapixels; a single accepted image can exceed
+  that budget. Oversized or malformed transfers are discarded. Images are discarded on text
   overwrite or scrolling out of view; image scrollback and partial bitmap
   erasure are not implemented. See [DEC's Sixel reference](https://vt100.net/docs/vt3xx-gp/chapter14.html).
 

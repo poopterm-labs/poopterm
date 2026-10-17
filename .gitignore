@@ -57,3 +57,6 @@ rust-project.json
 
 # Defer AUR packaging until Linux support is ready
 /packaging/aur/
+
+# Deferred Android package-environment and parity experiment
+/android/deferred/

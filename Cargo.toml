@@ -1,6 +1,6 @@
 [package]
 name = "poopterm"
-version = "0.42.0"
+version = "0.43.0"
 edition = "2024"
 license = "MIT"
 
@@ -11,6 +11,8 @@ portable-pty = "^0.9"
 vte = "^0.15"
 fontdue = "^0.9"
 unicode-width = "^0.2"
+image = { version = "^0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+rfd = { version = "^0.17", default-features = false, features = ["xdg-portal"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.5"

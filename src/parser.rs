@@ -616,6 +616,15 @@ impl Term {
 			return;
 		};
 		match command {
+			b"52" if params.len() >= 3 && params[1] == b"c" && params[2] != b"?" => {
+				// OSC 52 clipboard reads are deliberately not answered: doing so would
+				// disclose the user's clipboard to any process running in the shell.
+				if let Some(bytes) = decode_base64(params[2])
+					&& let Ok(text) = String::from_utf8(bytes)
+				{
+					self.clipboard_write = Some(text);
+				}
+			}
 			b"8" if params.len() >= 3 => {
 				let uri = params[2];
 				if uri.is_empty() {
@@ -726,6 +735,55 @@ impl Term {
 	fn indexed_color(&self, index: u8) -> u32 {
 		self.color_overrides[index as usize].unwrap_or_else(|| xterm_color(index, self.palette))
 	}
+}
+
+fn decode_base64(input: &[u8]) -> Option<Vec<u8>> {
+	const MAX_CLIPBOARD_BYTES: usize = 1024 * 1024;
+	if input.len() > MAX_CLIPBOARD_BYTES.saturating_mul(4) / 3 + 4 || input.len() % 4 != 0 {
+		return None;
+	}
+	let mut output = Vec::with_capacity(input.len() / 4 * 3);
+	for (index, chunk) in input.chunks_exact(4).enumerate() {
+		let last = index + 1 == input.len() / 4;
+		let value = |byte| match byte {
+			b'A'..=b'Z' => Some(byte - b'A'),
+			b'a'..=b'z' => Some(byte - b'a' + 26),
+			b'0'..=b'9' => Some(byte - b'0' + 52),
+			b'+' => Some(62),
+			b'/' => Some(63),
+			_ => None,
+		};
+		let a = value(chunk[0])? as u32;
+		let b = value(chunk[1])? as u32;
+		let c = if chunk[2] == b'=' {
+			if !last || chunk[3] != b'=' || b & 0x0f != 0 {
+				return None;
+			}
+			None
+		} else {
+			Some(value(chunk[2])? as u32)
+		};
+		let d = if chunk[3] == b'=' {
+			if !last || c.is_none() || c.is_some_and(|value| value & 0x03 != 0) {
+				return None;
+			}
+			None
+		} else {
+			Some(value(chunk[3])? as u32)
+		};
+		let bits = (a << 18) | (b << 12) | (c.unwrap_or(0) << 6) | d.unwrap_or(0);
+		output.push((bits >> 16) as u8);
+		if c.is_some() {
+			output.push((bits >> 8) as u8);
+		}
+		if d.is_some() {
+			output.push(bits as u8);
+		}
+		if output.len() > MAX_CLIPBOARD_BYTES {
+			return None;
+		}
+	}
+	Some(output)
 }
 
 fn osc_color_reply(command: &[u8], color: u32) -> Vec<u8> {

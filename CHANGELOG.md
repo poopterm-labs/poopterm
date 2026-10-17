@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.43.0 — 2026-10-17
+
+### Added
+
+- Added selectable PNG, JPEG, and WebP terminal wallpapers with an adjustable strength control in Settings.
+- Added optional zsh, Bash, and fish shell hooks for command markers and working-directory tracking.
+- Added OSC 52 clipboard writes while leaving clipboard read requests unanswered.
+- Added system Nerd Font and symbol-font fallback discovery for missing glyphs.
+
+### Improved
+
+- Cached resized wallpaper pixels and reused PTY reader buffers to reduce redraw and output-processing overhead.
+- Optimized common SGR parsing and opaque Sixel image rendering.
+- Preserved session startup when a previously saved working directory no longer exists.
+
 ## 0.42.0 — 2026-10-17
 
 ### Added
