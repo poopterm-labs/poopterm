@@ -1,12 +1,20 @@
 # Changelog
 
-## 0.4.0-1 — 2026-10-16
+## 0.42.0 — 2026-10-17
+
+### Added
+
+- Added a Custom theme with foreground, background, border, and ANSI color overrides; user-selected TrueType fonts with bundled glyph fallback.
+- Added a searchable command palette, tab renaming, configurable keyboard shortcuts, and the About poopterm page in Settings.
+- Added OSC 8 hyperlinks, local `file://` links, basic Unicode cluster retention, and initial Kitty keyboard protocol support.
+- Added saved main-window opacity controls on macOS.
+- Bundled Catppuccin's MIT license notice in `THIRD_PARTY_NOTICES`.
 
 ### Fixed
 
-- Replaced the incomplete hand-rolled ANSI byte parser with vte's incremental parser and fixed a duplicate indexed-color method that prevented compilation.
-- Expanded SGR, OSC palette and terminal mode handling; preserved parser state across PTY reads.
-- Renamed the macOS theme choices to Dark Mode and Light Mode; verified Catppuccin ANSI, foreground, background, and border colors against the official palette.
+- Replaced the incomplete hand-rolled ANSI byte parser with vte's incremental parser and expanded SGR, OSC, and terminal mode handling.
+- Improved terminal resize, alternate-screen, cursor, and color handling.
+- Corrected Light/Dark theme labels and checked Catppuccin palette values against upstream.
 
 ## 0.4.0 — 2026-10-16
 
@@ -38,4 +46,4 @@
 
 ### Limits
 
-This is a growing emulator, not complete xterm compliance. Combining marks, custom font fallback, and terminal image protocols other than Sixel remain unsupported. Sixel images are limited to 2,048 × 2,048 pixels, 1 MiB encoded data, 256 color registers, and 16 retained images within a 4-megapixel budget per screen. Images are discarded when their cells are overwritten or they scroll out of the visible region; image scrollback and partial bitmap erasure are not supported. Sixel aspect ratios are integer-rounded (1–10). The standard sixel display/scrolling mode 80 is supported. Shell integration requires shell-emitted OSC 133 markers; shell startup files are never modified automatically.
+This is a growing emulator, not complete xterm compliance. Combining marks and basic ZWJ sequences stay with their base cell, but full grapheme shaping and complex-script shaping are not implemented. Kitty keyboard support covers the basic disambiguation mode rather than every progressive enhancement. Terminal image protocols other than Sixel remain unsupported. Sixel images are limited to 2,048 × 2,048 pixels, 1 MiB encoded data, 256 color registers, and 16 retained images within a 4-megapixel budget per screen. Images are discarded when their cells are overwritten or they scroll out of the visible region; image scrollback and partial bitmap erasure are not supported. Sixel aspect ratios are integer-rounded (1–10). The standard sixel display/scrolling mode 80 is supported. Shell integration requires shell-emitted OSC 133 markers; shell startup files are never modified automatically.

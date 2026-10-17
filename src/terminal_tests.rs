@@ -140,6 +140,39 @@ fn partial_parser_chunks_and_wide_overwrite() {
 }
 
 #[test]
+fn combining_marks_and_joined_emoji_stay_with_their_base_cell() {
+	let mut t = terminal(16, 2);
+	feed(&mut t, "e\u{301}👨‍👩‍👧‍👦".as_bytes());
+	assert_eq!(t.cells[0].ch, 'e');
+	assert_eq!(t.cells[0].combining[0], '\u{301}');
+	assert_eq!(t.cells[1].ch, '👨');
+	assert_eq!(t.cells[1].width, 2);
+	assert!(t.cells[1].combining[..t.cells[1].combining_len as usize].contains(&'👩'));
+}
+
+#[test]
+fn osc8_hyperlinks_are_attached_to_printed_cells_and_can_be_closed() {
+	let mut t = terminal(24, 2);
+	feed(
+		&mut t,
+		b"\x1b]8;id=docs;https://example.com/docs\x1b\\docs\x1b]8;;\x1b\\ plain",
+	);
+	let link = t.cells[0].hyperlink;
+	assert_ne!(link, 0);
+	assert_eq!(t.hyperlinks[link as usize], "https://example.com/docs");
+	assert_eq!(t.cells[5].hyperlink, 0);
+}
+
+#[test]
+fn kitty_keyboard_mode_can_be_enabled_and_restored() {
+	let mut t = terminal(12, 2);
+	feed(&mut t, b"\x1b[>1u");
+	assert!(t.kitty_keyboard);
+	feed(&mut t, b"\x1b[<u");
+	assert!(!t.kitty_keyboard);
+}
+
+#[test]
 fn unsupported_private_sequences_do_not_execute_normal_commands() {
 	let mut t = terminal(4, 2);
 	feed(&mut t, b"abcd\x1b[?2J");

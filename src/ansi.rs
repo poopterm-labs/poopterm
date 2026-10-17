@@ -12,9 +12,12 @@ use std::{
 pub(crate) struct Cell {
 	pub(crate) attrs: u8,
 	pub(crate) ch: char,
+	pub(crate) combining: [char; 8],
+	pub(crate) combining_len: u8,
 	pub(crate) fg: u32,
 	pub(crate) bg: u32,
 	pub(crate) width: u8,
+	pub(crate) hyperlink: u16,
 }
 
 #[derive(Clone, Copy)]
@@ -71,6 +74,9 @@ pub(crate) struct Term {
 	pub(crate) origin_mode: bool,
 	pub(crate) auto_wrap: bool,
 	pub(crate) insert_mode: bool,
+	pub(crate) kitty_keyboard: bool,
+	pub(crate) active_hyperlink: u16,
+	pub(crate) hyperlinks: Vec<String>,
 	pub(crate) wrap_pending: bool,
 	pub(crate) charsets: [bool; 2],
 	pub(crate) active_charset: usize,
@@ -210,9 +216,12 @@ impl Term {
 		Cell {
 			attrs: self.attrs,
 			ch: ' ',
+			combining: ['\0'; 8],
+			combining_len: 0,
 			fg: self.fg,
 			bg: self.bg,
 			width: 1,
+			hyperlink: 0,
 		}
 	}
 
@@ -236,9 +245,12 @@ impl Term {
 				Cell {
 					attrs: 0,
 					ch: ' ',
+					combining: ['\0'; 8],
+					combining_len: 0,
 					fg: theme.fg,
 					bg: theme.bg,
 					width: 1,
+					hyperlink: 0,
 				};
 				cols * rows
 			],
@@ -266,6 +278,9 @@ impl Term {
 			origin_mode: false,
 			auto_wrap: true,
 			insert_mode: false,
+			kitty_keyboard: false,
+			active_hyperlink: 0,
+			hyperlinks: vec![String::new()],
 			wrap_pending: false,
 			charsets: [false; 2],
 			active_charset: 0,

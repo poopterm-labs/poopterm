@@ -6,6 +6,7 @@ pub struct Preferences {
 	pub font_size: usize,
 	pub scrollback_lines: usize,
 	pub restore_sessions: bool,
+	pub opacity: usize,
 }
 
 impl Default for Preferences {
@@ -14,6 +15,7 @@ impl Default for Preferences {
 			font_size: 18,
 			scrollback_lines: 5000,
 			restore_sessions: true,
+			opacity: 100,
 		}
 	}
 }
@@ -33,6 +35,10 @@ impl Preferences {
 			restore_sessions: value(text, "restore_sessions")
 				.and_then(|s| s.parse().ok())
 				.unwrap_or(defaults.restore_sessions),
+			opacity: value(text, "opacity")
+				.and_then(|s| s.parse().ok())
+				.unwrap_or(defaults.opacity)
+				.clamp(60, 100),
 		}
 	}
 	pub fn load() -> Self {
@@ -106,11 +112,13 @@ mod tests {
 	#[test]
 	fn invalid_preferences_are_bounded() {
 		let p = Preferences::parse(
-			"font_size = 999\nscrollback_lines = 999999999\nrestore_sessions = nonsense",
+			"font_size = 999\nscrollback_lines = 999999999\nrestore_sessions = nonsense\nopacity = 120",
 		);
 		assert_eq!(p.font_size, 32);
 		assert_eq!(p.scrollback_lines, 100_000);
 		assert!(p.restore_sessions);
+		assert_eq!(p.opacity, 100);
 		assert_eq!(Preferences::parse("font_size = -1").font_size, 18);
+		assert_eq!(Preferences::parse("opacity = 25").opacity, 60);
 	}
 }

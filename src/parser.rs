@@ -161,6 +161,28 @@ impl Term {
 			c
 		};
 		let width = c.width().unwrap_or(0).min(self.cols);
+		let mut previous = if self.wrap_pending {
+			self.idx(self.cx, self.cy)
+		} else if self.cx > 0 {
+			self.idx(self.cx - 1, self.cy)
+		} else {
+			usize::MAX
+		};
+		if previous < self.cells.len() && self.cells[previous].width == 0 {
+			previous = previous.saturating_sub(1);
+		}
+		let joins_previous = previous < self.cells.len()
+			&& self.cells[previous].combining_len > 0
+			&& self.cells[previous].combining[self.cells[previous].combining_len as usize - 1]
+				== '\u{200d}';
+		if (width == 0 || joins_previous) && previous < self.cells.len() {
+			let cell = &mut self.cells[previous];
+			if (width == 0 || joins_previous) && (cell.combining_len as usize) < cell.combining.len() {
+				cell.combining[cell.combining_len as usize] = c;
+				cell.combining_len += 1;
+			}
+			return;
+		}
 		if width == 0 {
 			return;
 		}
@@ -215,17 +237,23 @@ impl Term {
 		self.cells[i] = Cell {
 			attrs: self.attrs,
 			ch: c,
+			combining: ['\0'; 8],
+			combining_len: 0,
 			fg,
 			bg,
 			width: width as u8,
+			hyperlink: self.active_hyperlink,
 		};
 		if width == 2 && self.cx + 1 < self.cols {
 			self.cells[i + 1] = Cell {
 				attrs: self.attrs,
 				ch: ' ',
+				combining: ['\0'; 8],
+				combining_len: 0,
 				fg,
 				bg,
 				width: 0,
+				hyperlink: self.active_hyperlink,
 			};
 		}
 		self.wrap_pending = self.cx + width >= self.cols;
@@ -278,6 +306,14 @@ impl Term {
 		}
 		let private = intermediates == b"?";
 		if !intermediates.is_empty() && !private {
+			if action == 'u' && intermediates == b">" {
+				self.kitty_keyboard = params.iter().any(|p| p.first() == Some(&1));
+				return;
+			}
+			if action == 'u' && intermediates == b"<" {
+				self.kitty_keyboard = false;
+				return;
+			}
 			return;
 		}
 		if !matches!(action, 'm' | 'n' | 'c' | 'h' | 'l' | 's' | 'u') {
@@ -327,6 +363,12 @@ impl Term {
 					_ => {}
 				}
 			}
+			return;
+		}
+		if private && action == 'u' {
+			self
+				.responses
+				.push(format!("\x1b[?{}u", if self.kitty_keyboard { 1 } else { 0 }).into_bytes());
 			return;
 		}
 
@@ -554,6 +596,19 @@ impl Term {
 			return;
 		};
 		match command {
+			b"8" if params.len() >= 3 => {
+				let uri = params[2];
+				if uri.is_empty() {
+					self.active_hyperlink = 0;
+				} else if uri.len() <= 2048
+					&& let Ok(uri) = std::str::from_utf8(uri)
+					&& !uri.chars().any(char::is_control)
+					&& self.hyperlinks.len() < 4096
+				{
+					self.hyperlinks.push(uri.to_owned());
+					self.active_hyperlink = (self.hyperlinks.len() - 1) as u16;
+				}
+			}
 			b"133" => self.shell.record(
 				params,
 				self.history_base + self.scrollback.len() + self.cy,

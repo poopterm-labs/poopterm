@@ -72,6 +72,7 @@ enum ThemeKind {
 	CatppuccinMacchiato,
 	CatppuccinMocha,
 	Poop,
+	Custom,
 }
 
 impl ThemeKind {
@@ -84,6 +85,7 @@ impl ThemeKind {
 			"catppuccin-frappe" => Some(Self::CatppuccinFrappe),
 			"catppuccin-macchiato" => Some(Self::CatppuccinMacchiato),
 			"poop" => Some(Self::Poop),
+			"custom" => Some(Self::Custom),
 			_ => None,
 		}
 	}
@@ -96,6 +98,7 @@ impl ThemeKind {
 			Self::CatppuccinMacchiato => "catppuccin-macchiato",
 			Self::CatppuccinMocha => "catppuccin-mocha",
 			Self::Poop => "poop",
+			Self::Custom => "custom",
 		}
 	}
 	fn next(self) -> Self {
@@ -107,6 +110,7 @@ impl ThemeKind {
 			Self::CatppuccinMacchiato => Self::CatppuccinMocha,
 			Self::CatppuccinMocha => Self::Poop,
 			Self::Poop => Self::MacOsDark,
+			Self::Custom => Self::MacOsDark,
 		}
 	}
 }
@@ -175,6 +179,11 @@ impl Theme {
 				border: BORDER_COL,
 				palette: PALETTE,
 			},
+			ThemeKind::Custom => {
+				let mut theme = Self::from_kind(ThemeKind::Poop);
+				theme.kind = ThemeKind::Custom;
+				theme
+			}
 		}
 	}
 
@@ -184,8 +193,35 @@ impl Theme {
 			.and_then(|s| ThemeKind::parse(&s))
 			.or_else(read_config_theme)
 			.unwrap_or(ThemeKind::Poop);
-		Self::from_kind(kind)
+		let mut theme = Self::from_kind(kind);
+		for (key, target) in [
+			("foreground", &mut theme.fg),
+			("background", &mut theme.bg),
+			("border", &mut theme.border),
+		] {
+			if let Some(color) = read_config_value(key).and_then(|value| parse_color(&value)) {
+				*target = color;
+			}
+		}
+		for (index, color) in theme.palette.iter_mut().enumerate() {
+			if let Some(value) =
+				read_config_value(&format!("color{index}")).and_then(|value| parse_color(&value))
+			{
+				*color = value;
+			}
+		}
+		theme
 	}
+}
+
+fn parse_color(value: &str) -> Option<u32> {
+	let value = value.trim().trim_matches('"');
+	let value = value
+		.strip_prefix('#')
+		.or_else(|| value.strip_prefix("0x"))?;
+	(value.len() == 6)
+		.then(|| u32::from_str_radix(value, 16).ok())
+		.flatten()
 }
 
 fn config_path() -> PathBuf {
@@ -285,6 +321,37 @@ fn read_config_value(key: &str) -> Option<String> {
 	config::value(&fs::read_to_string(config_path()).ok()?, key)
 }
 
+fn load_fonts() -> (Font, Option<Font>) {
+	let bundled = Font::from_bytes(
+		include_bytes!("../assets/font.ttf") as &[u8],
+		FontSettings::default(),
+	)
+	.expect("bundled font is valid");
+	let configured = env::var("POOPTERM_FONT")
+		.ok()
+		.or_else(|| read_config_value("font_path"));
+	let Some(path) = configured else {
+		return (bundled, None);
+	};
+	let path = path
+		.strip_prefix("~/")
+		.map_or(PathBuf::from(&path), |tail| default_cwd().join(tail));
+	match fs::read(&path)
+		.map_err(|error| error.to_string())
+		.and_then(|bytes| {
+			Font::from_bytes(bytes, FontSettings::default()).map_err(|error| error.to_string())
+		}) {
+		Ok(font) => (font, Some(bundled)),
+		Err(error) => {
+			eprintln!(
+				"poopterm: couldn't load font {}: {error}; using bundled font",
+				path.display()
+			);
+			(bundled, None)
+		}
+	}
+}
+
 fn save_config_theme(kind: ThemeKind) -> std::io::Result<()> {
 	config::save(&config_path(), &[("theme", format!("\"{}\"", kind.name()))])
 }
@@ -356,6 +423,7 @@ struct Session {
 	id: u64,
 	term: Term,
 	parser: Parser,
+	custom_title: Option<String>,
 	master: Box<dyn MasterPty + Send>,
 	writer: Box<dyn Write + Send>,
 	_child: Box<dyn Child + Send + Sync>,
@@ -378,14 +446,16 @@ struct SettingsEditor {
 	theme: ThemeKind,
 	preferences: Preferences,
 	status: String,
+	about: bool,
 }
 
 impl SettingsEditor {
 	fn load() -> Self {
 		Self {
-			theme: read_config_theme().unwrap_or(ThemeKind::Poop),
+			theme: Theme::load().kind,
 			preferences: Preferences::load(),
 			status: "Change preferences, then click Save.".into(),
+			about: false,
 		}
 	}
 }
@@ -519,6 +589,7 @@ fn spawn_session(
 		id,
 		term,
 		parser: Parser::new(),
+		custom_title: None,
 		master: pair.master,
 		writer,
 		_child: child,
@@ -531,7 +602,8 @@ fn spawn_session(
 struct App {
 	theme: Theme,
 	font: Font,
-	glyphs: HashMap<(char, u32), (Metrics, Vec<u8>)>,
+	fallback_font: Option<Font>,
+	glyphs: HashMap<(char, u32, bool), (Metrics, Vec<u8>)>,
 	px: f32,
 	cw: usize,
 	ch: usize,
@@ -564,6 +636,7 @@ struct App {
 	height: u32,
 	ctrl: bool,
 	shift: bool,
+	alt: bool,
 	super_key: bool,
 	cursor_pos: (f64, f64),
 	mouse_button_down: bool,
@@ -574,6 +647,9 @@ struct App {
 	search_query: String,
 	search_matches: Vec<Selection>,
 	search_match_index: usize,
+	command_palette: bool,
+	command_query: String,
+	renaming_tab: bool,
 }
 
 fn find_matches(term: &Term, query: &str) -> Vec<Selection> {
@@ -746,11 +822,16 @@ impl App {
 				("font_size", preferences.font_size.to_string()),
 				("scrollback_lines", preferences.scrollback_lines.to_string()),
 				("restore_sessions", preferences.restore_sessions.to_string()),
+				("opacity", preferences.opacity.to_string()),
 			],
 		);
 		match result {
 			Ok(()) => {
-				self.theme = Theme::from_kind(self.settings_editor.theme);
+				self.theme = Theme::load();
+				#[cfg(target_os = "macos")]
+				if let Some(window) = &self.window {
+					set_window_opacity(window, preferences.opacity);
+				}
 				for session in &mut self.sessions {
 					session.term.set_theme(self.theme);
 					session.term.scrollback_limit = preferences.scrollback_lines;
@@ -824,6 +905,73 @@ impl App {
 		let content_w = width.saturating_sub(48 * scale);
 		let font = &self.font;
 		let glyphs = &mut self.glyphs;
+		if self.settings_editor.about {
+			draw_text(
+				pixels,
+				width,
+				height,
+				x,
+				28 * scale,
+				"About poopterm",
+				px * 1.3,
+				ascent,
+				self.theme.fg,
+				font,
+				glyphs,
+			);
+			for (line, text) in [
+				(104, concat!("Version ", env!("CARGO_PKG_VERSION"))),
+				(148, "A small, native terminal emulator written in Rust."),
+				(184, "Copyright © 2026 poopware-labs"),
+				(220, "Licensed under the MIT License."),
+				(256, "Source: github.com/poopterm-labs/poopterm"),
+				(292, "Built with Rust, winit, softbuffer, fontdue, and vte."),
+			] {
+				draw_text(
+					pixels,
+					width,
+					height,
+					x,
+					line * scale,
+					text,
+					px * 0.82,
+					ascent,
+					self.theme.fg,
+					font,
+					glyphs,
+				);
+			}
+			let back_x = width.saturating_sub(164 * scale);
+			draw_kde_button(
+				pixels,
+				width,
+				height,
+				back_x,
+				20 * scale,
+				140 * scale,
+				36 * scale,
+				scale,
+				self.theme.bg,
+				self.theme.border,
+				self.theme.palette[4],
+				false,
+			);
+			draw_text(
+				pixels,
+				width,
+				height,
+				back_x + 22 * scale,
+				27 * scale,
+				"Settings",
+				px * 0.8,
+				ascent,
+				self.theme.fg,
+				font,
+				glyphs,
+			);
+			let _ = buffer.present();
+			return;
+		}
 		draw_text(
 			pixels,
 			width,
@@ -832,6 +980,37 @@ impl App {
 			24 * scale,
 			"Poopterm Settings",
 			px,
+			ascent,
+			self.theme.fg,
+			font,
+			glyphs,
+		);
+		let about_x = width.saturating_sub(140 * scale);
+		draw_kde_button(
+			pixels,
+			width,
+			height,
+			about_x,
+			20 * scale,
+			116 * scale,
+			36 * scale,
+			scale,
+			self.theme.bg,
+			self.theme.border,
+			self.theme.palette[4],
+			self.settings_cursor_pos.0 >= about_x as f64
+				&& self.settings_cursor_pos.0 < (about_x + 116 * scale) as f64
+				&& self.settings_cursor_pos.1 >= (20 * scale) as f64
+				&& self.settings_cursor_pos.1 < (56 * scale) as f64,
+		);
+		draw_text(
+			pixels,
+			width,
+			height,
+			about_x + 25 * scale,
+			27 * scale,
+			"About",
+			px * 0.8,
 			ascent,
 			self.theme.fg,
 			font,
@@ -873,6 +1052,7 @@ impl App {
 			ThemeKind::CatppuccinMacchiato,
 			ThemeKind::CatppuccinMocha,
 			ThemeKind::Poop,
+			ThemeKind::Custom,
 		];
 		let index = themes
 			.iter()
@@ -926,6 +1106,7 @@ impl App {
 		let theme_name = match self.settings_editor.theme {
 			ThemeKind::MacOsDark => "Dark Mode".to_owned(),
 			ThemeKind::MacOsLight => "Light Mode".to_owned(),
+			ThemeKind::Custom => "Custom".to_owned(),
 			_ => self
 				.settings_editor
 				.theme
@@ -1078,6 +1259,68 @@ impl App {
 				glyphs,
 			);
 		}
+		#[cfg(target_os = "macos")]
+		{
+			let row = 438;
+			draw_text(
+				pixels,
+				width,
+				height,
+				x,
+				(row + 8) * scale,
+				"Window opacity",
+				px * 0.82,
+				ascent,
+				self.theme.fg,
+				font,
+				glyphs,
+			);
+			for (bx, text) in [
+				(width.saturating_sub(240 * scale), "−"),
+				(width.saturating_sub(72 * scale), "+"),
+			] {
+				draw_kde_button(
+					pixels,
+					width,
+					height,
+					bx,
+					row * scale,
+					48 * scale,
+					40 * scale,
+					scale,
+					self.theme.bg,
+					self.theme.border,
+					self.theme.palette[4],
+					false,
+				);
+				draw_text(
+					pixels,
+					width,
+					height,
+					bx + 16 * scale,
+					(row + 7) * scale,
+					text,
+					px,
+					ascent,
+					self.theme.fg,
+					font,
+					glyphs,
+				);
+			}
+			draw_text(
+				pixels,
+				width,
+				height,
+				width.saturating_sub(180 * scale),
+				(row + 8) * scale,
+				&format!("{}%", self.settings_editor.preferences.opacity),
+				px * 0.82,
+				ascent,
+				self.theme.fg,
+				font,
+				glyphs,
+			);
+		}
 		let save_x = width.saturating_sub(140 * scale);
 		let save_y = height.saturating_sub(52 * scale);
 		let save_w = 120 * scale;
@@ -1168,6 +1411,22 @@ impl App {
 					self.settings_cursor_pos.0.max(0.0) as usize,
 					self.settings_cursor_pos.1.max(0.0) as usize,
 				);
+				let about_x = (self.settings_width as usize).saturating_sub(140 * scale);
+				if (20 * scale..56 * scale).contains(&y)
+					&& x >= about_x
+					&& x
+						< about_x
+							+ if self.settings_editor.about {
+								140 * scale
+							} else {
+								116 * scale
+							} {
+					self.settings_editor.about = !self.settings_editor.about;
+					if let Some(window) = &self.settings_window {
+						window.request_redraw();
+					}
+					return;
+				}
 				let save_x = (self.settings_width as usize).saturating_sub(140 * scale);
 				let save_y = (self.settings_height as usize).saturating_sub(52 * scale);
 				if x >= save_x && x < save_x + 120 * scale && y >= save_y && y < save_y + 36 * scale {
@@ -1206,6 +1465,12 @@ impl App {
 						};
 					} else if (382 * scale..422 * scale).contains(&y) {
 						prefs.restore_sessions = !prefs.restore_sessions;
+					} else if cfg!(target_os = "macos") && (438 * scale..478 * scale).contains(&y) {
+						prefs.opacity = if increase {
+							(prefs.opacity + 5).min(100)
+						} else {
+							prefs.opacity.saturating_sub(5).max(60)
+						};
 					}
 					if let Some(window) = &self.settings_window {
 						window.request_redraw();
@@ -1224,6 +1489,7 @@ impl App {
 						ThemeKind::CatppuccinMacchiato,
 						ThemeKind::CatppuccinMocha,
 						ThemeKind::Poop,
+						ThemeKind::Custom,
 					];
 					let index = themes
 						.iter()
@@ -1247,6 +1513,13 @@ impl App {
 					return;
 				}
 				if matches!(&event.logical_key, Key::Named(NamedKey::Escape)) {
+					if self.settings_editor.about {
+						self.settings_editor.about = false;
+						if let Some(window) = &self.settings_window {
+							window.request_redraw();
+						}
+						return;
+					}
 					self.settings_window = None;
 					self.settings_surface = None;
 					self._settings_context = None;
@@ -1260,6 +1533,7 @@ impl App {
 					ThemeKind::CatppuccinMacchiato,
 					ThemeKind::CatppuccinMocha,
 					ThemeKind::Poop,
+					ThemeKind::Custom,
 				];
 				let index = themes
 					.iter()
@@ -1380,7 +1654,10 @@ impl App {
 	}
 
 	fn update_window_title(&mut self) {
-		let title = self.active_term().title.clone();
+		let title = self.sessions[self.active]
+			.custom_title
+			.clone()
+			.unwrap_or_else(|| self.active_term().title.clone());
 		if self.reported_title == title {
 			return;
 		}
@@ -1468,6 +1745,7 @@ impl App {
 			for cell in cells.iter().take(to + 1).skip(from) {
 				if cell.width != 0 {
 					result.push(cell.ch);
+					result.extend(cell.combining.iter().take(cell.combining_len as usize));
 				}
 			}
 			if row != end.row {
@@ -1506,7 +1784,15 @@ impl App {
 			cells[start..end]
 				.iter()
 				.filter(|cell| cell.width != 0)
-				.map(|cell| cell.ch)
+				.flat_map(|cell| {
+					std::iter::once(cell.ch).chain(
+						cell
+							.combining
+							.iter()
+							.take(cell.combining_len as usize)
+							.copied(),
+					)
+				})
 				.collect::<String>()
 				.trim_matches(|ch: char| matches!(ch, ')' | ']' | '}' | ',' | '.' | ';' | ':'))
 				.to_owned(),
@@ -1520,9 +1806,30 @@ impl App {
 		let Some(token) = self.token_at(point) else {
 			return false;
 		};
+		let term = self.active_term();
+		let explicit = term
+			.row_cells(point.row)
+			.and_then(|cells| cells.get(point.col))
+			.and_then(|cell| term.hyperlinks.get(cell.hyperlink as usize))
+			.filter(|uri| !uri.is_empty());
+		let token = explicit.map(String::as_str).unwrap_or(&token);
 		if token.starts_with("https://") || token.starts_with("http://") {
 			if let Err(error) = open_external(&token) {
 				eprintln!("poopterm: could not open link: {error}");
+			}
+			return true;
+		}
+		let file_path = token.strip_prefix("file://").and_then(|uri| {
+			let path = if uri.starts_with('/') {
+				Some(uri)
+			} else {
+				uri.strip_prefix("localhost")
+			};
+			path.and_then(decode_uri_path)
+		});
+		if let Some(path) = file_path {
+			if let Err(error) = open_external(&path.to_string_lossy()) {
+				eprintln!("poopterm: could not open linked file: {error}");
 			}
 			return true;
 		}
@@ -1647,12 +1954,12 @@ impl App {
 	}
 
 	fn apply_theme(&mut self, kind: ThemeKind) {
-		self.theme = Theme::from_kind(kind);
+		if let Err(error) = save_config_theme(kind) {
+			eprintln!("poopterm: could not save theme config: {error}");
+		}
+		self.theme = Theme::load();
 		for session in &mut self.sessions {
 			session.term.set_theme(self.theme);
-		}
-		if let Err(error) = save_config_theme(self.theme.kind) {
-			eprintln!("poopterm: could not save theme config: {error}");
 		}
 		if let Some(window) = &self.window {
 			window.request_redraw();
@@ -1697,7 +2004,177 @@ impl App {
 		}
 	}
 
+	fn shortcut_matches(&self, key: &Key, config_key: &str, default: &str) -> bool {
+		let binding = read_config_value(config_key).unwrap_or_else(|| default.to_owned());
+		let parts: Vec<_> = binding
+			.to_ascii_lowercase()
+			.split('+')
+			.map(str::to_owned)
+			.collect();
+		let Some(name) = parts.last() else {
+			return false;
+		};
+		let expected = |modifier: &str| parts.iter().any(|part| part == modifier);
+		let key_matches = matches!(key, Key::Character(value) if value.eq_ignore_ascii_case(name));
+		key_matches
+			&& self.ctrl == expected("ctrl")
+			&& self.shift == expected("shift")
+			&& self.alt == expected("alt")
+			&& self.super_key == expected("super")
+	}
+
 	fn key_bytes(&self, key: &Key) -> Option<Vec<u8>> {
+		if self.active_term().kitty_keyboard {
+			let modifiers = 1
+				+ u8::from(self.shift)
+				+ 2 * u8::from(self.alt)
+				+ 4 * u8::from(self.ctrl)
+				+ 8 * u8::from(self.super_key);
+			let letter = match key {
+				Key::Named(NamedKey::ArrowUp) => Some('A'),
+				Key::Named(NamedKey::ArrowDown) => Some('B'),
+				Key::Named(NamedKey::ArrowRight) => Some('C'),
+				Key::Named(NamedKey::ArrowLeft) => Some('D'),
+				Key::Named(NamedKey::Home) => Some('H'),
+				Key::Named(NamedKey::End) => Some('F'),
+				_ => None,
+			};
+			if let Some(letter) = letter {
+				if modifiers > 1 {
+					return Some(format!("\x1b[1;{modifiers}{letter}").into_bytes());
+				}
+				return Some(match key {
+					Key::Named(NamedKey::ArrowUp) if self.active_term().application_cursor => {
+						b"\x1bOA".to_vec()
+					}
+					Key::Named(NamedKey::ArrowDown) if self.active_term().application_cursor => {
+						b"\x1bOB".to_vec()
+					}
+					Key::Named(NamedKey::ArrowRight) if self.active_term().application_cursor => {
+						b"\x1bOC".to_vec()
+					}
+					Key::Named(NamedKey::ArrowLeft) if self.active_term().application_cursor => {
+						b"\x1bOD".to_vec()
+					}
+					_ => format!("\x1b[{letter}").into_bytes(),
+				});
+			}
+			match key {
+				Key::Named(NamedKey::Enter) => return Some(b"\r".to_vec()),
+				Key::Named(NamedKey::Backspace) => return Some(vec![0x7f]),
+				Key::Named(NamedKey::Tab) if self.shift => return Some(b"\x1b[Z".to_vec()),
+				Key::Named(NamedKey::Tab) => return Some(b"\t".to_vec()),
+				Key::Named(NamedKey::Escape) if modifiers > 1 => {
+					return Some(format!("\x1b[27;{modifiers}u").into_bytes());
+				}
+				Key::Named(NamedKey::Escape) => return Some(vec![0x1b]),
+				Key::Named(NamedKey::Insert) => {
+					return Some(
+						format!(
+							"\x1b[2{}~",
+							if modifiers > 1 {
+								format!(";{modifiers}")
+							} else {
+								String::new()
+							}
+						)
+						.into_bytes(),
+					);
+				}
+				Key::Named(NamedKey::Delete) => {
+					return Some(
+						format!(
+							"\x1b[3{}~",
+							if modifiers > 1 {
+								format!(";{modifiers}")
+							} else {
+								String::new()
+							}
+						)
+						.into_bytes(),
+					);
+				}
+				Key::Named(NamedKey::PageUp) => {
+					return Some(
+						format!(
+							"\x1b[5{}~",
+							if modifiers > 1 {
+								format!(";{modifiers}")
+							} else {
+								String::new()
+							}
+						)
+						.into_bytes(),
+					);
+				}
+				Key::Named(NamedKey::PageDown) => {
+					return Some(
+						format!(
+							"\x1b[6{}~",
+							if modifiers > 1 {
+								format!(";{modifiers}")
+							} else {
+								String::new()
+							}
+						)
+						.into_bytes(),
+					);
+				}
+				Key::Named(n @ (NamedKey::F1 | NamedKey::F2 | NamedKey::F3 | NamedKey::F4)) => {
+					let suffix = match n {
+						NamedKey::F1 => 'P',
+						NamedKey::F2 => 'Q',
+						NamedKey::F3 => 'R',
+						_ => 'S',
+					};
+					return Some(if modifiers > 1 {
+						format!("\x1b[1;{modifiers}{suffix}").into_bytes()
+					} else {
+						format!("\x1bO{suffix}").into_bytes()
+					});
+				}
+				Key::Named(
+					n @ (NamedKey::F5
+					| NamedKey::F6
+					| NamedKey::F7
+					| NamedKey::F8
+					| NamedKey::F9
+					| NamedKey::F10
+					| NamedKey::F11
+					| NamedKey::F12),
+				) => {
+					let number = match n {
+						NamedKey::F5 => 15,
+						NamedKey::F6 => 17,
+						NamedKey::F7 => 18,
+						NamedKey::F8 => 19,
+						NamedKey::F9 => 20,
+						NamedKey::F10 => 21,
+						NamedKey::F11 => 23,
+						_ => 24,
+					};
+					return Some(
+						format!(
+							"\x1b[{number}{}~",
+							if modifiers > 1 {
+								format!(";{modifiers}")
+							} else {
+								String::new()
+							}
+						)
+						.into_bytes(),
+					);
+				}
+				Key::Character(text) if self.ctrl || self.alt || self.super_key => {
+					if let Some(ch) = text.chars().next() {
+						return Some(
+							format!("\x1b[{};{modifiers}u", ch.to_ascii_lowercase() as u32).into_bytes(),
+						);
+					}
+				}
+				_ => {}
+			}
+		}
 		match key {
 			Key::Named(n) => match n {
 				NamedKey::Enter => Some(b"\r".to_vec()),
@@ -1806,6 +2283,9 @@ impl App {
 		};
 		let pixels: &mut [u32] = &mut buf;
 		let (w, h) = (self.width as usize, self.height as usize);
+		let font = &self.font;
+		let fallback_font = self.fallback_font.as_ref();
+		let glyphs = &mut self.glyphs;
 
 		// Caramel rim, then chocolate interior.
 		pixels.fill(self.theme.border);
@@ -1832,8 +2312,6 @@ impl App {
 			ui_px,
 			ui_metrics.ascent.round() as i32,
 		);
-		let font = &self.font;
-		let glyphs = &mut self.glyphs;
 		let term = &self.sessions[self.active].term;
 		let selected = self.selection.map(Selection::ordered);
 		let layout = tab_layout(w, session_count, scale, left_reserve, tab_scroll);
@@ -1907,13 +2385,12 @@ impl App {
 				);
 			}
 			let title_chars = layout.width.saturating_sub(42 * scale) / cw.max(1);
-			let mut label: String = session
-				.term
-				.title
-				.chars()
-				.take(title_chars.max(1))
-				.collect();
-			if session.term.title.chars().count() > title_chars.max(1) && title_chars > 1 {
+			let title = session
+				.custom_title
+				.as_deref()
+				.unwrap_or(&session.term.title);
+			let mut label: String = title.chars().take(title_chars.max(1)).collect();
+			if title.chars().count() > title_chars.max(1) && title_chars > 1 {
 				label.pop();
 				label.push('…');
 			}
@@ -2153,12 +2630,20 @@ impl App {
 				if cell.attrs & 16 != 0 {
 					fill_rect(pixels, w, h, x0, y0 + ch / 2, cw, scale.max(1), fg);
 				}
-				if cell.ch == ' ' || cell.width == 0 {
+				if (cell.ch == ' ' && cell.combining_len == 0) || cell.width == 0 {
 					continue;
 				}
+				let use_fallback = fallback_font.is_some_and(|fallback| {
+					font.lookup_glyph_index(cell.ch) == 0 && fallback.lookup_glyph_index(cell.ch) != 0
+				});
+				let glyph_font = if use_fallback {
+					fallback_font.unwrap()
+				} else {
+					font
+				};
 				let (gm, bitmap) = glyphs
-					.entry(glyph_cache_key(cell.ch, px))
-					.or_insert_with(|| font.rasterize(cell.ch, px));
+					.entry(glyph_cache_key_for(cell.ch, px, use_fallback))
+					.or_insert_with(|| glyph_font.rasterize(cell.ch, px));
 
 				let gx0 = x0 as i32 + gm.xmin;
 				let gy0 = y0 as i32 + ascent - gm.ymin - gm.height as i32;
@@ -2186,6 +2671,52 @@ impl App {
 							continue;
 						}
 						pixels[y as usize * w + x as usize] = blend(bg, fg, a);
+					}
+				}
+				if cell.hyperlink != 0 {
+					fill_rect(
+						pixels,
+						w,
+						h,
+						x0,
+						y0 + ch.saturating_sub(2 * scale),
+						cw * cell.width as usize,
+						scale.max(1),
+						self.theme.palette[4],
+					);
+				}
+				for mark in cell
+					.combining
+					.iter()
+					.take(cell.combining_len as usize)
+					.copied()
+				{
+					if mark == '\u{200d}' || mark == '\u{fe0f}' {
+						continue;
+					}
+					let use_fallback = fallback_font.is_some_and(|fallback| {
+						font.lookup_glyph_index(mark) == 0 && fallback.lookup_glyph_index(mark) != 0
+					});
+					let glyph_font = if use_fallback {
+						fallback_font.unwrap()
+					} else {
+						font
+					};
+					let (mark_metrics, mark_bitmap) = glyphs
+						.entry(glyph_cache_key_for(mark, px, use_fallback))
+						.or_insert_with(|| glyph_font.rasterize(mark, px));
+					let mark_x = x0 as i32 + (cw as i32 - mark_metrics.width as i32) / 2;
+					let mark_y = y0 as i32 + ascent - mark_metrics.ymin - mark_metrics.height as i32;
+					for gy in 0..mark_metrics.height {
+						for gx in 0..mark_metrics.width {
+							let x = mark_x + gx as i32;
+							let y = mark_y + gy as i32;
+							if x >= x0 as i32 && x < x0 as i32 + cw as i32 && y >= 0 && y < h as i32 {
+								let alpha = mark_bitmap[gy * mark_metrics.width + gx] as u32;
+								let index = y as usize * w + x as usize;
+								pixels[index] = blend(pixels[index], fg, alpha);
+							}
+						}
 					}
 				}
 			}
@@ -2269,6 +2800,81 @@ impl App {
 				font,
 				glyphs,
 			);
+		}
+		if self.command_palette {
+			let box_w = (520 * scale).min(w.saturating_sub(24 * scale));
+			let box_h = 210 * scale;
+			let x = (w.saturating_sub(box_w)) / 2;
+			let y = top + 20 * scale;
+			fill_round_rect(
+				pixels,
+				w,
+				h,
+				x,
+				y,
+				box_w,
+				box_h,
+				10 * scale,
+				self.theme.border,
+			);
+			fill_round_rect(
+				pixels,
+				w,
+				h,
+				x + scale,
+				y + scale,
+				box_w.saturating_sub(2 * scale),
+				box_h.saturating_sub(2 * scale),
+				9 * scale,
+				self.theme.bg,
+			);
+			let label = if self.renaming_tab {
+				format!("Rename active tab: {}", self.command_query)
+			} else {
+				format!("Run command: {}", self.command_query)
+			};
+			draw_text(
+				pixels,
+				w,
+				h,
+				x + 16 * scale,
+				y + 14 * scale,
+				&label,
+				px * 0.86,
+				ascent,
+				self.theme.fg,
+				font,
+				glyphs,
+			);
+			let query = self.command_query.to_ascii_lowercase();
+			if !self.renaming_tab {
+				for (index, command) in [
+					"New tab",
+					"Settings",
+					"About poopterm",
+					"Cycle theme",
+					"Close tab",
+					"Rename active tab",
+				]
+				.into_iter()
+				.filter(|command| command.to_ascii_lowercase().contains(&query))
+				.enumerate()
+				{
+					draw_text(
+						pixels,
+						w,
+						h,
+						x + 20 * scale,
+						y + (54 + index * 28) * scale,
+						command,
+						px * 0.78,
+						ascent,
+						self.theme.fg,
+						font,
+						glyphs,
+					);
+				}
+			}
 		}
 
 		let status_y = h.saturating_sub(self.status_height + self.border);
@@ -2476,7 +3082,7 @@ fn draw_text(
 	ascent: i32,
 	color: u32,
 	font: &Font,
-	glyphs: &mut HashMap<(char, u32), (Metrics, Vec<u8>)>,
+	glyphs: &mut HashMap<(char, u32, bool), (Metrics, Vec<u8>)>,
 ) {
 	let mut cursor_x = x as i32;
 	for ch in text.chars() {
@@ -2632,8 +3238,30 @@ fn blend_chunk(bg: u32x4, fg: u32x4, a: u32) -> u32x4 {
 	r | g | b
 }
 
-fn glyph_cache_key(ch: char, px: f32) -> (char, u32) {
-	(ch, px.to_bits())
+fn glyph_cache_key(ch: char, px: f32) -> (char, u32, bool) {
+	glyph_cache_key_for(ch, px, false)
+}
+
+fn glyph_cache_key_for(ch: char, px: f32, fallback: bool) -> (char, u32, bool) {
+	(ch, px.to_bits(), fallback)
+}
+
+#[cfg(target_os = "macos")]
+fn set_window_opacity(window: &Window, opacity: usize) {
+	use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+	let Ok(handle) = window.window_handle() else {
+		return;
+	};
+	let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+		return;
+	};
+	let view = handle.ns_view.as_ptr().cast::<objc2::runtime::AnyObject>();
+	unsafe {
+		let native_window: *mut objc2::runtime::AnyObject = objc2::msg_send![view, window];
+		if !native_window.is_null() {
+			let _: () = objc2::msg_send![native_window, setAlphaValue: opacity as f64 / 100.0];
+		}
+	}
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -2660,6 +3288,8 @@ impl ApplicationHandler<UserEvent> for App {
 				.create_window(attrs)
 				.expect("failed to create window"),
 		);
+		#[cfg(target_os = "macos")]
+		set_window_opacity(&window, Preferences::load().opacity);
 
 		let scale = window.scale_factor() as f32;
 		self.px = Preferences::load().font_size as f32 * scale;
@@ -2727,6 +3357,7 @@ impl ApplicationHandler<UserEvent> for App {
 			WindowEvent::ModifiersChanged(m) => {
 				self.ctrl = m.state().control_key();
 				self.shift = m.state().shift_key();
+				self.alt = m.state().alt_key();
 				self.super_key = m.state().super_key();
 			}
 			WindowEvent::MouseWheel { delta, .. } => {
@@ -2761,11 +3392,124 @@ impl ApplicationHandler<UserEvent> for App {
 				}
 			}
 			WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-				let search_shortcut = (self.super_key
-					&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("f")))
-					|| (self.ctrl
-						&& self.shift
-						&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("f")));
+				if self.shortcut_matches(
+					&event.logical_key,
+					"shortcut_command_palette",
+					"ctrl+shift+p",
+				) {
+					self.end_search();
+					self.command_palette = true;
+					self.command_query.clear();
+					if let Some(window) = &self.window {
+						window.request_redraw();
+					}
+					return;
+				}
+				if self.command_palette {
+					if self.renaming_tab {
+						match &event.logical_key {
+							Key::Named(NamedKey::Escape) => {
+								self.renaming_tab = false;
+								self.command_palette = false;
+							}
+							Key::Named(NamedKey::Backspace) => {
+								self.command_query.pop();
+							}
+							Key::Named(NamedKey::Enter) => {
+								let title = self.command_query.trim().to_owned();
+								self.sessions[self.active].custom_title = (!title.is_empty()).then_some(title);
+								self.renaming_tab = false;
+								self.command_palette = false;
+								self.update_window_title();
+							}
+							Key::Character(value) if !self.ctrl && !self.super_key => {
+								let available = 64usize.saturating_sub(self.command_query.chars().count());
+								self
+									.command_query
+									.extend(value.chars().filter(|c| !c.is_control()).take(available));
+							}
+							_ => {}
+						}
+						if let Some(window) = &self.window {
+							window.request_redraw();
+						}
+						return;
+					}
+					match &event.logical_key {
+						Key::Named(NamedKey::Escape) => self.command_palette = false,
+						Key::Named(NamedKey::Backspace) => {
+							self.command_query.pop();
+						}
+						Key::Named(NamedKey::Enter) => {
+							let query = self.command_query.to_ascii_lowercase();
+							self.command_palette = false;
+							let commands = [
+								"New tab",
+								"Settings",
+								"About poopterm",
+								"Cycle theme",
+								"Close tab",
+								"Rename active tab",
+							];
+							if let Some(command) = commands
+								.iter()
+								.find(|command| command.to_ascii_lowercase().contains(&query))
+							{
+								match *command {
+									"Rename active tab" => {
+										self.renaming_tab = true;
+										self.command_query = self.active_term().title.clone();
+									}
+									"New tab" => {
+										self.command_palette = false;
+										self.add_tab();
+									}
+									"Settings" => {
+										self.command_palette = false;
+										self.open_settings_window(event_loop);
+									}
+									"About poopterm" => {
+										self.command_palette = false;
+										self.open_settings_window(event_loop);
+										self.settings_editor.about = true;
+										if let Some(window) = &self.settings_window {
+											window.request_redraw();
+										}
+									}
+									"Cycle theme" => {
+										self.command_palette = false;
+										self.cycle_theme();
+									}
+									"Close tab" => {
+										self.command_palette = false;
+										self.close_active_tab(event_loop);
+									}
+									_ => {}
+								}
+							}
+						}
+						Key::Character(value) if !self.ctrl && !self.super_key => {
+							let available = 64usize.saturating_sub(self.command_query.chars().count());
+							self
+								.command_query
+								.extend(value.chars().filter(|c| !c.is_control()).take(available));
+						}
+						_ => {}
+					}
+					if let Some(window) = &self.window {
+						window.request_redraw();
+					}
+					return;
+				}
+				let search_shortcut = self.shortcut_matches(
+					&event.logical_key,
+					"shortcut_search",
+					if cfg!(target_os = "macos") {
+						"super+f"
+					} else {
+						"ctrl+shift+f"
+					},
+				);
 				if search_shortcut {
 					self.begin_search();
 					return;
@@ -2799,19 +3543,19 @@ impl ApplicationHandler<UserEvent> for App {
 					}
 					return;
 				}
-				if self.ctrl
-					&& self.shift
-					&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("t"))
-				{
+				if self.shortcut_matches(&event.logical_key, "shortcut_cycle_theme", "ctrl+shift+t") {
 					self.cycle_theme();
 					return;
 				}
-				if self.super_key
-					&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("t"))
-					|| self.ctrl
-						&& self.shift
-						&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("n"))
-				{
+				if self.shortcut_matches(
+					&event.logical_key,
+					"shortcut_new_tab",
+					if cfg!(target_os = "macos") {
+						"super+t"
+					} else {
+						"ctrl+shift+n"
+					},
+				) {
 					self.add_tab();
 					return;
 				}
@@ -2850,9 +3594,15 @@ impl ApplicationHandler<UserEvent> for App {
 					self.activate_tab(index as usize - 1);
 					return;
 				}
-				if (self.super_key || (self.ctrl && self.shift))
-					&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("w"))
-				{
+				if self.shortcut_matches(
+					&event.logical_key,
+					"shortcut_close_tab",
+					if cfg!(target_os = "macos") {
+						"super+w"
+					} else {
+						"ctrl+shift+w"
+					},
+				) {
 					self.close_active_tab(event_loop);
 					return;
 				}
@@ -3062,10 +3812,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
 	let proxy = event_loop.create_proxy();
 
-	let font = Font::from_bytes(
-		include_bytes!("../assets/font.ttf") as &[u8],
-		FontSettings::default(),
-	)?;
+	let (font, fallback_font) = load_fonts();
 
 	let theme = Theme::load();
 	let mut sessions = Vec::new();
@@ -3083,6 +3830,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let mut app = App {
 		theme,
 		font,
+		fallback_font,
 		glyphs: HashMap::new(),
 		px: 18.0,
 		cw: 10,
@@ -3114,6 +3862,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 		height: 0,
 		ctrl: false,
 		shift: false,
+		alt: false,
 		super_key: false,
 		cursor_pos: (0.0, 0.0),
 		mouse_button_down: false,
@@ -3124,6 +3873,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 		search_query: String::new(),
 		search_matches: Vec::new(),
 		search_match_index: 0,
+		command_palette: false,
+		command_query: String::new(),
+		renaming_tab: false,
 	};
 
 	event_loop.run_app(&mut app)?;

@@ -1122,9 +1122,10 @@ dependencies = [
 
 [[package]]
 name = "poopterm"
-version = "0.4.0-1"
+version = "0.42.0"
 dependencies = [
  "fontdue",
+	"objc2 0.6.5",
  "portable-pty",
  "softbuffer",
  "unicode-width",

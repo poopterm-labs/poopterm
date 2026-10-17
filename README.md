@@ -11,17 +11,21 @@ Poopterm is a lightweight, ultra-high-throughput terminal emulator written in Ru
   alternate-screen switching, and common editing and function keys.
 - Configurable scrollback (5,000 lines by default). Use the mouse wheel to browse it.
 - Supports drag-to-select text and system clipboard copy/paste.
+- Keeps combining marks attached to their base cell for display and copy, and can load a user font with the bundled font as a missing-glyph fallback.
 - Opens independent shell sessions in tabs, with activity and bell indicators.
 - Searches scrollback with a highlighted match and next/previous navigation.
 - Restores up to 12 tabs and their directories when reopening the window.
-- Opens HTTP(S) links and copies displayed file paths with a modifier-click.
+- Opens HTTP(S) links, OSC 8 hyperlinks, and local `file://` links with a modifier-click; modifier-clicking a displayed path copies it.
 - Uses a compact tab bar and a status bar showing directory, grid size, and theme.
 - Supports bracketed paste and common SGR mouse reporting modes.
+- Supports the initial Kitty keyboard protocol (`CSI u`) key encoding for applications that opt in.
 - Resizes the shell along with the window.
 - Batches synchronized terminal updates (`?2026`) to avoid partial frames.
 - Displays bounded Sixel graphics and tracks OSC 133 shell markers.
 - Supports semicolon/colon TrueColor, DEC line drawing, and additional text styles.
-- Includes Dark Mode, Light Mode, all four Catppuccin flavors, and signature Poop themes.
+- Includes Dark Mode, Light Mode, all four Catppuccin flavors, signature Poop, and a configurable Custom theme.
+- Includes an **About poopterm** page in Settings.
+- Lets macOS users adjust main-window opacity from Settings.
 - Includes a desktop launcher and icon for Linux and FreeBSD.
 - **Gigabit-tier performance:** Utilizes portable SIMD (`std::simd::u32x4`) for vectorized rectangle fills and alpha channel blending, zero-allocation stack buffers for SGR escape sequences, and aggressive compiler optimizations targeting Rust 2024 edition.
 
@@ -115,15 +119,50 @@ theme = "catppuccin-mocha"
 font_size = 18           # Logical pixels, 10–32
 scrollback_lines = 5000 # 0–100000; 0 disables history
 restore_sessions = true
+opacity = 100           # macOS main window opacity, 60–100
+shortcut_new_tab = "super+t"
+shortcut_command_palette = "ctrl+shift+p"
+shortcut_cycle_theme = "ctrl+shift+t"
+shortcut_search = "super+f"
+shortcut_close_tab = "super+w"
 ```
 
 `theme` accepts `darkmode`, `light-mode`, `catppuccin-latte`,
-`catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, or `poop`.
+`catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `poop`, or
+`custom`. The custom theme starts from the Poop palette and accepts optional
+six-digit RGB overrides. Color keys can also override a built-in theme:
+
+```toml
+theme = "custom"
+foreground = "#E8D5B0"
+background = "#24170B"
+border = "#7A4E1F"
+color0 = "#1E1409"
+color1 = "#D9534F"
+color2 = "#8BC34A"
+color3 = "#E0B040"
+color4 = "#5C9BD6"
+color5 = "#B06AC8"
+color6 = "#4FB6B0"
+color7 = "#E8D5B0"
+font_path = "/path/to/YourNerdFontMono-Regular.ttf"
+```
+
+`font_path` or the `POOPTERM_FONT` environment variable selects a TrueType font
+file; the bundled font supplies glyphs missing from that font. Use a monospaced
+font for predictable terminal cell alignment. `POOPTERM_FONT` takes precedence
+over `font_path`.
 The older `macos-dark` and `macos-light` values remain accepted for existing configs.
 Settings changes apply immediately after saving; session restore takes effect on
 the next launch. Reducing scrollback discards the oldest lines. Invalid numbers
 fall back to defaults or are clamped to supported limits. Other config keys and
 comments are preserved when Settings saves. Toolbar text keeps its own size.
+
+On macOS, use the **Window opacity** controls in Settings and save to make the
+main window translucent. This applies to the entire terminal window; the separate
+Settings window stays opaque. The default is 100%. This setting currently works
+on macOS only. Catppuccin palette attribution and license terms are included in
+`THIRD_PARTY_NOTICES` and in packaged app resources.
 
 Set `POOPTERM_CONFIG` to use a config file at another path. `POOPTERM_THEME`
 can override the saved setting for a single launch, for example:
@@ -160,6 +199,14 @@ POOPTERM_THEME=catppuccin-latte poopterm
 - Drag with the left mouse button to select text. The mouse wheel scrolls
   scrollback unless the running app has enabled mouse reporting.
 - **Ctrl+Shift+T** cycles themes and saves the choice to the config file.
+- **Ctrl+Shift+P** opens the command palette for new tab, settings, About, theme,
+  close-tab, and rename-tab actions. Enter filters and runs the first match; after
+  choosing rename, type a title and press Enter.
+
+The `shortcut_new_tab`, `shortcut_command_palette`, `shortcut_cycle_theme`,
+`shortcut_search`, and `shortcut_close_tab` config keys accept `ctrl`, `shift`,
+`alt`, and `super` plus a character key. Defaults use the platform's common
+shortcuts; the sample values above are for macOS.
 
 On Linux, clipboard shortcuts need a clipboard command-line tool: `wl-clipboard`
 for Wayland (`wl-copy` and `wl-paste`), or `xclip`/`xsel` for X11.

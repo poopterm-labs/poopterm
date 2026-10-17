@@ -2,9 +2,9 @@ class Poopterm < Formula
   desc "Small, poop-colored terminal emulator"
   homepage "https://github.com/poopterm-labs/poopterm"
   url "https://github.com/poopterm-labs/poopterm.git",
-      tag: "v0.4.0-1",
+      tag: "v0.42.0",
       using: :git
-  version "0.4.0-1"
+  version "0.42.0"
   license "MIT"
 
   depends_on "rustup" => :build
@@ -16,6 +16,7 @@ class Poopterm < Formula
     system "rustup", "run", "nightly", "cargo", "build", "--release", "--locked"
     unless OS.mac?
       bin.install "target/release/poopterm"
+      (share/"doc/poopterm").install "THIRD_PARTY_NOTICES"
       return
     end
 
@@ -26,6 +27,7 @@ class Poopterm < Formula
     resources.mkpath
     (macos/"Poopterm").write (buildpath/"target/release/poopterm").binread
     (resources/"Poopterm.icns").write (buildpath/"assets/poopterm.icns").binread
+    (resources/"THIRD_PARTY_NOTICES").write (buildpath/"THIRD_PARTY_NOTICES").read
     (app/"Contents/Info.plist").write <<~PLIST
       <?xml version="1.0" encoding="UTF-8"?>
       <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -46,6 +48,7 @@ class Poopterm < Formula
     PLIST
     chmod 0755, macos/"Poopterm"
     bin.install "target/release/poopterm"
+    (share/"doc/poopterm").install "THIRD_PARTY_NOTICES"
   end
 
   test do
