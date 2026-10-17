@@ -5,9 +5,9 @@ mod osc;
 mod parser;
 use osc::decode_uri_path;
 mod sixel;
-mod state;
+mod ansi;
+use ansi::{Cell, Term};
 use config::Preferences;
-use state::{Cell, Term};
 
 use std::{
 	collections::HashMap,
@@ -25,7 +25,6 @@ use std::{
 use fontdue::{Font, FontSettings, Metrics};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::simd::u32x4;
-use vte::Parser;
 use winit::{
 	application::ApplicationHandler,
 	dpi::{LogicalSize, PhysicalSize},
@@ -355,7 +354,6 @@ enum UserEvent {
 struct Session {
 	id: u64,
 	term: Term,
-	parser: Parser,
 	master: Box<dyn MasterPty + Send>,
 	writer: Box<dyn Write + Send>,
 	_child: Box<dyn Child + Send + Sync>,
@@ -518,7 +516,6 @@ fn spawn_session(
 	Ok(Session {
 		id,
 		term,
-		parser: Parser::new(),
 		master: pair.master,
 		writer,
 		_child: child,
@@ -2981,7 +2978,7 @@ impl ApplicationHandler<UserEvent> for App {
 		match event {
 			UserEvent::Output(id, bytes, ack) => {
 				let _ = ack.send(());
-				// Pass each PTY chunk to vte in one call instead of dispatching per byte.
+				// Pass each PTY chunk directly to our SIMD-optimized parse_bytes parser!
 				let mut active_output = false;
 				let mut became_active = false;
 				let mut cwd_changed = false;
@@ -2990,7 +2987,10 @@ impl ApplicationHandler<UserEvent> for App {
 					let previous_bell = session.term.bell;
 					let previous_title = session.term.title.clone();
 					let previous_cwd = session.term.cwd.clone();
-					session.parser.advance(&mut session.term, &bytes);
+					
+					// Use our custom SIMD parser instead of vte
+                                        session.term.parse_bytes(&bytes);
+
 					cwd_changed = session.term.cwd != previous_cwd;
 					became_active |=
 						session.term.bell != previous_bell || session.term.title != previous_title;
@@ -3129,8 +3129,7 @@ mod tests {
 			super::Theme::from_kind(super::ThemeKind::Poop),
 			"/tmp".into(),
 		);
-		let mut parser = super::Parser::new();
-		parser.advance(&mut term, "猫 hello HELLO".as_bytes());
+		term.parse_bytes("猫 hello HELLO".as_bytes());
 		let found = super::find_matches(&term, "hello");
 		assert_eq!(found.len(), 2);
 		assert_eq!(found[0].start.col, 3);
@@ -3159,8 +3158,7 @@ mod tests {
 			super::Theme::from_kind(super::ThemeKind::Poop),
 			"/tmp".into(),
 		);
-		let mut parser = super::Parser::new();
-		parser.advance(&mut term, b"\x1b]7;file://localhost/tmp/my%20dir\x07\x07");
+		term.parse_bytes(b"\x1b]7;file://localhost/tmp/my%20dir\x07\x07");
 		assert_eq!(term.cwd, std::path::PathBuf::from("/tmp/my dir"));
 		assert!(term.bell);
 	}
