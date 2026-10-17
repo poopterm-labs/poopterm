@@ -1,66 +1,115 @@
 //! Escape-sequence handling using vte's incremental state machine.
-use crate::{
-	Cell, Term, Theme, ThemeKind, bright_color, dec_graphic, decode_uri_path, xterm_color,
-};
+use crate::{Cell, Term, Theme, ThemeKind, dec_graphic, decode_uri_path, xterm_color};
 use unicode_width::UnicodeWidthChar;
 use vte::{Params, Perform};
 
+/// Stateful parser for one PTY stream. Keep it beside `Term` in a session so
+/// escape sequences and UTF-8 codepoints split across reads remain intact.
+pub(crate) struct Parser {
+	inner: vte::Parser,
+}
+
+impl Parser {
+	pub(crate) fn new() -> Self {
+		Self {
+			inner: vte::Parser::new(),
+		}
+	}
+
+	pub(crate) fn advance(&mut self, term: &mut Term, bytes: &[u8]) {
+		self.inner.advance(term, bytes);
+	}
+}
+
 impl Term {
 	pub(crate) fn sgr(&mut self, params: &Params) {
-		// Avoid heap allocation entirely for typical SGR parameter lengths by using a stack buffer
-		// or a small-vec pattern, or processing directly. Here we use a small stack array since
-		// SGR parameter lists are virtually never longer than 16-32 elements.
-		let mut stack_buf = [0u16; 32];
-		let mut len = 0;
-
-		for group in params.iter() {
-			if group.len() > 1 && matches!(group[0], 38 | 48) {
-				match group[1] {
-					2 if group.len() == 5 => {
-						if len + group.len() <= stack_buf.len() {
-							for &v in group {
-								stack_buf[len] = v;
-								len += 1;
-							}
-						}
-					}
-					2 if group.len() >= 6 && group[2] == 0 => {
-						if len + 5 <= stack_buf.len() {
-							stack_buf[len] = group[0];
-							stack_buf[len + 1] = group[1];
-							stack_buf[len + 2] = group[3];
-							stack_buf[len + 3] = group[4];
-							stack_buf[len + 4] = group[5];
-							len += 5;
-						}
-					}
-					5 if group.len() == 3 && len + 3 <= stack_buf.len() => {
-						stack_buf[len] = group[0];
-						stack_buf[len + 1] = group[1];
-						stack_buf[len + 2] = group[2];
-						len += 3;
-					}
-					_ => {}
-				}
-			} else if group.first() == Some(&4) && group.len() > 1 {
-				if len < stack_buf.len() {
-					stack_buf[len] = if group[1] == 0 { 24 } else { 4 };
-					len += 1;
-				}
-			} else if group.len() == 1 && len < stack_buf.len() {
-				stack_buf[len] = group[0];
-				len += 1;
-			}
-		}
-
-		if len == 0 {
+		let groups: Vec<Vec<u16>> = params.iter().map(|group| group.to_vec()).collect();
+		if groups.is_empty() {
+			self.fg = self.default_fg;
+			self.bg = self.default_bg;
+			self.attrs = 0;
+			self.bold = false;
+			self.reverse = false;
 			return;
 		}
-
-		let values = &stack_buf[..len];
 		let mut i = 0;
-		while i < values.len() {
-			let code = values[i];
+		while i < groups.len() {
+			let group = &groups[i];
+			let Some(&code) = group.first() else {
+				self.fg = self.default_fg;
+				self.bg = self.default_bg;
+				self.attrs = 0;
+				self.bold = false;
+				self.reverse = false;
+				i += 1;
+				continue;
+			};
+			if matches!(code, 38 | 48) {
+				let foreground = code == 38;
+				let (mode, color, consumed) = if group.len() > 1 {
+					match group.get(1).copied() {
+						Some(5) if group.len() >= 3 => {
+							(5, Some(self.indexed_color(group[2].min(255) as u8)), 0)
+						}
+						Some(2) if group.len() >= 5 => {
+							let start = if group.len() >= 6 && group[2] == 0 {
+								3
+							} else {
+								2
+							};
+							let color = (group.len() >= start + 3)
+								.then(|| rgb_color(group[start], group[start + 1], group[start + 2]));
+							(2, color, 0)
+						}
+						_ => (0, None, 0),
+					}
+				} else if let Some(mode_group) = groups.get(i + 1) {
+					let mode = mode_group.first().copied().unwrap_or(0);
+					match mode {
+						5 => (
+							5,
+							groups
+								.get(i + 2)
+								.and_then(|g| g.first())
+								.map(|v| self.indexed_color((*v).min(255) as u8)),
+							2,
+						),
+						2 => {
+							let color = groups
+								.get(i + 2)
+								.and_then(|r| r.first())
+								.zip(groups.get(i + 3).and_then(|g| g.first()))
+								.zip(groups.get(i + 4).and_then(|b| b.first()))
+								.map(|((r, g), b)| rgb_color(*r, *g, *b));
+							(2, color, 4)
+						}
+						_ => (0, None, 0),
+					}
+				} else {
+					(0, None, 0)
+				};
+				if let Some(color) = color {
+					if foreground {
+						self.fg = color
+					} else {
+						self.bg = color
+					}
+				}
+				if mode != 0 {
+					i += consumed;
+				}
+				i += 1;
+				continue;
+			}
+			if code == 4 && group.len() > 1 {
+				match group[1] {
+					0 => self.attrs &= !(4 | 128),
+					2 => self.attrs |= 4 | 128,
+					_ => self.attrs |= 4,
+				}
+				i += 1;
+				continue;
+			}
 			match code {
 				0 => {
 					self.fg = self.default_fg;
@@ -72,7 +121,10 @@ impl Term {
 				1 => self.bold = true,
 				2 => self.attrs |= 1,
 				3 => self.attrs |= 2,
-				4 | 21 => self.attrs |= 4,
+				4 => self.attrs |= 4,
+				21 => self.attrs |= 4 | 128,
+				5 | 6 => self.attrs |= 32,
+				7 => self.reverse = true,
 				8 => self.attrs |= 8,
 				9 => self.attrs |= 16,
 				22 => {
@@ -80,37 +132,19 @@ impl Term {
 					self.attrs &= !1;
 				}
 				23 => self.attrs &= !2,
-				24 => self.attrs &= !4,
+				24 => self.attrs &= !(4 | 128),
+				25 => self.attrs &= !32,
+				27 => self.reverse = false,
 				28 => self.attrs &= !8,
 				29 => self.attrs &= !16,
-				7 => self.reverse = true,
-				27 => self.reverse = false,
-				30..=37 => self.fg = self.palette[(code - 30) as usize],
+				53 => self.attrs |= 64,
+				55 => self.attrs &= !64,
+				30..=37 => self.fg = self.indexed_color((code - 30) as u8),
 				39 => self.fg = self.default_fg,
-				40..=47 => self.bg = self.palette[(code - 40) as usize],
+				40..=47 => self.bg = self.indexed_color((code - 40) as u8),
 				49 => self.bg = self.default_bg,
-				90..=97 => self.fg = bright_color((code - 90) as usize),
-				100..=107 => self.bg = bright_color((code - 100) as usize),
-				38 | 48 if values.get(i + 1) == Some(&5) && values.len() > i + 2 => {
-					let color = xterm_color(values[i + 2] as u8, self.palette);
-					if code == 38 {
-						self.fg = color
-					} else {
-						self.bg = color
-					}
-					i += 2;
-				}
-				38 | 48 if values.get(i + 1) == Some(&2) && values.len() > i + 4 => {
-					let color = ((values[i + 2] as u32 & 255) << 16)
-						| ((values[i + 3] as u32 & 255) << 8)
-						| (values[i + 4] as u32 & 255);
-					if code == 38 {
-						self.fg = color
-					} else {
-						self.bg = color
-					}
-					i += 4;
-				}
+				90..=97 => self.fg = self.indexed_color((code - 90 + 8) as u8),
+				100..=107 => self.bg = self.indexed_color((code - 100 + 8) as u8),
 				_ => {}
 			}
 			i += 1;
@@ -140,6 +174,13 @@ impl Term {
 		}
 		self.wrap_pending = false;
 		let i = self.idx(self.cx, self.cy);
+		if self.insert_mode {
+			let count = width.min(self.cols - self.cx);
+			let row_end = (self.cy + 1) * self.cols;
+			self.cells.copy_within(i..row_end - count, i + count);
+			self.clear_range(i, i + count);
+			self.repair_wide_row(self.cy);
+		}
 		self.erase_images(i, i + width);
 		// Remove both halves when overwriting a wide character.
 		if self.cells[i].width == 0 && self.cx > 0 {
@@ -158,9 +199,9 @@ impl Term {
 		let mut fg = self.fg;
 		let mut bg = self.bg;
 		if self.bold
-			&& let Some(index) = self.palette.iter().position(|&color| color == fg)
+			&& let Some(index) = (0..8).find(|&index| self.indexed_color(index as u8) == fg)
 		{
-			fg = bright_color(index);
+			fg = self.indexed_color((index + 8) as u8);
 		}
 		if self.reverse {
 			std::mem::swap(&mut fg, &mut bg);
@@ -200,6 +241,19 @@ impl Term {
 			0x0e => self.active_charset = 1,
 			0x0f => self.active_charset = 0,
 			7 => self.bell = true,
+			0x84 => self.linefeed(),
+			0x85 => {
+				self.cx = 0;
+				self.linefeed();
+			}
+			0x88 => self.tab_stops[self.cx] = true,
+			0x8d => {
+				if self.cy == self.scroll_top {
+					self.scroll_region_down(1);
+				} else {
+					self.cy = self.cy.saturating_sub(1);
+				}
+			}
 			b'\n' | 0x0b | 0x0c => self.linefeed(),
 			b'\r' => self.cx = 0,
 			0x08 => self.cx = self.cx.saturating_sub(1),
@@ -277,6 +331,15 @@ impl Term {
 		}
 
 		if private {
+			return;
+		}
+		if matches!(action, 'h' | 'l') {
+			let enabled = action == 'h';
+			for mode in params.iter().filter_map(|param| param.first().copied()) {
+				if mode == 4 {
+					self.insert_mode = enabled;
+				}
+			}
 			return;
 		}
 		match action {
@@ -487,26 +550,139 @@ impl Term {
 	}
 
 	fn apply_osc_dispatch(&mut self, params: &[&[u8]], _: bool) {
-		if params.first() == Some(&b"133".as_slice()) {
-			self.shell.record(
+		let Some(command) = params.first().copied() else {
+			return;
+		};
+		match command {
+			b"133" => self.shell.record(
 				params,
 				self.history_base + self.scrollback.len() + self.cy,
 				self.cx,
-			);
-		} else if params.len() >= 2 && matches!(params[0], b"0" | b"2") {
-			let title = String::from_utf8_lossy(params[1]);
-			self.title = title.chars().filter(|c| !c.is_control()).take(64).collect();
-		} else if params.len() >= 2
-			&& params[0] == b"7"
-			&& let Ok(uri) = std::str::from_utf8(params[1])
-			&& let Some(path) = uri.strip_prefix("file://")
-			&& let Some(path) = path
-				.find('/')
-				.and_then(|index| decode_uri_path(&path[index..]))
-		{
-			self.cwd = path;
+			),
+			b"0" | b"1" | b"2" if params.len() >= 2 => {
+				let title = String::from_utf8_lossy(params[1]);
+				self.title = title.chars().filter(|c| !c.is_control()).take(64).collect();
+			}
+			b"4" => self.osc_palette(&params[1..]),
+			b"104" => {
+				if params.len() == 1 {
+					self.color_overrides.fill(None);
+				} else {
+					for index in params[1..]
+						.iter()
+						.filter_map(|value| std::str::from_utf8(value).ok()?.parse::<usize>().ok())
+					{
+						if index < self.color_overrides.len() {
+							self.color_overrides[index] = None;
+						}
+					}
+				}
+			}
+			b"7" if params.len() >= 2 => {
+				if let Ok(uri) = std::str::from_utf8(params[1])
+					&& let Some(path) = uri.strip_prefix("file://")
+					&& let Some(path) = path
+						.find('/')
+						.and_then(|index| decode_uri_path(&path[index..]))
+				{
+					self.cwd = path;
+				}
+			}
+			b"10" | b"11" if params.len() >= 2 => {
+				let foreground = command == b"10";
+				if params[1] == b"?" {
+					let color = if foreground {
+						self.default_fg
+					} else {
+						self.default_bg
+					};
+					self.responses.push(osc_color_reply(command, color));
+				} else if let Some(color) = parse_osc_color(params[1]) {
+					if foreground {
+						self.default_fg = color;
+						self.fg = color;
+					} else {
+						self.default_bg = color;
+						self.bg = color;
+					}
+				}
+			}
+			_ => {}
 		}
 	}
+
+	fn osc_palette(&mut self, params: &[&[u8]]) {
+		let mut i = 0;
+		while i + 1 < params.len() {
+			let Ok(index) = std::str::from_utf8(params[i])
+				.unwrap_or("")
+				.parse::<usize>()
+			else {
+				i += 2;
+				continue;
+			};
+			if index < self.color_overrides.len() {
+				if params[i + 1] == b"?" {
+					let color = self.indexed_color(index as u8);
+					self.responses.push(
+						format!(
+							"\x1b]4;{index};rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+							(color >> 16) & 0xff,
+							(color >> 8) & 0xff,
+							color & 0xff
+						)
+						.into_bytes(),
+					);
+				} else if let Some(color) = parse_osc_color(params[i + 1]) {
+					self.color_overrides[index] = Some(color);
+				}
+			}
+			i += 2;
+		}
+	}
+
+	fn indexed_color(&self, index: u8) -> u32 {
+		self.color_overrides[index as usize].unwrap_or_else(|| xterm_color(index, self.palette))
+	}
+}
+
+fn osc_color_reply(command: &[u8], color: u32) -> Vec<u8> {
+	format!(
+		"\x1b]{};rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+		String::from_utf8_lossy(command),
+		(color >> 16) & 0xff,
+		(color >> 8) & 0xff,
+		color & 0xff
+	)
+	.into_bytes()
+}
+
+fn parse_osc_color(value: &[u8]) -> Option<u32> {
+	if let Ok(value) = std::str::from_utf8(value) {
+		if let Some(hex) = value.strip_prefix('#') {
+			if hex.len() == 6 {
+				return u32::from_str_radix(hex, 16).ok();
+			}
+		}
+		if let Some(rgb) = value.strip_prefix("rgb:") {
+			let mut channels = rgb
+				.split('/')
+				.map(|part| u16::from_str_radix(part, 16).ok());
+			let channel = |value: u16, digits: usize| -> u32 {
+				let max = (1u32 << (digits.min(4) * 4)) - 1;
+				((value as u32 * 255 + max / 2) / max).min(255)
+			};
+			let r = channels.next()??;
+			let g = channels.next()??;
+			let b = channels.next()??;
+			return Some(
+				(channel(r, rgb.split('/').next()?.len()) << 16)
+					| (channel(g, rgb.split('/').nth(1)?.len()) << 8)
+					| channel(b, rgb.split('/').nth(2)?.len()),
+			);
+		}
+	}
+	None
 }
 
 impl Perform for Term {
@@ -514,7 +690,7 @@ impl Perform for Term {
 	fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
 		let target = self.pending();
 		target.sixel_transfer = if !ignore && intermediates.is_empty() && action == 'q' {
-			let mut values = params.iter().map(|p| p[0]);
+			let mut values = params.iter().map(|p| p.first().copied().unwrap_or(0));
 			Some(crate::sixel::Transfer::new(
 				values.next().unwrap_or(0),
 				values.next().unwrap_or(0),
@@ -588,4 +764,8 @@ impl Perform for Term {
 			self.responses.append(&mut pending.responses);
 		}
 	}
+}
+
+fn rgb_color(r: u16, g: u16, b: u16) -> u32 {
+	((r.min(255) as u32) << 16) | ((g.min(255) as u32) << 8) | b.min(255) as u32
 }

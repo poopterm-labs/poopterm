@@ -4,6 +4,7 @@ mod config;
 mod osc;
 mod parser;
 use osc::decode_uri_path;
+use parser::Parser;
 mod ansi;
 mod sixel;
 use ansi::{Cell, Term};
@@ -76,8 +77,8 @@ enum ThemeKind {
 impl ThemeKind {
 	fn parse(value: &str) -> Option<Self> {
 		match value.trim().trim_matches('"').to_ascii_lowercase().as_str() {
-			"macos" | "mac" | "macos-dark" => Some(Self::MacOsDark),
-			"macos-light" | "light" => Some(Self::MacOsLight),
+			"darkmode" | "macos" | "mac" | "macos-dark" => Some(Self::MacOsDark),
+			"light-mode" | "light mode" | "macos-light" | "light" => Some(Self::MacOsLight),
 			"catppuccin" | "catppuccin-mocha" => Some(Self::CatppuccinMocha),
 			"catppuccin-latte" => Some(Self::CatppuccinLatte),
 			"catppuccin-frappe" => Some(Self::CatppuccinFrappe),
@@ -88,8 +89,8 @@ impl ThemeKind {
 	}
 	fn name(self) -> &'static str {
 		match self {
-			Self::MacOsDark => "macos-dark",
-			Self::MacOsLight => "macos-light",
+			Self::MacOsDark => "darkmode",
+			Self::MacOsLight => "light-mode",
 			Self::CatppuccinLatte => "catppuccin-latte",
 			Self::CatppuccinFrappe => "catppuccin-frappe",
 			Self::CatppuccinMacchiato => "catppuccin-macchiato",
@@ -354,6 +355,7 @@ enum UserEvent {
 struct Session {
 	id: u64,
 	term: Term,
+	parser: Parser,
 	master: Box<dyn MasterPty + Send>,
 	writer: Box<dyn Write + Send>,
 	_child: Box<dyn Child + Send + Sync>,
@@ -516,6 +518,7 @@ fn spawn_session(
 	Ok(Session {
 		id,
 		term,
+		parser: Parser::new(),
 		master: pair.master,
 		writer,
 		_child: child,
@@ -920,12 +923,15 @@ impl App {
 			self.theme.palette[4],
 			false,
 		);
-		let theme_name = self
-			.settings_editor
-			.theme
-			.name()
-			.replace("catppuccin-", "Catppuccin ")
-			.replace("macos-", "macOS ");
+		let theme_name = match self.settings_editor.theme {
+			ThemeKind::MacOsDark => "Dark Mode".to_owned(),
+			ThemeKind::MacOsLight => "Light Mode".to_owned(),
+			_ => self
+				.settings_editor
+				.theme
+				.name()
+				.replace("catppuccin-", "Catppuccin "),
+		};
 		draw_text(
 			pixels,
 			width,
@@ -2131,6 +2137,21 @@ impl App {
 						fg,
 					);
 				}
+				if cell.attrs & 128 != 0 {
+					fill_rect(
+						pixels,
+						w,
+						h,
+						x0,
+						y0 + ch.saturating_sub(4 * scale),
+						cw,
+						scale.max(1),
+						fg,
+					);
+				}
+				if cell.attrs & 64 != 0 {
+					fill_rect(pixels, w, h, x0, y0 + scale, cw, scale.max(1), fg);
+				}
 				if cell.attrs & 16 != 0 {
 					fill_rect(pixels, w, h, x0, y0 + ch / 2, cw, scale.max(1), fg);
 				}
@@ -2587,8 +2608,7 @@ fn blend(bg: u32, fg: u32, a: u32) -> u32 {
 	}
 	let bg_v = u32x4::from([bg, bg, bg, bg]);
 	let fg_v = u32x4::from([fg, fg, fg, fg]);
-	let res = blend_chunk(bg_v, fg_v, a);
-	res[0]
+	blend_chunk(bg_v, fg_v, a)[0]
 }
 
 #[inline]
@@ -2602,19 +2622,15 @@ fn blend_chunk(bg: u32x4, fg: u32x4, a: u32) -> u32x4 {
 	let a_v = u32x4::splat(a);
 	let inv_a_v = u32x4::splat(255 - a);
 	let max_a = u32x4::splat(255);
-
 	let fg_r = (fg >> u32x4::splat(16)) & u32x4::splat(0xff);
 	let bg_r = (bg >> u32x4::splat(16)) & u32x4::splat(0xff);
 	let r = ((fg_r * a_v + bg_r * inv_a_v) / max_a) << u32x4::splat(16);
-
 	let fg_g = (fg >> u32x4::splat(8)) & u32x4::splat(0xff);
 	let bg_g = (bg >> u32x4::splat(8)) & u32x4::splat(0xff);
 	let g = ((fg_g * a_v + bg_g * inv_a_v) / max_a) << u32x4::splat(8);
-
 	let fg_b = fg & u32x4::splat(0xff);
 	let bg_b = bg & u32x4::splat(0xff);
 	let b = (fg_b * a_v + bg_b * inv_a_v) / max_a;
-
 	r | g | b
 }
 
@@ -2978,7 +2994,7 @@ impl ApplicationHandler<UserEvent> for App {
 		match event {
 			UserEvent::Output(id, bytes, ack) => {
 				let _ = ack.send(());
-				// Pass each PTY chunk directly to our SIMD-optimized parse_bytes parser!
+				// Keep one parser per PTY stream to preserve partial escape sequences.
 				let mut active_output = false;
 				let mut became_active = false;
 				let mut cwd_changed = false;
@@ -2988,8 +3004,7 @@ impl ApplicationHandler<UserEvent> for App {
 					let previous_title = session.term.title.clone();
 					let previous_cwd = session.term.cwd.clone();
 
-					// Use our custom SIMD parser instead of vte
-					session.term.parse_bytes(&bytes);
+					session.parser.advance(&mut session.term, &bytes);
 
 					cwd_changed = session.term.cwd != previous_cwd;
 					became_active |=
@@ -3119,7 +3134,61 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-	use super::{glyph_cache_key, tab_layout};
+	use super::{Parser, Theme, ThemeKind, glyph_cache_key, tab_layout};
+
+	#[test]
+	fn theme_labels_and_catppuccin_palette_match_expected_values() {
+		assert_eq!(ThemeKind::MacOsDark.name(), "darkmode");
+		assert_eq!(ThemeKind::MacOsLight.name(), "light-mode");
+		assert_eq!(ThemeKind::parse("macos-dark"), Some(ThemeKind::MacOsDark));
+		assert_eq!(ThemeKind::parse("macos-light"), Some(ThemeKind::MacOsLight));
+
+		let flavors = [
+			(
+				ThemeKind::CatppuccinLatte,
+				0x4C4F69,
+				0xEFF1F5,
+				0xCCD0DA,
+				[
+					0x5C5F77, 0xD20F39, 0x40A02B, 0xDF8E1D, 0x1E66F5, 0xEA76CB, 0x179299, 0xACB0BE,
+				],
+			),
+			(
+				ThemeKind::CatppuccinFrappe,
+				0xC6D0F5,
+				0x303446,
+				0x414559,
+				[
+					0x51576D, 0xE78284, 0xA6D189, 0xE5C890, 0x8CAAEE, 0xCA9EE6, 0x81C8BE, 0xB5BFE2,
+				],
+			),
+			(
+				ThemeKind::CatppuccinMacchiato,
+				0xCAD3F5,
+				0x24273A,
+				0x363A4F,
+				[
+					0x494D64, 0xED8796, 0xA6DA95, 0xEED49F, 0x8AADF4, 0xF5BDE6, 0x8BD5CA, 0xB8C0E0,
+				],
+			),
+			(
+				ThemeKind::CatppuccinMocha,
+				0xCDD6F4,
+				0x1E1E2E,
+				0x45475A,
+				[
+					0x45475A, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xF5C2E7, 0x94E2D5, 0xBAC2DE,
+				],
+			),
+		];
+		for (kind, fg, bg, border, palette) in flavors {
+			let theme = Theme::from_kind(kind);
+			assert_eq!(
+				(theme.fg, theme.bg, theme.border, theme.palette),
+				(fg, bg, border, palette)
+			);
+		}
+	}
 
 	#[test]
 	fn search_handles_wide_cells_and_long_queries() {
@@ -3129,7 +3198,7 @@ mod tests {
 			super::Theme::from_kind(super::ThemeKind::Poop),
 			"/tmp".into(),
 		);
-		term.parse_bytes("猫 hello HELLO".as_bytes());
+		Parser::new().advance(&mut term, "猫 hello HELLO".as_bytes());
 		let found = super::find_matches(&term, "hello");
 		assert_eq!(found.len(), 2);
 		assert_eq!(found[0].start.col, 3);
@@ -3158,7 +3227,7 @@ mod tests {
 			super::Theme::from_kind(super::ThemeKind::Poop),
 			"/tmp".into(),
 		);
-		term.parse_bytes(b"\x1b]7;file://localhost/tmp/my%20dir\x07\x07");
+		Parser::new().advance(&mut term, b"\x1b]7;file://localhost/tmp/my%20dir\x07\x07");
 		assert_eq!(term.cwd, std::path::PathBuf::from("/tmp/my dir"));
 		assert!(term.bell);
 	}

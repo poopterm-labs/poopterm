@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0-1 — 2026-10-16
+
+### Fixed
+
+- Replaced the incomplete hand-rolled ANSI byte parser with vte's incremental parser and fixed a duplicate indexed-color method that prevented compilation.
+- Expanded SGR, OSC palette and terminal mode handling; preserved parser state across PTY reads.
+- Renamed the macOS theme choices to Dark Mode and Light Mode; verified Catppuccin ANSI, foreground, background, and border colors against the official palette.
+
 ## 0.4.0 — 2026-10-16
 
 ### Added

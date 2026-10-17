@@ -235,6 +235,66 @@ fn truecolor_colon_and_semicolon_forms_match() {
 }
 
 #[test]
+fn stateful_vte_parser_handles_fragmented_controls_and_invalid_utf8() {
+	let mut t = terminal(16, 2);
+	let mut parser = Parser::new();
+	for byte in b"before\x1b]2;fragmented title\x1b\\\xf0\x9f\x90\x88\xffX" {
+		parser.advance(&mut t, &[*byte]);
+	}
+	assert_eq!(t.title, "fragmented title");
+	assert_eq!(t.cells[6].ch, '🐈');
+	assert_eq!(t.cells[8].ch, '�');
+	assert_eq!(t.cells[9].ch, 'X');
+}
+
+#[test]
+fn osc_palette_and_default_color_queries_are_answered() {
+	let mut t = terminal(8, 2);
+	feed(&mut t, b"\x1b]4;1;#123456\x07\x1b[31mA");
+	assert_eq!(t.cells[0].fg, 0x123456);
+	feed(&mut t, b"\x1b]4;1;?\x1b\\\x1b]10;?\x07");
+	assert_eq!(t.responses[0], b"\x1b]4;1;rgb:12/34/56\x1b\\");
+	assert_eq!(
+		t.responses[1],
+		format!(
+			"\x1b]10;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+			t.default_fg >> 16,
+			(t.default_fg >> 8) & 0xff,
+			t.default_fg & 0xff
+		)
+		.as_bytes()
+	);
+	feed(&mut t, b"\x1b]11;#010203\x07");
+	assert_eq!(t.default_bg, 0x010203);
+}
+
+#[test]
+fn osc_palette_supports_extended_slots_and_reset() {
+	let mut t = terminal(8, 2);
+	feed(&mut t, b"\x1b]4;196;rgb:12/34/56\x07\x1b[38;5;196mX");
+	assert_eq!(t.cells[0].fg, 0x123456);
+	feed(&mut t, b"\x1b]104;196\x07\x1b[38;5;196mY");
+	assert_ne!(t.cells[1].fg, 0x123456);
+}
+
+#[test]
+fn sgr_extended_styles_clear_independently() {
+	let mut t = terminal(8, 2);
+	feed(&mut t, b"\x1b[4:2;5;53mA\x1b[24;25;55mB");
+	assert_eq!(t.cells[0].attrs & (4 | 32 | 64 | 128), 4 | 32 | 64 | 128);
+	assert_eq!(t.cells[1].attrs & (4 | 32 | 64 | 128), 0);
+}
+
+#[test]
+fn ansi_insert_mode_shifts_cells_at_the_cursor() {
+	let mut t = terminal(6, 2);
+	feed(&mut t, b"abcd\r\x1b[4hZ");
+	assert_eq!(row(&t, 0), "Zabcd ");
+	feed(&mut t, b"\x1b[4l\rY");
+	assert_eq!(row(&t, 0), "Yabcd ");
+}
+
+#[test]
 fn text_styles_are_set_and_reset_independently() {
 	let mut t = terminal(8, 2);
 	feed(&mut t, b"\x1b[2;3;4;9mA\x1b[22;23;24;29mB\x1b[8mC\x1b[0mD");

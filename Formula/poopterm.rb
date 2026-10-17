@@ -2,15 +2,18 @@ class Poopterm < Formula
   desc "Small, poop-colored terminal emulator"
   homepage "https://github.com/poopterm-labs/poopterm"
   url "https://github.com/poopterm-labs/poopterm.git",
-      tag: "v0.3.3",
+      tag: "v0.4.0-1",
       using: :git
-  version "0.3.3"
+  version "0.4.0-1"
   license "MIT"
 
-  depends_on "rust" => :build
+  depends_on "rustup" => :build
 
   def install
-    system "cargo", "build", "--release", "--locked"
+    ENV["RUSTUP_HOME"] = (buildpath/".rustup").to_s
+    ENV["CARGO_HOME"] = (buildpath/".cargo").to_s
+    system "rustup", "toolchain", "install", "nightly", "--profile", "minimal"
+    system "rustup", "run", "nightly", "cargo", "build", "--release", "--locked"
     unless OS.mac?
       bin.install "target/release/poopterm"
       return
@@ -47,6 +50,7 @@ class Poopterm < Formula
 
   test do
     assert_predicate bin/"poopterm", :executable?
+    assert_equal "poopterm #{version}", shell_output("#{bin}/poopterm --version").strip
     if OS.mac?
       assert_predicate prefix/"Poopterm.app/Contents/MacOS/Poopterm", :executable?
       assert_predicate prefix/"Poopterm.app/Contents/Resources/Poopterm.icns", :exist?

@@ -1,11 +1,9 @@
-//! SIMD-optimized ANSI parser and terminal grid, scrollback, cursor and screen state.
+//! Terminal grid, scrollback, cursor and screen state.
 use crate::Theme;
-use unicode_width::UnicodeWidthChar;
 
 use std::{
 	collections::VecDeque,
 	path::PathBuf,
-	simd::{Simd, prelude::*, u8x32},
 	sync::Arc,
 	time::{Duration, Instant},
 };
@@ -58,6 +56,7 @@ pub(crate) struct Term {
 	pub(crate) default_fg: u32,
 	pub(crate) default_bg: u32,
 	pub(crate) palette: [u32; 8],
+	pub(crate) color_overrides: [Option<u32>; 256],
 	pub(crate) cx: usize,
 	pub(crate) cy: usize,
 	pub(crate) fg: u32,
@@ -71,6 +70,7 @@ pub(crate) struct Term {
 	pub(crate) application_cursor: bool,
 	pub(crate) origin_mode: bool,
 	pub(crate) auto_wrap: bool,
+	pub(crate) insert_mode: bool,
 	pub(crate) wrap_pending: bool,
 	pub(crate) charsets: [bool; 2],
 	pub(crate) active_charset: usize,
@@ -82,29 +82,6 @@ pub(crate) struct Term {
 	pub(crate) title: String,
 	pub(crate) cwd: PathBuf,
 	pub(crate) bell: bool,
-
-	// Parser state machine internal buffers
-	parser_state: ParserState,
-	csi_params: Vec<i32>,
-	csi_intermediates: Vec<u8>,
-	osc_payload: Vec<u8>,
-	dcs_payload: Vec<u8>,
-
-	// UTF-8 accumulation buffer
-	utf8_buf: [u8; 4],
-	utf8_len: usize,
-	utf8_expected: usize,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ParserState {
-	Ground,
-	Escape,
-	CsiEntry,
-	CsiParam,
-	CsiIntermediate,
-	OscString,
-	DcsString,
 }
 
 impl Term {
@@ -219,6 +196,7 @@ impl Term {
 		self.default_fg = theme.fg;
 		self.default_bg = theme.bg;
 		self.palette = theme.palette;
+		self.color_overrides.fill(None);
 		if self.fg == old_fg {
 			self.fg = theme.fg;
 		}
@@ -275,6 +253,7 @@ impl Term {
 			default_fg: theme.fg,
 			default_bg: theme.bg,
 			palette: theme.palette,
+			color_overrides: [None; 256],
 			fg: theme.fg,
 			bg: theme.bg,
 			scroll_top: 0,
@@ -286,6 +265,7 @@ impl Term {
 			application_cursor: false,
 			origin_mode: false,
 			auto_wrap: true,
+			insert_mode: false,
 			wrap_pending: false,
 			charsets: [false; 2],
 			active_charset: 0,
@@ -297,14 +277,6 @@ impl Term {
 			title: "Shell".into(),
 			cwd,
 			bell: false,
-			parser_state: ParserState::Ground,
-			csi_params: Vec::new(),
-			csi_intermediates: Vec::new(),
-			osc_payload: Vec::new(),
-			dcs_payload: Vec::new(),
-			utf8_buf: [0; 4],
-			utf8_len: 0,
-			utf8_expected: 0,
 		}
 	}
 
@@ -360,14 +332,23 @@ impl Term {
 	}
 
 	pub(crate) fn repair_wide_cells(&mut self) {
-		for row in self.cells.chunks_exact_mut(self.cols) {
-			for col in 0..row.len() {
-				if (row[col].width == 0 && (col == 0 || row[col - 1].width != 2))
-					|| (row[col].width == 2 && (col + 1 == row.len() || row[col + 1].width != 0))
-				{
-					row[col].ch = ' ';
-					row[col].width = 1;
-				}
+		for y in 0..self.rows {
+			self.repair_wide_row(y);
+		}
+	}
+
+	pub(crate) fn repair_wide_row(&mut self, y: usize) {
+		if y >= self.rows {
+			return;
+		}
+		let row_start = y * self.cols;
+		let row = &mut self.cells[row_start..row_start + self.cols];
+		for col in 0..row.len() {
+			if (row[col].width == 0 && (col == 0 || row[col - 1].width != 2))
+				|| (row[col].width == 2 && (col + 1 == row.len() || row[col + 1].width != 0))
+			{
+				row[col].ch = ' ';
+				row[col].width = 1;
 			}
 		}
 	}
@@ -568,566 +549,4 @@ impl Term {
 			self.cells[from..end].fill(blank);
 		}
 	}
-
-	// =========================================================================
-	// SIMD-Accelerated ANSI Stream Parsing & Execution Engine
-	// =========================================================================
-
-	/// Parse a stream of PTY bytes with SIMD-accelerated ASCII fast paths.
-	pub(crate) fn parse_bytes(&mut self, input: &[u8]) {
-		let mut i = 0;
-		let len = input.len();
-
-		while i < len {
-			if self.parser_state == ParserState::Ground && self.utf8_expected == 0 && i + 32 <= len {
-				let chunk = u8x32::from_slice(&input[i..i + 32]);
-				let lt_space = chunk.simd_lt(Simd::splat(0x20));
-				let is_esc = chunk.simd_eq(Simd::splat(0x1B));
-				let gte_hi = chunk.simd_ge(Simd::splat(0x80));
-
-				let control_mask = lt_space.to_bitmask() | is_esc.to_bitmask() | gte_hi.to_bitmask();
-
-				if control_mask == 0 {
-					for &b in &input[i..i + 32] {
-						self.print_char(b as char);
-					}
-					i += 32;
-					continue;
-				} else {
-					let safe_len = control_mask.trailing_zeros() as usize;
-					for &b in &input[i..i + safe_len] {
-						self.print_char(b as char);
-					}
-					i += safe_len;
-				}
-			}
-
-			let byte = input[i];
-			i += 1;
-			self.feed_byte(byte);
-		}
-	}
-
-	#[inline(always)]
-	fn print_char(&mut self, c: char) {
-		let width = c.width().unwrap_or(1).min(self.cols);
-		if width == 0 {
-			return;
-		}
-		if self.wrap_pending || self.cx + width > self.cols {
-			if self.auto_wrap {
-				self.cx = 0;
-				self.linefeed();
-			} else {
-				self.cx = self.cols.saturating_sub(width);
-			}
-		}
-		self.wrap_pending = false;
-		let idx = self.idx(self.cx, self.cy);
-
-		let mut cell_fg = self.fg;
-		let mut cell_bg = self.bg;
-		if self.bold {
-			if let Some(index) = self.palette.iter().position(|&color| color == cell_fg) {
-				cell_fg = bright_color(index);
-			}
-		}
-		if self.reverse {
-			std::mem::swap(&mut cell_fg, &mut cell_bg);
-		}
-		if self.attrs & 1 != 0 {
-			cell_fg = blend_color(cell_bg, cell_fg, 160);
-		}
-		if self.attrs & 8 != 0 {
-			cell_fg = cell_bg;
-		}
-
-		self.erase_images(idx, idx + width);
-		if idx < self.cells.len() {
-			self.cells[idx] = Cell {
-				attrs: self.attrs,
-				ch: c,
-				fg: cell_fg,
-				bg: cell_bg,
-				width: width as u8,
-			};
-		}
-		if width == 2 && self.cx + 1 < self.cols {
-			self.cells[idx + 1] = Cell {
-				attrs: self.attrs,
-				ch: ' ',
-				fg: cell_fg,
-				bg: cell_bg,
-				width: 0,
-			};
-		}
-		self.wrap_pending = self.cx + width >= self.cols;
-		self.cx = (self.cx + width).min(self.cols - 1);
-	}
-
-	fn feed_byte(&mut self, byte: u8) {
-		match self.parser_state {
-			ParserState::Ground => {
-				if self.utf8_expected > 0 {
-					self.utf8_buf[self.utf8_len] = byte;
-					self.utf8_len += 1;
-					if self.utf8_len == self.utf8_expected {
-						if let Ok(s) = std::str::from_utf8(&self.utf8_buf[..self.utf8_len]) {
-							if let Some(ch) = s.chars().next() {
-								self.print_char(ch);
-							}
-						}
-						self.utf8_expected = 0;
-						self.utf8_len = 0;
-					}
-					return;
-				}
-
-				match byte {
-					0x1B => self.parser_state = ParserState::Escape,
-					b'\n' => {
-						self.linefeed();
-						self.wrap_pending = false;
-					}
-					b'\r' => {
-						self.cx = 0;
-						self.wrap_pending = false;
-					}
-					b'\t' => {
-						if let Some(next_stop) = self
-							.tab_stops
-							.iter()
-							.enumerate()
-							.skip(self.cx + 1)
-							.find(|&(_, &is_stop)| is_stop)
-							.map(|(idx, _)| idx)
-						{
-							self.cx = next_stop.min(self.cols - 1);
-						} else {
-							self.cx = self.cols - 1;
-						}
-					}
-					0x08 => {
-						self.cx = self.cx.saturating_sub(1);
-						self.wrap_pending = false;
-					}
-					b if b >= 0x20 && b < 0x7F => self.print_char(b as char),
-					b if b >= 0x80 => {
-						if b & 0xE0 == 0xC0 {
-							self.utf8_expected = 2;
-						} else if b & 0xF0 == 0xE0 {
-							self.utf8_expected = 3;
-						} else if b & 0xF8 == 0xF0 {
-							self.utf8_expected = 4;
-						} else {
-							return;
-						}
-						self.utf8_buf[0] = b;
-						self.utf8_len = 1;
-					}
-					_ => {}
-				}
-			}
-			ParserState::Escape => match byte {
-				b'[' => {
-					self.parser_state = ParserState::CsiEntry;
-					self.csi_params.clear();
-					self.csi_intermediates.clear();
-					self.csi_params.push(0);
-				}
-				b']' => {
-					self.parser_state = ParserState::OscString;
-					self.osc_payload.clear();
-				}
-				b'P' => {
-					self.parser_state = ParserState::DcsString;
-					self.dcs_payload.clear();
-				}
-				_ => {
-					self.parser_state = ParserState::Ground;
-				}
-			},
-			ParserState::CsiEntry => match byte {
-				b'0'..=b'9' => {
-					self.parser_state = ParserState::CsiParam;
-					let val = (byte - b'0') as i32;
-					if let Some(last) = self.csi_params.last_mut() {
-						*last = val;
-					}
-				}
-				b';' => {
-					self.parser_state = ParserState::CsiParam;
-					self.csi_params.push(0);
-				}
-				b'?' | b'>' | b'!' => {
-					self.csi_intermediates.push(byte);
-				}
-				0x40..=0x7E => {
-					self.execute_csi(byte);
-					self.parser_state = ParserState::Ground;
-				}
-				_ => {
-					self.parser_state = ParserState::Ground;
-				}
-			},
-			ParserState::CsiParam => match byte {
-				b'0'..=b'9' => {
-					let val = (byte - b'0') as i32;
-					if let Some(last) = self.csi_params.last_mut() {
-						*last = last.saturating_mul(10).saturating_add(val);
-					}
-				}
-				b';' => {
-					self.csi_params.push(0);
-				}
-				0x40..=0x7E => {
-					self.execute_csi(byte);
-					self.parser_state = ParserState::Ground;
-				}
-				_ => {
-					self.parser_state = ParserState::Ground;
-				}
-			},
-			ParserState::OscString => {
-				if byte == 0x07 {
-					self.execute_osc();
-					self.parser_state = ParserState::Ground;
-				} else if byte == 0x1B {
-					self.execute_osc();
-					self.parser_state = ParserState::Escape;
-				} else {
-					self.osc_payload.push(byte);
-				}
-			}
-			ParserState::DcsString => {
-				if byte == 0x1B {
-					self.execute_dcs();
-					self.parser_state = ParserState::Escape;
-				} else {
-					self.dcs_payload.push(byte);
-				}
-			}
-			_ => {
-				self.parser_state = ParserState::Ground;
-			}
-		}
-	}
-
-	fn execute_osc(&mut self) {
-		let payload = String::from_utf8_lossy(&self.osc_payload);
-		let mut parts = payload.splitn(2, ';');
-		let code = parts.next().unwrap_or("");
-		let value = parts.next().unwrap_or("");
-
-		match code {
-			"0" | "2" => {
-				self.title = value.to_string();
-			}
-			"4" => {
-				let mut sub = value.split(';');
-				if let (Some(idx_str), Some(col_spec)) = (sub.next(), sub.next()) {
-					if let Ok(idx) = idx_str.parse::<usize>() {
-						if col_spec == "?" {
-							let color = self.palette.get(idx).copied().unwrap_or(self.default_fg);
-							let r = (color >> 16) & 0xff;
-							let g = (color >> 8) & 0xff;
-							let b = color & 0xff;
-							let resp = format!("\x1b]4;{};rgb:{:02x}/{:02x}/{:02x}\x07", idx, r, g, b);
-							self.responses.push(resp.into_bytes());
-						} else if let Some(rgb) = parse_color_spec(col_spec) {
-							if idx < self.palette.len() {
-								self.palette[idx] = rgb;
-							}
-						}
-					}
-				}
-			}
-			"7" => {
-				if let Some(path) = crate::osc::decode_uri_path(value) {
-					self.cwd = path;
-				}
-			}
-			_ => {}
-		}
-	}
-
-	fn execute_dcs(&mut self) {
-		if let Some(q_pos) = self.dcs_payload.iter().position(|&b| b == b'q') {
-			let params = &self.dcs_payload[..q_pos];
-			let data = &self.dcs_payload[q_pos + 1..];
-			let mut macro_param = 0u16;
-			let mut bg_param = 0u16;
-			let mut p_iter = params.split(|&b| b == b';');
-			if let Some(p1) = p_iter.next() {
-				macro_param = std::str::from_utf8(p1)
-					.ok()
-					.and_then(|s| s.parse().ok())
-					.unwrap_or(0);
-			}
-			if let Some(p2) = p_iter.next() {
-				bg_param = std::str::from_utf8(p2)
-					.ok()
-					.and_then(|s| s.parse().ok())
-					.unwrap_or(0);
-			}
-
-			let mut transfer = crate::sixel::Transfer::new(macro_param, bg_param);
-			for &b in data {
-				transfer.push(b);
-			}
-			self.sixel_transfer = Some(transfer);
-			self.finish_sixel();
-		}
-	}
-
-	fn execute_csi(&mut self, action: u8) {
-		let p = |idx: usize, default: i32| -> i32 {
-			self.csi_params.get(idx).copied().unwrap_or(default).max(0)
-		};
-
-		let is_private = self.csi_intermediates.contains(&b'?');
-
-		match action {
-			b'A' => {
-				let count = p(0, 1) as usize;
-				self.cy = self.cy.saturating_sub(count);
-				self.wrap_pending = false;
-			}
-			b'B' => {
-				let count = p(0, 1) as usize;
-				self.cy = (self.cy + count).min(self.rows - 1);
-				self.wrap_pending = false;
-			}
-			b'C' => {
-				let count = p(0, 1) as usize;
-				self.cx = (self.cx + count).min(self.cols - 1);
-				self.wrap_pending = false;
-			}
-			b'D' => {
-				let count = p(0, 1) as usize;
-				self.cx = self.cx.saturating_sub(count);
-				self.wrap_pending = false;
-			}
-			b'H' | b'f' => {
-				let row = p(0, 1) as usize;
-				let col = p(1, 1) as usize;
-				self.cy = (row.saturating_sub(1)).min(self.rows - 1);
-				self.cx = (col.saturating_sub(1)).min(self.cols - 1);
-				self.wrap_pending = false;
-			}
-			b'J' => {
-				let mode = p(0, 0);
-				let idx = self.idx(self.cx, self.cy);
-				match mode {
-					0 => self.clear_range(idx, self.cells.len()),
-					1 => self.clear_range(0, idx + 1),
-					2 => self.clear_range(0, self.cells.len()),
-					_ => {}
-				}
-			}
-			b'K' => {
-				let mode = p(0, 0);
-				let start = self.idx(0, self.cy);
-				let end = self.idx(self.cols, self.cy);
-				let cur = self.idx(self.cx, self.cy);
-				match mode {
-					0 => self.clear_range(cur, end),
-					1 => self.clear_range(start, cur + 1),
-					2 => self.clear_range(start, end),
-					_ => {}
-				}
-			}
-			b'm' => {
-				if self.csi_params.is_empty() {
-					self.attrs = 0;
-					self.bold = false;
-					self.reverse = false;
-					self.fg = self.default_fg;
-					self.bg = self.default_bg;
-				} else {
-					let mut idx = 0;
-					while idx < self.csi_params.len() {
-						let param = self.csi_params[idx];
-						match param {
-							0 => {
-								self.attrs = 0;
-								self.bold = false;
-								self.reverse = false;
-								self.fg = self.default_fg;
-								self.bg = self.default_bg;
-							}
-							1 => self.bold = true,
-							2 => self.attrs |= 1, // Dim
-							3 => self.attrs |= 2, // Italic
-							4 => self.attrs |= 4, // Underline
-							7 => self.reverse = true,
-							9 => self.attrs |= 16, // Strikethrough
-							22 => {
-								self.bold = false;
-								self.attrs &= !1;
-							}
-							23 => self.attrs &= !2,
-							24 => self.attrs &= !4,
-							27 => self.reverse = false,
-							29 => self.attrs &= !16,
-							30..=37 => {
-								let color_idx = (param - 30) as usize;
-								self.fg = self
-									.palette
-									.get(color_idx)
-									.copied()
-									.unwrap_or(self.default_fg);
-							}
-							38 => {
-								if let Some(&mode_type) = self.csi_params.get(idx + 1) {
-									if mode_type == 5 {
-										if let Some(&col) = self.csi_params.get(idx + 2) {
-											self.fg = xterm_color(col as u8, self.palette);
-											idx += 2;
-										}
-									} else if mode_type == 2 {
-										if let (Some(&r), Some(&g), Some(&b)) = (
-											self.csi_params.get(idx + 2),
-											self.csi_params.get(idx + 3),
-											self.csi_params.get(idx + 4),
-										) {
-											self.fg = ((r.clamp(0, 255) as u32) << 16)
-												| ((g.clamp(0, 255) as u32) << 8)
-												| (b.clamp(0, 255) as u32);
-											idx += 4;
-										}
-									}
-								}
-							}
-							39 => self.fg = self.default_fg,
-							40..=47 => {
-								let color_idx = (param - 40) as usize;
-								self.bg = self
-									.palette
-									.get(color_idx)
-									.copied()
-									.unwrap_or(self.default_bg);
-							}
-							48 => {
-								if let Some(&mode_type) = self.csi_params.get(idx + 1) {
-									if mode_type == 5 {
-										if let Some(&col) = self.csi_params.get(idx + 2) {
-											self.bg = xterm_color(col as u8, self.palette);
-											idx += 2;
-										}
-									} else if mode_type == 2 {
-										if let (Some(&r), Some(&g), Some(&b)) = (
-											self.csi_params.get(idx + 2),
-											self.csi_params.get(idx + 3),
-											self.csi_params.get(idx + 4),
-										) {
-											self.bg = ((r.clamp(0, 255) as u32) << 16)
-												| ((g.clamp(0, 255) as u32) << 8)
-												| (b.clamp(0, 255) as u32);
-											idx += 4;
-										}
-									}
-								}
-							}
-							49 => self.bg = self.default_bg,
-							90..=97 => {
-								let color_idx = (param - 90) as usize;
-								self.fg = bright_color(color_idx);
-							}
-							100..=107 => {
-								let color_idx = (param - 100) as usize;
-								self.bg = bright_color(color_idx);
-							}
-							_ => {}
-						}
-						idx += 1;
-					}
-				}
-			}
-			b'h' | b'l' => {
-				let enable = action == b'h';
-				if is_private {
-					let params = self.csi_params.clone();
-					for param in params {
-						match param {
-							1 => self.application_cursor = enable,
-							7 => self.auto_wrap = enable,
-							25 => self.cursor_visible = enable,
-							1049 => self.alternate_screen(enable),
-							2004 => self.bracketed_paste = enable,
-							_ => {}
-						}
-					}
-				}
-			}
-			b'n' => {
-				let mode = p(0, 0);
-				if mode == 6 {
-					let resp = format!("\x1b[{};{}R", self.cy + 1, self.cx + 1);
-					self.responses.push(resp.into_bytes());
-				} else if mode == 5 {
-					self.responses.push(b"\x1b[0n".to_vec());
-				}
-			}
-			b'c' => {
-				let is_secondary = self.csi_intermediates.contains(&b'>');
-				if is_secondary {
-					self.responses.push(b"\x1b[>0;95;0c".to_vec());
-				} else {
-					self.responses.push(b"\x1b[?6c".to_vec());
-				}
-			}
-			_ => {}
-		}
-	}
-}
-
-fn parse_color_spec(spec: &str) -> Option<u32> {
-	if let Some(hex) = spec.strip_prefix('#') {
-		if hex.len() == 6 {
-			let r = u32::from_str_radix(&hex[0..2], 16).ok()?;
-			let g = u32::from_str_radix(&hex[2..4], 16).ok()?;
-			let b = u32::from_str_radix(&hex[4..6], 16).ok()?;
-			return Some((r << 16) | (g << 8) | b);
-		}
-	}
-	None
-}
-
-fn bright_color(index: usize) -> u32 {
-	[
-		0x808080, 0xFF5555, 0x55FF55, 0xFFFF55, 0x5555FF, 0xFF55FF, 0x55FFFF, 0xFFFFFF,
-	][index]
-}
-
-fn xterm_color(index: u8, palette: [u32; 8]) -> u32 {
-	if index < 8 {
-		return palette[index as usize];
-	}
-	if index < 16 {
-		return bright_color((index - 8) as usize);
-	}
-	if index < 232 {
-		let n = index - 16;
-		let component = |v: u8| if v == 0 { 0 } else { 55 + 40 * v as u32 };
-		return (component(n / 36) << 16) | (component((n / 6) % 6) << 8) | component(n % 6);
-	}
-	let gray = 8 + 10 * (index as u32 - 232);
-	(gray << 16) | (gray << 8) | gray
-}
-
-fn blend_color(bg: u32, fg: u32, a: u32) -> u32 {
-	let fg_r = (fg >> 16) & 0xff;
-	let bg_r = (bg >> 16) & 0xff;
-	let r = (fg_r * a + bg_r * (255 - a)) / 255;
-
-	let fg_g = (fg >> 8) & 0xff;
-	let bg_g = (bg >> 8) & 0xff;
-	let g = (fg_g * a + bg_g * (255 - a)) / 255;
-
-	let fg_b = fg & 0xff;
-	let bg_b = bg & 0xff;
-	let b = (fg_b * a + bg_b * (255 - a)) / 255;
-
-	(r << 16) | (g << 8) | b
 }

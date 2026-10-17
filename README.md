@@ -21,13 +21,13 @@ Poopterm is a lightweight, ultra-high-throughput terminal emulator written in Ru
 - Batches synchronized terminal updates (`?2026`) to avoid partial frames.
 - Displays bounded Sixel graphics and tracks OSC 133 shell markers.
 - Supports semicolon/colon TrueColor, DEC line drawing, and additional text styles.
-- Includes macOS Light and Dark, all four Catppuccin flavors, and signature Poop themes.
+- Includes Dark Mode, Light Mode, all four Catppuccin flavors, and signature Poop themes.
 - Includes a desktop launcher and icon for Linux and FreeBSD.
 - **Gigabit-tier performance:** Utilizes portable SIMD (`std::simd::u32x4`) for vectorized rectangle fills and alpha channel blending, zero-allocation stack buffers for SGR escape sequences, and aggressive compiler optimizations targeting Rust 2024 edition.
 
 ## Build and run
 
-Poopterm requires the **Rust nightly toolchain** because it uses unstable portable SIMD features (`#![feature(portable_simd)]`). A `rust-toolchain.toml` file is included in the repository, so `cargo` will automatically use the correct nightly toolchain when building inside the project directory without modifying your global default.
+Poopterm currently requires **nightly Rust** because its optimized pixel blending uses Rust's `portable_simd` feature. The included `rust-toolchain.toml` selects nightly automatically when Rust is installed through rustup.
 
 Build from the project directory:
 
@@ -98,7 +98,7 @@ pkg install rust pkgconf xorg libX11 libxkbcommon wayland
 
 ## Themes
 
-Poopterm includes macOS Light and Dark, Catppuccin Latte, Frappé, Macchiato,
+Poopterm includes Dark Mode and Light Mode, Catppuccin Latte, Frappé, Macchiato,
 Mocha, and signature Poop themes. Rosé Pine has been removed for now. Choose a
 theme in **Settings** or press **Ctrl+Shift+T** to cycle through them. The
 selection is saved to a config file and restored on the next launch.
@@ -117,8 +117,9 @@ scrollback_lines = 5000 # 0–100000; 0 disables history
 restore_sessions = true
 ```
 
-`theme` accepts `macos-dark`, `macos-light`, `catppuccin-latte`,
+`theme` accepts `darkmode`, `light-mode`, `catppuccin-latte`,
 `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, or `poop`.
+The older `macos-dark` and `macos-light` values remain accepted for existing configs.
 Settings changes apply immediately after saving; session restore takes effect on
 the next launch. Reducing scrollback discards the oldest lines. Invalid numbers
 fall back to defaults or are clamped to supported limits. Other config keys and
@@ -278,5 +279,6 @@ flags, and documented shell integration behavior are the compatibility surface.
 
 Update `Cargo.toml`, the Poopterm entry in `Cargo.lock`, and the changelog together.
 Successful CI on `main` creates the matching `vX.Y.Z` tag and GitHub release only
-when the tag does not already exist. Published tags are never moved. Update the
+when the tag does not already exist. Prerelease versions such as `0.4.0-1` are
+published as GitHub prereleases. Published tags are never moved. Update the
 Homebrew formula after that tag exists, so installs never point at missing source.

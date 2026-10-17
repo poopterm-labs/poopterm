@@ -72,4 +72,8 @@ jobs:
             exit 1
           fi
           
-          gh release create "$tag" --target "$GITHUB_SHA" --title "Poopterm ${version}" --notes-file CHANGELOG.md
+          release_args=("$tag" --target "$GITHUB_SHA" --title "Poopterm ${version}" --notes-file CHANGELOG.md)
+          if [[ "$version" == *-* ]]; then
+            release_args+=(--prerelease)
+          fi
+          gh release create "${release_args[@]}"
