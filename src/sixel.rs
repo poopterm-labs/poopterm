@@ -10,6 +10,7 @@ pub(crate) const MAX_PAYLOAD: usize = 4 * 1024 * 1024;
 pub(crate) struct Bitmap {
 	pub width: usize,
 	pub height: usize,
+	pub opaque: bool,
 	pub pixels: Vec<u32>,
 }
 #[derive(Clone)]
@@ -209,6 +210,7 @@ impl Decoder {
 		Some(Bitmap {
 			width: self.width,
 			height: self.height,
+			opaque: self.background != TRANSPARENT,
 			pixels,
 		})
 	}

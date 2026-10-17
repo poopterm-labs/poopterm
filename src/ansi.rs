@@ -86,7 +86,9 @@ pub(crate) struct Term {
 	pub(crate) reverse: bool,
 	pub(crate) responses: Vec<Vec<u8>>,
 	pub(crate) title: String,
+	pub(crate) title_generation: u64,
 	pub(crate) cwd: PathBuf,
+	pub(crate) cwd_generation: u64,
 	pub(crate) bell: bool,
 }
 
@@ -290,7 +292,9 @@ impl Term {
 			reverse: false,
 			responses: Vec::new(),
 			title: "Shell".into(),
+			title_generation: 0,
 			cwd,
+			cwd_generation: 0,
 			bell: false,
 		}
 	}

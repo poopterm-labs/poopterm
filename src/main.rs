@@ -415,7 +415,7 @@ fn xterm_color(index: u8, palette: [u32; 8]) -> u32 {
 
 #[derive(Debug)]
 enum UserEvent {
-	Output(u64, Vec<u8>, mpsc::SyncSender<()>),
+	Output(u64, Vec<u8>, mpsc::SyncSender<Vec<u8>>),
 	Closed(u64),
 }
 
@@ -559,7 +559,7 @@ fn spawn_session(
 	let mut reader = pair.master.try_clone_reader()?;
 	let writer = pair.master.take_writer()?;
 	thread::spawn(move || {
-		let mut buf = [0u8; 16384];
+		let mut buf = vec![0u8; 16384];
 		loop {
 			match reader.read(&mut buf) {
 				Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -568,16 +568,16 @@ fn spawn_session(
 					break;
 				}
 				Ok(n) => {
+					buf.truncate(n);
 					let (ack, received) = mpsc::sync_channel(1);
-					if proxy
-						.send_event(UserEvent::Output(id, buf[..n].to_vec(), ack))
-						.is_err()
-					{
+					if proxy.send_event(UserEvent::Output(id, buf, ack)).is_err() {
 						break;
 					}
-					if received.recv().is_err() {
+					let Ok(mut returned) = received.recv() else {
 						break;
-					}
+					};
+					returned.resize(16384, 0);
+					buf = returned;
 				}
 			}
 		}
@@ -2598,7 +2598,11 @@ impl App {
 
 				let x0 = m + col * cw;
 				let y0 = top + row * ch;
-				fill_rect(pixels, w, h, x0, y0, cw, ch, bg);
+				// The frame's content area was already cleared to the terminal's
+				// default background. Most terminal cells use that same color.
+				if bg != self.theme.bg {
+					fill_rect(pixels, w, h, x0, y0, cw, ch, bg);
+				}
 
 				if cell.attrs & 4 != 0 {
 					fill_rect(
@@ -2707,15 +2711,23 @@ impl App {
 						.or_insert_with(|| glyph_font.rasterize(mark, px));
 					let mark_x = x0 as i32 + (cw as i32 - mark_metrics.width as i32) / 2;
 					let mark_y = y0 as i32 + ascent - mark_metrics.ymin - mark_metrics.height as i32;
-					for gy in 0..mark_metrics.height {
-						for gx in 0..mark_metrics.width {
-							let x = mark_x + gx as i32;
-							let y = mark_y + gy as i32;
-							if x >= x0 as i32 && x < x0 as i32 + cw as i32 && y >= 0 && y < h as i32 {
-								let alpha = mark_bitmap[gy * mark_metrics.width + gx] as u32;
-								let index = y as usize * w + x as usize;
-								pixels[index] = blend(pixels[index], fg, alpha);
-							}
+					let draw_left = mark_x.max(x0 as i32).max(0);
+					let draw_right = (mark_x + mark_metrics.width as i32)
+						.min((x0 + cw) as i32)
+						.min(w as i32);
+					let draw_top = mark_y.max(0);
+					let draw_bottom = (mark_y + mark_metrics.height as i32).min(h as i32);
+					if draw_left < draw_right && draw_top < draw_bottom {
+						let draw_width = (draw_right - draw_left) as usize;
+						for py in draw_top..draw_bottom {
+							let gy = (py - mark_y) as usize;
+							let src_start = gy * mark_metrics.width + (draw_left - mark_x) as usize;
+							let dst_start = py as usize * w + draw_left as usize;
+							blend_coverage_row(
+								&mut pixels[dst_start..dst_start + draw_width],
+								&mark_bitmap[src_start..src_start + draw_width],
+								fg,
+							);
 						}
 					}
 				}
@@ -2724,16 +2736,27 @@ impl App {
 
 		for image in &term.images {
 			let image_x = m + image.col * cw;
+			if image_x >= w {
+				continue;
+			}
 			let image_y = top as isize + (image.row + term.scroll_offset as isize) * ch as isize;
 			for sy in 0..image.bitmap.height {
 				let y = image_y + sy as isize;
 				if y < top as isize || y >= (top + term.rows * ch).min(h) as isize {
 					continue;
 				}
-				for sx in 0..image.bitmap.width.min(w.saturating_sub(image_x)) {
-					let pixel = image.bitmap.pixels[sy * image.bitmap.width + sx];
-					if pixel != sixel::TRANSPARENT {
-						pixels[y as usize * w + image_x + sx] = pixel;
+				let draw_width = image.bitmap.width.min(w.saturating_sub(image_x));
+				let src_start = sy * image.bitmap.width;
+				let dst_start = y as usize * w + image_x;
+				if image.bitmap.opaque {
+					pixels[dst_start..dst_start + draw_width]
+						.copy_from_slice(&image.bitmap.pixels[src_start..src_start + draw_width]);
+				} else {
+					for sx in 0..draw_width {
+						let pixel = image.bitmap.pixels[src_start + sx];
+						if pixel != sixel::TRANSPARENT {
+							pixels[dst_start + sx] = pixel;
+						}
 					}
 				}
 			}
@@ -3091,16 +3114,21 @@ fn draw_text(
 			.or_insert_with(|| font.rasterize(ch, px));
 		let gx0 = cursor_x + metrics.xmin;
 		let gy0 = y as i32 + ascent - metrics.ymin - metrics.height as i32;
-		for gy in 0..metrics.height {
-			for gx in 0..metrics.width {
-				let alpha = bitmap[gy * metrics.width + gx] as u32;
-				let px_x = gx0 + gx as i32;
-				let px_y = gy0 + gy as i32;
-				if alpha == 0 || px_x < 0 || px_y < 0 || px_x >= width as i32 || px_y >= height as i32 {
-					continue;
-				}
-				let index = px_y as usize * width + px_x as usize;
-				pixels[index] = blend(pixels[index], color, alpha);
+		let draw_left = gx0.max(0);
+		let draw_right = (gx0 + metrics.width as i32).min(width as i32);
+		let draw_top = gy0.max(0);
+		let draw_bottom = (gy0 + metrics.height as i32).min(height as i32);
+		if draw_left < draw_right && draw_top < draw_bottom {
+			let draw_width = (draw_right - draw_left) as usize;
+			for py in draw_top..draw_bottom {
+				let gy = (py - gy0) as usize;
+				let src_start = gy * metrics.width + (draw_left - gx0) as usize;
+				let dst_start = py as usize * width + draw_left as usize;
+				blend_coverage_row(
+					&mut pixels[dst_start..dst_start + draw_width],
+					&bitmap[src_start..src_start + draw_width],
+					color,
+				);
 			}
 		}
 		cursor_x += metrics.advance_width.ceil() as i32;
@@ -3222,10 +3250,16 @@ fn blend_coverage_row(pixels: &mut [u32], coverage: &[u8], fg: u32) {
 	let (pixel_chunks, pixel_remainder) = pixels.as_chunks_mut::<4>();
 	let (coverage_chunks, coverage_remainder) = coverage.as_chunks::<4>();
 	for (background, alpha) in pixel_chunks.iter_mut().zip(coverage_chunks) {
-		let background_vector = u32x4::from_array(*background);
-		let alpha = u32x4::from_array(alpha.map(u32::from));
-		let result = blend_chunk(background_vector, u32x4::splat(fg), alpha);
-		*background = result.to_array();
+		if alpha.iter().all(|&value| value == 0) {
+			continue;
+		}
+		if alpha.iter().all(|&value| value == u8::MAX) {
+			*background = [fg; 4];
+		} else {
+			let background_vector = u32x4::from_array(*background);
+			let alpha = u32x4::from_array(alpha.map(u32::from));
+			*background = blend_chunk(background_vector, u32x4::splat(fg), alpha).to_array();
+		}
 	}
 	for (pixel, alpha) in pixel_remainder.iter_mut().zip(coverage_remainder) {
 		*pixel = blend(*pixel, fg, *alpha as u32);
@@ -3751,7 +3785,6 @@ impl ApplicationHandler<UserEvent> for App {
 	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
 		match event {
 			UserEvent::Output(id, bytes, ack) => {
-				let _ = ack.send(());
 				// Keep one parser per PTY stream to preserve partial escape sequences.
 				let mut active_output = false;
 				let mut became_active = false;
@@ -3759,14 +3792,14 @@ impl ApplicationHandler<UserEvent> for App {
 				let active_id = self.sessions.get(self.active).map(|session| session.id);
 				if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
 					let previous_bell = session.term.bell;
-					let previous_title = session.term.title.clone();
-					let previous_cwd = session.term.cwd.clone();
+					let previous_title_generation = session.term.title_generation;
+					let previous_cwd_generation = session.term.cwd_generation;
 
 					session.parser.advance(&mut session.term, &bytes);
 
-					cwd_changed = session.term.cwd != previous_cwd;
-					became_active |=
-						session.term.bell != previous_bell || session.term.title != previous_title;
+					cwd_changed = session.term.cwd_generation != previous_cwd_generation;
+					became_active |= session.term.bell != previous_bell
+						|| session.term.title_generation != previous_title_generation;
 					if !session.term.responses.is_empty() {
 						for response in std::mem::take(&mut session.term.responses) {
 							let _ = session.writer.write_all(&response);
@@ -3795,6 +3828,7 @@ impl ApplicationHandler<UserEvent> for App {
 				{
 					win.request_redraw();
 				}
+				let _ = ack.send(bytes);
 			}
 			UserEvent::Closed(id) => {
 				if let Some(index) = self.sessions.iter().position(|s| s.id == id) {

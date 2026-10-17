@@ -636,7 +636,11 @@ impl Term {
 			),
 			b"0" | b"1" | b"2" if params.len() >= 2 => {
 				let title = String::from_utf8_lossy(params[1]);
-				self.title = title.chars().filter(|c| !c.is_control()).take(64).collect();
+				let title: String = title.chars().filter(|c| !c.is_control()).take(64).collect();
+				if self.title != title {
+					self.title = title;
+					self.title_generation = self.title_generation.wrapping_add(1);
+				}
 			}
 			b"4" => self.osc_palette(&params[1..]),
 			b"104" => {
@@ -660,7 +664,10 @@ impl Term {
 						.find('/')
 						.and_then(|index| decode_uri_path(&path[index..]))
 				{
-					self.cwd = path;
+					if self.cwd != path {
+						self.cwd = path;
+						self.cwd_generation = self.cwd_generation.wrapping_add(1);
+					}
 				}
 			}
 			b"10" | b"11" if params.len() >= 2 => {
