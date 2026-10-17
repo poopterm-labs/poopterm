@@ -2647,31 +2647,31 @@ impl App {
 
 				let gx0 = x0 as i32 + gm.xmin;
 				let gy0 = y0 as i32 + ascent - gm.ymin - gm.height as i32;
-				for gy in 0..gm.height {
-					for gx in 0..gm.width {
-						let a = bitmap[gy * gm.width + gx] as u32;
-						if a == 0 {
-							continue;
-						}
-						let x = gx0
-							+ gx as i32
-							+ if cell.attrs & 2 != 0 {
-								(gm.height.saturating_sub(gy) / 6) as i32
-							} else {
-								0
-							};
-						let y = gy0 + gy as i32;
-						if x < x0 as i32
-							|| x >= x0 as i32 + cw as i32 * cell.width as i32
-							|| y < 0
-							|| x < 0
-							|| x >= w as i32
-							|| y >= h as i32
-						{
-							continue;
-						}
-						pixels[y as usize * w + x as usize] = blend(bg, fg, a);
+				let cell_left = x0 as i32;
+				let cell_right = (x0 + cw * cell.width as usize).min(w) as i32;
+				let glyph_top = gy0.max(0) as usize;
+				let glyph_bottom = (gy0 + gm.height as i32).min(h as i32).max(0) as usize;
+				for y in glyph_top..glyph_bottom {
+					let gy = (y as i32 - gy0) as usize;
+					let italic_shift = if cell.attrs & 2 != 0 {
+						(gm.height.saturating_sub(gy) / 6) as i32
+					} else {
+						0
+					};
+					let glyph_left = gx0 + italic_shift;
+					let draw_left = glyph_left.max(cell_left).max(0);
+					let draw_right = (glyph_left + gm.width as i32).min(cell_right).min(w as i32);
+					if draw_left >= draw_right {
+						continue;
 					}
+					let src_start = gy * gm.width + (draw_left - glyph_left) as usize;
+					let draw_width = (draw_right - draw_left) as usize;
+					let dst_start = y * w + draw_left as usize;
+					blend_coverage_row(
+						&mut pixels[dst_start..dst_start + draw_width],
+						&bitmap[src_start..src_start + draw_width],
+						fg,
+					);
 				}
 				if cell.hyperlink != 0 {
 					fill_rect(
@@ -3210,31 +3210,41 @@ fn blend(bg: u32, fg: u32, a: u32) -> u32 {
 	if a == 255 {
 		return fg;
 	}
-	let bg_v = u32x4::from([bg, bg, bg, bg]);
-	let fg_v = u32x4::from([fg, fg, fg, fg]);
-	blend_chunk(bg_v, fg_v, a)[0]
+	let inverse = 255 - a;
+	let red = (((fg >> 16 & 0xff) * a + (bg >> 16 & 0xff) * inverse) / 255) << 16;
+	let green = (((fg >> 8 & 0xff) * a + (bg >> 8 & 0xff) * inverse) / 255) << 8;
+	let blue = ((fg & 0xff) * a + (bg & 0xff) * inverse) / 255;
+	red | green | blue
 }
 
 #[inline]
-fn blend_chunk(bg: u32x4, fg: u32x4, a: u32) -> u32x4 {
-	if a == 0 {
-		return bg;
+fn blend_coverage_row(pixels: &mut [u32], coverage: &[u8], fg: u32) {
+	let (pixel_chunks, pixel_remainder) = pixels.as_chunks_mut::<4>();
+	let (coverage_chunks, coverage_remainder) = coverage.as_chunks::<4>();
+	for (background, alpha) in pixel_chunks.iter_mut().zip(coverage_chunks) {
+		let background_vector = u32x4::from_array(*background);
+		let alpha = u32x4::from_array(alpha.map(u32::from));
+		let result = blend_chunk(background_vector, u32x4::splat(fg), alpha);
+		*background = result.to_array();
 	}
-	if a == 255 {
-		return fg;
+	for (pixel, alpha) in pixel_remainder.iter_mut().zip(coverage_remainder) {
+		*pixel = blend(*pixel, fg, *alpha as u32);
 	}
-	let a_v = u32x4::splat(a);
-	let inv_a_v = u32x4::splat(255 - a);
+}
+
+#[inline]
+fn blend_chunk(bg: u32x4, fg: u32x4, a: u32x4) -> u32x4 {
+	let inv_a_v = u32x4::splat(255) - a;
 	let max_a = u32x4::splat(255);
 	let fg_r = (fg >> u32x4::splat(16)) & u32x4::splat(0xff);
 	let bg_r = (bg >> u32x4::splat(16)) & u32x4::splat(0xff);
-	let r = ((fg_r * a_v + bg_r * inv_a_v) / max_a) << u32x4::splat(16);
+	let r = ((fg_r * a + bg_r * inv_a_v) / max_a) << u32x4::splat(16);
 	let fg_g = (fg >> u32x4::splat(8)) & u32x4::splat(0xff);
 	let bg_g = (bg >> u32x4::splat(8)) & u32x4::splat(0xff);
-	let g = ((fg_g * a_v + bg_g * inv_a_v) / max_a) << u32x4::splat(8);
+	let g = ((fg_g * a + bg_g * inv_a_v) / max_a) << u32x4::splat(8);
 	let fg_b = fg & u32x4::splat(0xff);
 	let bg_b = bg & u32x4::splat(0xff);
-	let b = (fg_b * a_v + bg_b * inv_a_v) / max_a;
+	let b = (fg_b * a + bg_b * inv_a_v) / max_a;
 	r | g | b
 }
 

@@ -23,8 +23,16 @@ impl Parser {
 
 impl Term {
 	pub(crate) fn sgr(&mut self, params: &Params) {
-		let groups: Vec<Vec<u16>> = params.iter().map(|group| group.to_vec()).collect();
-		if groups.is_empty() {
+		// vte stores at most 32 parameters/subparameters in its parser state.
+		// Keep group slices on the stack instead of allocating nested Vecs for
+		// every SGR sequence (which is common in full-screen terminal apps).
+		let mut groups = [None; 32];
+		let mut group_count = 0;
+		for group in params.iter() {
+			groups[group_count] = Some(group);
+			group_count += 1;
+		}
+		if group_count == 0 {
 			self.fg = self.default_fg;
 			self.bg = self.default_bg;
 			self.attrs = 0;
@@ -33,8 +41,8 @@ impl Term {
 			return;
 		}
 		let mut i = 0;
-		while i < groups.len() {
-			let group = &groups[i];
+		while i < group_count {
+			let group = groups[i].unwrap_or_default();
 			let Some(&code) = group.first() else {
 				self.fg = self.default_fg;
 				self.bg = self.default_bg;
@@ -63,13 +71,14 @@ impl Term {
 						}
 						_ => (0, None, 0),
 					}
-				} else if let Some(mode_group) = groups.get(i + 1) {
+				} else if let Some(mode_group) = groups.get(i + 1).and_then(|group| *group) {
 					let mode = mode_group.first().copied().unwrap_or(0);
 					match mode {
 						5 => (
 							5,
 							groups
 								.get(i + 2)
+								.and_then(|group| *group)
 								.and_then(|g| g.first())
 								.map(|v| self.indexed_color((*v).min(255) as u8)),
 							2,
@@ -77,9 +86,20 @@ impl Term {
 						2 => {
 							let color = groups
 								.get(i + 2)
+								.and_then(|group| *group)
 								.and_then(|r| r.first())
-								.zip(groups.get(i + 3).and_then(|g| g.first()))
-								.zip(groups.get(i + 4).and_then(|b| b.first()))
+								.zip(
+									groups
+										.get(i + 3)
+										.and_then(|group| *group)
+										.and_then(|g| g.first()),
+								)
+								.zip(
+									groups
+										.get(i + 4)
+										.and_then(|group| *group)
+										.and_then(|b| b.first()),
+								)
 								.map(|((r, g), b)| rgb_color(*r, *g, *b));
 							(2, color, 4)
 						}
