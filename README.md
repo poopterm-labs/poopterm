@@ -351,11 +351,6 @@ The code is separated into `state.rs` (grid/history), `parser.rs` (vte callbacks
 (preferences), and `main.rs` (windowing, PTYs, input, rendering).
 CI builds and checks macOS and Linux; BSD still needs testing on real systems.
 
-Poopterm follows [Semantic Versioning](https://semver.org/): patch releases fix
-bugs, minor releases add features, and major releases signal incompatible changes
-after 1.0. Before 1.0, incompatible changes advance the minor version and are
-listed in [CHANGELOG.md](CHANGELOG.md). Existing configuration keys, command-line
-flags, and documented shell integration behavior are the compatibility surface.
 
 Update `Cargo.toml`, the Poopterm entry in `Cargo.lock`, and the changelog together.
 Successful CI on `main` creates the matching `vX.Y.Z` tag and GitHub release only
