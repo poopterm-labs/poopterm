@@ -658,12 +658,13 @@ fn osc_color_reply(command: &[u8], color: u32) -> Vec<u8> {
 }
 
 fn parse_osc_color(value: &[u8]) -> Option<u32> {
+	if let Ok(value) = std::str::from_utf8(value)
+		&& let Some(hex) = value.strip_prefix('#')
+		&& hex.len() == 6
+	{
+		return u32::from_str_radix(hex, 16).ok();
+	}
 	if let Ok(value) = std::str::from_utf8(value) {
-		if let Some(hex) = value.strip_prefix('#') {
-			if hex.len() == 6 {
-				return u32::from_str_radix(hex, 16).ok();
-			}
-		}
 		if let Some(rgb) = value.strip_prefix("rgb:") {
 			let mut channels = rgb
 				.split('/')

@@ -1404,13 +1404,11 @@ impl App {
 				if let Ok(output) = Command::new("/usr/sbin/lsof")
 					.args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
 					.output()
-				{
-					if let Some(path) = String::from_utf8_lossy(&output.stdout)
+					&& let Some(path) = String::from_utf8_lossy(&output.stdout)
 						.lines()
 						.find_map(|line| line.strip_prefix('n'))
-					{
-						session.term.cwd = PathBuf::from(path);
-					}
+				{
+					session.term.cwd = PathBuf::from(path);
 				}
 			}
 		}
