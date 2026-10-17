@@ -664,24 +664,24 @@ fn parse_osc_color(value: &[u8]) -> Option<u32> {
 	{
 		return u32::from_str_radix(hex, 16).ok();
 	}
-	if let Ok(value) = std::str::from_utf8(value) {
-		if let Some(rgb) = value.strip_prefix("rgb:") {
-			let mut channels = rgb
-				.split('/')
-				.map(|part| u16::from_str_radix(part, 16).ok());
-			let channel = |value: u16, digits: usize| -> u32 {
-				let max = (1u32 << (digits.min(4) * 4)) - 1;
-				((value as u32 * 255 + max / 2) / max).min(255)
-			};
-			let r = channels.next()??;
-			let g = channels.next()??;
-			let b = channels.next()??;
-			return Some(
-				(channel(r, rgb.split('/').next()?.len()) << 16)
-					| (channel(g, rgb.split('/').nth(1)?.len()) << 8)
-					| channel(b, rgb.split('/').nth(2)?.len()),
-			);
-		}
+	if let Ok(value) = std::str::from_utf8(value)
+		&& let Some(rgb) = value.strip_prefix("rgb:")
+	{
+		let mut channels = rgb
+			.split('/')
+			.map(|part| u16::from_str_radix(part, 16).ok());
+		let channel = |value: u16, digits: usize| -> u32 {
+			let max = (1u32 << (digits.min(4) * 4)) - 1;
+			((value as u32 * 255 + max / 2) / max).min(255)
+		};
+		let r = channels.next()??;
+		let g = channels.next()??;
+		let b = channels.next()??;
+		return Some(
+			(channel(r, rgb.split('/').next()?.len()) << 16)
+				| (channel(g, rgb.split('/').nth(1)?.len()) << 8)
+				| channel(b, rgb.split('/').nth(2)?.len()),
+		);
 	}
 	None
 }
