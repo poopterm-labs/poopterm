@@ -8,6 +8,7 @@ mod csi;
 mod esc;
 mod osc;
 mod print;
+mod scan;
 mod sgr;
 
 use crate::term::Term;
@@ -20,6 +21,10 @@ pub(crate) struct Parser {
 	/// An incomplete UTF-8 sequence from the end of the previous read.
 	carry: [u8; 4],
 	carry_len: usize,
+	/// True only when vte is certainly in its ground state, which allows the
+	/// SIMD fast path. Cleared whenever bytes go through vte, and set again
+	/// by a callback after which vte always returns to ground.
+	ground: bool,
 }
 
 impl Parser {
@@ -28,6 +33,7 @@ impl Parser {
 			inner: vte::Parser::new(),
 			carry: [0; 4],
 			carry_len: 0,
+			ground: true,
 		}
 	}
 
@@ -47,14 +53,146 @@ impl Parser {
 			if take < needed {
 				return;
 			}
-			self.inner.advance(term, &self.carry[..self.carry_len]);
+			let carry = self.carry;
+			self.feed(term, &carry[..self.carry_len]);
 			self.carry_len = 0;
 		}
 		let complete = complete_prefix(bytes);
-		self.inner.advance(term, &bytes[..complete]);
+		self.feed(term, &bytes[..complete]);
 		let tail = &bytes[complete..];
 		self.carry[..tail.len()].copy_from_slice(tail);
 		self.carry_len = tail.len();
+	}
+}
+
+/// Collects runs of printable ASCII from vte's per-character `print` calls
+/// and writes each run with [`Term::print_ascii`]; every other callback
+/// flushes the run first, so ordering is unchanged.
+struct Batch<'a> {
+	term: &'a mut Term,
+	run: [u8; 1024],
+	len: usize,
+	/// Set by callbacks after which vte is always back in ground state.
+	returned_to_ground: bool,
+}
+
+impl<'a> Batch<'a> {
+	fn new(term: &'a mut Term) -> Self {
+		Self {
+			term,
+			run: [0; 1024],
+			len: 0,
+			returned_to_ground: false,
+		}
+	}
+
+	/// Handles printable ASCII and C0 controls (other than ESC) directly, as
+	/// vte would in ground state. Returns the bytes from the first ESC or
+	/// non-ASCII byte onwards.
+	#[inline]
+	fn ground_fast_path<'b>(&mut self, mut bytes: &'b [u8]) -> &'b [u8] {
+		self.flush();
+		let term = self.term.pending();
+		loop {
+			let printable = scan::printable_prefix(bytes);
+			if printable > 0 {
+				term.print_ascii(&bytes[..printable]);
+				bytes = &bytes[printable..];
+			}
+			match bytes.first() {
+				Some(&byte) if byte < 0x20 && byte != 0x1b => {
+					term.apply_execute(byte);
+					bytes = &bytes[1..];
+				}
+				_ => return bytes,
+			}
+		}
+	}
+
+	#[inline]
+	fn flush(&mut self) {
+		if self.len > 0 {
+			self.term.pending().print_ascii(&self.run[..self.len]);
+			self.len = 0;
+		}
+	}
+}
+
+impl Perform for Batch<'_> {
+	#[inline(always)]
+	fn print(&mut self, c: char) {
+		// vte only prints characters >= U+0020; DEL takes the general path.
+		if c < '\x7f' {
+			if self.len == self.run.len() {
+				self.flush();
+			}
+			self.run[self.len] = c as u8;
+			self.len += 1;
+		} else {
+			self.flush();
+			self.term.print(c);
+		}
+	}
+	fn execute(&mut self, byte: u8) {
+		self.flush();
+		self.term.execute(byte);
+		// CAN and SUB abort any sequence and return vte to ground.
+		self.returned_to_ground |= matches!(byte, 0x18 | 0x1a);
+	}
+	fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
+		self.flush();
+		self.term.hook(params, intermediates, ignore, action);
+	}
+	fn put(&mut self, byte: u8) {
+		self.term.put(byte);
+	}
+	fn unhook(&mut self) {
+		self.term.unhook();
+	}
+	fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
+		self.flush();
+		self.term.osc_dispatch(params, bell_terminated);
+		// An ESC-terminated OSC leaves vte in its escape state until `\\`.
+		self.returned_to_ground |= bell_terminated;
+	}
+	fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
+		self.flush();
+		self
+			.term
+			.csi_dispatch(params, intermediates, ignore, action);
+		self.returned_to_ground = true;
+	}
+	fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
+		self.flush();
+		self.term.esc_dispatch(intermediates, ignore, byte);
+		self.returned_to_ground = true;
+	}
+
+	fn terminated(&self) -> bool {
+		self.returned_to_ground
+	}
+}
+
+impl Parser {
+	/// Processes whole characters, alternating between the fast path (while
+	/// vte is known to be in ground state) and vte itself.
+	fn feed(&mut self, term: &mut Term, mut bytes: &[u8]) {
+		let mut batch = Batch::new(term);
+		while !bytes.is_empty() {
+			if self.ground {
+				bytes = batch.ground_fast_path(bytes);
+				if bytes.is_empty() {
+					break;
+				}
+				// ESC or a non-ASCII byte: let vte decide what it means.
+				self.ground = false;
+			}
+			batch.returned_to_ground = false;
+			let used = self.inner.advance_until_terminated(&mut batch, bytes);
+			bytes = &bytes[used..];
+			self.ground = batch.returned_to_ground;
+		}
+		batch.flush();
 	}
 }
 

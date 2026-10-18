@@ -534,6 +534,18 @@ fn batched_printing_matches_per_character_printing() {
 		b"\x7f",
 		b"\x1b[3;5r",
 		b"\x1b[r",
+		b"\x1b[1\x18x",
+		b"\x1b]0;title\x1a",
+		b"\x1b[1<2mz",
+		b"\x1b]2;bell title\x07",
+		b"\x1b]2;st title\x1b\\",
+		b"\x1bPq#0;2;0;0;0~-\x1b\\",
+		"\u{9b}".as_bytes(),
+		"日本\x1b[32m語".as_bytes(),
+		b"abc\x1b",
+		b"[0m",
+		b"\x1b7\x1b8",
+		b"\x00\x05",
 	];
 	let mut seed = 0x9e37_79b9_u32;
 	for _ in 0..200 {

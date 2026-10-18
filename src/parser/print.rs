@@ -63,6 +63,61 @@ impl Term {
 		self.cx = (x + width).min(cols - 1);
 	}
 
+	/// Prints a run of printable ASCII (`0x20..=0x7e`). Equivalent to calling
+	/// [`Term::apply_print`] per byte, but resolves the cell style once and
+	/// fills each row segment in one pass.
+	pub(crate) fn print_ascii(&mut self, mut bytes: &[u8]) {
+		if self.charsets[self.active_charset] || self.insert_mode {
+			for &byte in bytes {
+				self.apply_print(byte as char);
+			}
+			return;
+		}
+		// Only the first character can join a cluster (after a ZWJ).
+		if let Some((&first, rest)) = bytes.split_first()
+			&& self.attach_to_previous(first as char, 1)
+		{
+			bytes = rest;
+		}
+		let template = self.styled_cell();
+		while !bytes.is_empty() {
+			if self.wrap_pending {
+				if self.auto_wrap {
+					self.cx = 0;
+					self.linefeed();
+				} else {
+					// Without wrap, each character overwrites the last column.
+					bytes = &bytes[bytes.len() - 1..];
+				}
+			}
+			self.wrap_pending = false;
+			let (x, y, cols) = (self.cx, self.cy, self.cols);
+			let count = (cols - x).min(bytes.len());
+			if !self.images.is_empty() {
+				let i = self.idx(x, y);
+				self.erase_images(i, i + count);
+			}
+			let blank = self.blank();
+			let row = &mut self.grid[y];
+			// Remove the other half of wide characters cut by the run's edges.
+			if row[x].width == 0 && x > 0 {
+				row[x - 1] = blank;
+			}
+			if row[x + count - 1].width == 2 && x + count < cols {
+				row[x + count] = blank;
+			}
+			for (cell, &byte) in row[x..x + count].iter_mut().zip(bytes) {
+				*cell = Cell {
+					ch: byte as char,
+					..template
+				};
+			}
+			bytes = &bytes[count..];
+			self.wrap_pending = x + count >= cols;
+			self.cx = (x + count).min(cols - 1);
+		}
+	}
+
 	/// A blank cell carrying the current colors and attributes, with bold
 	/// brightening, reverse video, dim and conceal already applied.
 	#[inline]
