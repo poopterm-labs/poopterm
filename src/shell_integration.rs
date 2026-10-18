@@ -134,4 +134,66 @@ mod tests {
 		assert_eq!(ps1, "P> \\[\\e]133;B\\a\\]");
 		assert!(prompt.starts_with("\x1b]133;D;1\x07"), "{prompt:?}");
 	}
+
+	/// A directory whose name contains BEL, ESC and other bytes outside the
+	/// URI-safe set. Raw control bytes in OSC 7 would end the sequence early
+	/// and let the rest of the name run as terminal commands.
+	struct HostileDirectory {
+		root: std::path::PathBuf,
+		path: std::path::PathBuf,
+	}
+
+	impl HostileDirectory {
+		fn new(shell: &str) -> Self {
+			let root =
+				std::env::temp_dir().join(format!("poopterm-hooks-{}-{shell}", std::process::id()));
+			let path = root.join("a b\x07\x1b]52;c;eA==\x07é%");
+			std::fs::create_dir_all(&path).unwrap();
+			Self { root, path }
+		}
+	}
+
+	impl Drop for HostileDirectory {
+		fn drop(&mut self) {
+			let _ = std::fs::remove_dir_all(&self.root);
+		}
+	}
+
+	const ENCODED_TAIL: &str = "/a%20b%07%1B%5D52%3Bc%3BeA%3D%3D%07%C3%A9%25";
+
+	#[test]
+	fn zsh_percent_encodes_unsafe_directory_bytes() {
+		let dir = HostileDirectory::new("zsh");
+		let script = "source shell-integration/zsh.zsh; cd -- \"$TARGET\"; _poopterm_precmd";
+		let Some(output) = Command::new("zsh")
+			.args(["-fc", script])
+			.env("TARGET", &dir.path)
+			.output()
+			.ok()
+		else {
+			return;
+		};
+		let stdout = String::from_utf8_lossy(&output.stdout);
+		let osc7 = stdout.split("\x1b]7;").nth(1).unwrap_or_default();
+		assert!(osc7.ends_with(&format!("{ENCODED_TAIL}\x07")), "{stdout:?}");
+		assert_eq!(osc7.matches('\x07').count(), 1, "{stdout:?}");
+	}
+
+	#[test]
+	fn bash_percent_encodes_unsafe_directory_bytes() {
+		let dir = HostileDirectory::new("bash");
+		let script = "source shell-integration/bash.sh; cd -- \"$TARGET\"; __poopterm_prompt_command";
+		let Some(output) = Command::new("bash")
+			.args(["--norc", "-c", script])
+			.env("TARGET", &dir.path)
+			.output()
+			.ok()
+		else {
+			return;
+		};
+		let stdout = String::from_utf8_lossy(&output.stdout);
+		let osc7 = stdout.split("\x1b]7;").nth(1).unwrap_or_default();
+		assert!(osc7.ends_with(&format!("{ENCODED_TAIL}\x07")), "{stdout:?}");
+		assert_eq!(osc7.matches('\x07').count(), 1, "{stdout:?}");
+	}
 }

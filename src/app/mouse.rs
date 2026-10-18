@@ -2,6 +2,7 @@
 use super::*;
 use crate::input::mouse::{MouseAction, MouseButtonCode, MouseReport, encode_mouse};
 use crate::input::{paste::paste_bytes, scroll::alternate_scroll_bytes};
+use crate::ui::links::{LinkAction, link_action};
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
 
 impl App {
@@ -100,39 +101,32 @@ impl App {
 			.and_then(|cells| cells.get(point.col))
 			.and_then(|cell| term.hyperlink_uri(cell))
 			.filter(|uri| !uri.is_empty());
-		let token = explicit.unwrap_or(&token);
-		if token.starts_with("https://") || token.starts_with("http://") {
-			if let Err(error) = open_external(token) {
-				eprintln!("poopterm: could not open link: {error}");
-			}
-			return true;
+		let target = explicit.unwrap_or(&token);
+		let result = match link_action(target) {
+			Some(LinkAction::OpenUrl(url)) => open_external(&url),
+			Some(LinkAction::OpenPath(path)) => open_external(&path.to_string_lossy()),
+			Some(LinkAction::CopyPath(path)) => clipboard_write(&path),
+			None => return false,
+		};
+		if let Err(error) = result {
+			eprintln!("poopterm: could not follow link {target}: {error}");
 		}
-		let file_path = token.strip_prefix("file://").and_then(|uri| {
-			let path = if uri.starts_with('/') {
-				Some(uri)
-			} else {
-				uri.strip_prefix("localhost")
-			};
-			path.and_then(decode_uri_path)
+		true
+	}
+
+	/// The OSC 8 target under the pointer, shown in the status bar so a link's
+	/// real destination is visible before it is clicked.
+	pub(super) fn update_hovered_link(&mut self) {
+		let (x, y) = self.cursor_pos;
+		let link = self.point_at(x, y).and_then(|point| {
+			let term = self.active_term();
+			let cell = term.row_cells(point.row)?.get(point.col)?;
+			term.hyperlink_uri(cell).map(str::to_owned)
 		});
-		if let Some(path) = file_path {
-			if let Err(error) = open_external(&path.to_string_lossy()) {
-				eprintln!("poopterm: could not open linked file: {error}");
-			}
-			return true;
+		if link != self.hovered_link {
+			self.hovered_link = link;
+			self.request_redraw();
 		}
-		if token.starts_with('/')
-			|| token.starts_with("~/")
-			|| token.starts_with("./")
-			|| token.starts_with("../")
-			|| token.contains('/')
-		{
-			if let Err(error) = clipboard_write(token) {
-				eprintln!("poopterm: could not copy path: {error}");
-			}
-			return true;
-		}
-		false
 	}
 
 	pub(super) fn paste_clipboard(&mut self) {
@@ -260,6 +254,7 @@ impl App {
 	pub(super) fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
 		let previous = self.cursor_pos;
 		self.cursor_pos = (position.x, position.y);
+		self.update_hovered_link();
 		if self.selecting {
 			self.extend_selection(position.x, position.y);
 		} else {

@@ -11,12 +11,15 @@ _poopterm_precmd() {
 	local exit_code=$?
 	print -rn -- $'\e]133;D;'"$exit_code"$'\a'
 	print -rn -- $'\e]133;A\a'
-	local cwd=${PWD//\%/%25}
-	cwd=${cwd// /%20}
-	cwd=${cwd//\#/%23}
-	cwd=${cwd//\?/%3F}
-	cwd=${cwd//\[/%5B}
-	cwd=${cwd//\]/%5D}
+	# Percent-encode every byte outside the URI-unreserved set, so control
+	# characters in directory names cannot end the OSC 7 sequence early.
+	local LC_ALL=C cwd= char hex
+	for char in ${(s::)PWD}; do
+		case $char in
+			([a-zA-Z0-9/._~-]) cwd+=$char ;;
+			(*) printf -v hex '%%%02X' "'$char"; cwd+=$hex ;;
+		esac
+	done
 	print -rn -- $'\e]7;file://'"$cwd"$'\a'
 }
 

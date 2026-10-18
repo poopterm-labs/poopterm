@@ -33,7 +33,6 @@ use crate::{
 	pty::{Session, UserEvent, spawn_session},
 	render::{blend::blend, glyphs::FontSet},
 	session_store::restored_session_dirs,
-	shell_integration::decode_uri_path,
 	term::Term,
 	theme::{Theme, ThemeKind},
 	ui::{
@@ -86,6 +85,8 @@ pub(crate) struct App {
 	cursor_pos: (f64, f64),
 	held_button: Option<MouseButtonCode>,
 	scroll: ScrollAccumulator,
+	/// Hyperlink target under the pointer, shown in the status bar.
+	hovered_link: Option<String>,
 	pacer: frame_pacer::FramePacer,
 	/// Reused buffer for bytes taken from a session's output queue.
 	read_buffer: Vec<u8>,
@@ -254,6 +255,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		cursor_pos: (0.0, 0.0),
 		held_button: None,
 		scroll: ScrollAccumulator::default(),
+		hovered_link: None,
 		pacer: frame_pacer::FramePacer::new(std::time::Duration::from_micros(16_667)),
 		read_buffer: Vec::new(),
 		selection: None,

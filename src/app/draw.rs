@@ -232,7 +232,13 @@ impl App {
 			.file_name()
 			.and_then(|name| name.to_str())
 			.unwrap_or("~");
-		let left: String = cwd.chars().take(p.width / ui.cw.max(1) / 3).collect();
+		let left: String = match &self.hovered_link {
+			Some(link) => format!("→ {link}")
+				.chars()
+				.take(p.width / ui.cw.max(1) / 2)
+				.collect(),
+			None => cwd.chars().take(p.width / ui.cw.max(1) / 3).collect(),
+		};
 		let command = match term.shell.phase {
 			Phase::Output => "   ·   running".to_owned(),
 			_ => term

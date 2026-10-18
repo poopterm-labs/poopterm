@@ -8,13 +8,18 @@ __POOPTERM_INTEGRATION_LOADED=1
 __poopterm_original_prompt_command=${PROMPT_COMMAND-}
 __poopterm_original_ps0=${PS0-}
 
+# Percent-encodes every byte of $PWD outside the URI-unreserved set, so
+# control characters in directory names cannot end the OSC 7 sequence.
 __poopterm_escape_path() {
-	local path=$PWD
-	path=${path//%/%25}
-	path=${path// /%20}
-	path=${path//#/%23}
-	path=${path//\?/%3F}
-	printf '%s' "$path"
+	local LC_ALL=C path=$PWD encoded= char i
+	for (( i = 0; i < ${#path}; i++ )); do
+		char=${path:i:1}
+		case $char in
+			[a-zA-Z0-9/._~-]) encoded+=$char ;;
+			*) printf -v char '%%%02X' "'$char"; encoded+=$char ;;
+		esac
+	done
+	printf '%s' "$encoded"
 }
 
 __poopterm_prompt_command() {

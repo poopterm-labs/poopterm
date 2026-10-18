@@ -37,6 +37,7 @@ impl App {
 			self.persist_sessions();
 		}
 		if visible {
+			self.update_hovered_link();
 			self.search_dirty |= self.search_active;
 			self.update_window_title();
 		}
