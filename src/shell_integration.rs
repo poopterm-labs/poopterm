@@ -91,3 +91,47 @@ pub(crate) fn script(shell: &str) -> Result<&'static str, String> {
 		)),
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use std::process::Command;
+
+	/// Runs `script` in `shell`, or returns `None` when the shell is not installed.
+	fn run(shell: &str, args: &[&str], script: &str) -> Option<(String, String)> {
+		let output = Command::new(shell).args(args).arg(script).output().ok()?;
+		Some((
+			String::from_utf8_lossy(&output.stdout).into_owned(),
+			String::from_utf8_lossy(&output.stderr).into_owned(),
+		))
+	}
+
+	#[test]
+	fn zsh_hooks_report_exit_status_and_directory_without_errors() {
+		let script = concat!(
+			"source shell-integration/zsh.zsh; cd /tmp; false; _poopterm_precmd; ",
+			"print -rn -- \"[$PATH]\""
+		);
+		let Some((stdout, stderr)) = run("zsh", &["-fc"], script) else {
+			return;
+		};
+		assert_eq!(stderr, "");
+		assert!(stdout.contains("\x1b]133;D;1\x07"), "{stdout:?}");
+		assert!(stdout.contains("\x1b]7;file:///tmp\x07"), "{stdout:?}");
+		assert!(!stdout.contains("[/tmp]"), "hook must not clobber $PATH");
+	}
+
+	#[test]
+	fn bash_marks_command_input_after_the_prompt() {
+		let script = concat!(
+			"PS1='P> '; source shell-integration/bash.sh; printf '%s|' \"$PS1\"; ",
+			"false; __poopterm_prompt_command"
+		);
+		let Some((stdout, stderr)) = run("bash", &["--norc", "-c"], script) else {
+			return;
+		};
+		assert_eq!(stderr, "");
+		let (ps1, prompt) = stdout.split_once('|').unwrap();
+		assert_eq!(ps1, "P> \\[\\e]133;B\\a\\]");
+		assert!(prompt.starts_with("\x1b]133;D;1\x07"), "{prompt:?}");
+	}
+}

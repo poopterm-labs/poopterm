@@ -7,16 +7,17 @@ fi
 autoload -Uz add-zsh-hook add-zle-hook-widget
 
 _poopterm_precmd() {
-	local status=$?
-	print -rn -- $'\e]133;D;'"$status"$'\a'
+	# `status` is read-only and `path` is tied to $PATH in zsh; use other names.
+	local exit_code=$?
+	print -rn -- $'\e]133;D;'"$exit_code"$'\a'
 	print -rn -- $'\e]133;A\a'
-	local path=${PWD//\%/%25}
-	path=${path// /%20}
-	path=${path//#/%23}
-	path=${path//\?/%3F}
-	path=${path//\[/%5B}
-	path=${path//\]/%5D}
-	print -rn -- $'\e]7;file://'"$path"$'\a'
+	local cwd=${PWD//\%/%25}
+	cwd=${cwd// /%20}
+	cwd=${cwd//\#/%23}
+	cwd=${cwd//\?/%3F}
+	cwd=${cwd//\[/%5B}
+	cwd=${cwd//\]/%5D}
+	print -rn -- $'\e]7;file://'"$cwd"$'\a'
 }
 
 _poopterm_preexec() {

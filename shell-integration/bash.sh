@@ -27,6 +27,7 @@ __poopterm_prompt_command() {
 }
 
 PROMPT_COMMAND=__poopterm_prompt_command
-PS1='\[\e]133;B\a\]'"$PS1"
+# B marks where command input starts, so it belongs at the end of the prompt.
+PS1="$PS1"'\[\e]133;B\a\]'
 PS0=$'\033]133;C\007'"$__poopterm_original_ps0"
 # <<< poopterm shell integration <<<
