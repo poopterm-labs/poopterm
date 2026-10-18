@@ -85,6 +85,8 @@ pub(crate) struct App {
 	cursor_pos: (f64, f64),
 	held_button: Option<MouseButtonCode>,
 	scroll: ScrollAccumulator,
+	/// Whether the main window has keyboard focus.
+	focused: bool,
 	/// Hyperlink target under the pointer, shown in the status bar.
 	hovered_link: Option<String>,
 	pacer: frame_pacer::FramePacer,
@@ -255,6 +257,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		cursor_pos: (0.0, 0.0),
 		held_button: None,
 		scroll: ScrollAccumulator::default(),
+		focused: true,
 		hovered_link: None,
 		pacer: frame_pacer::FramePacer::new(std::time::Duration::from_micros(16_667)),
 		read_buffer: Vec::new(),

@@ -61,6 +61,7 @@ impl Term {
 		}
 		self.wrap_pending = x + width >= cols;
 		self.cx = (x + width).min(cols - 1);
+		self.last_printed = Some(c);
 	}
 
 	/// Prints a run of printable ASCII (`0x20..=0x7e`). Equivalent to calling
@@ -112,6 +113,7 @@ impl Term {
 					..template
 				};
 			}
+			self.last_printed = Some(bytes[count - 1] as char);
 			bytes = &bytes[count..];
 			self.wrap_pending = x + count >= cols;
 			self.cx = (x + count).min(cols - 1);

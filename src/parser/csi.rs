@@ -1,5 +1,5 @@
 //! Control Sequence Introducer (`CSI`) dispatch: cursor, erase, scroll and modes.
-use crate::term::Term;
+use crate::term::{CursorShape, Term};
 use vte::Params;
 
 impl Term {
@@ -29,6 +29,23 @@ impl Term {
 			if action == 'u' && intermediates == b"<" {
 				self.kitty_keyboard = false;
 				return;
+			}
+			match (intermediates, action) {
+				// DECSCUSR: 0-2 block, 3-4 underline, 5-6 bar.
+				(b" ", 'q') => {
+					self.cursor_shape = match params.iter().next().and_then(|p| p.first().copied()) {
+						Some(3 | 4) => CursorShape::Underline,
+						Some(5 | 6) => CursorShape::Bar,
+						_ => CursorShape::Block,
+					}
+				}
+				// XTVERSION
+				(b">", 'q') => self
+					.responses
+					.push(format!("\x1bP>|poopterm {}\x1b\\", env!("CARGO_PKG_VERSION")).into_bytes()),
+				// DECSTR
+				(b"!", 'p') => self.soft_reset(),
+				_ => {}
 			}
 			return;
 		}
@@ -74,6 +91,7 @@ impl Term {
 					}
 					1049 | 47 | 1047 => self.alternate_screen(enabled),
 					1000 | 1002 | 1003 => self.mouse_tracking = if enabled { p } else { 0 },
+					1004 => self.focus_reporting = enabled,
 					1006 => self.mouse_sgr = enabled,
 					2004 => self.bracketed_paste = enabled,
 					_ => {}
@@ -244,6 +262,13 @@ impl Term {
 				_ => {}
 			},
 			'c' => self.responses.push(b"\x1b[?62;4;6c".to_vec()),
+			'b' => {
+				if let Some(c) = self.last_printed {
+					for _ in 0..p(0, 1).min(self.cols * self.rows) {
+						self.apply_print(c);
+					}
+				}
+			}
 			_ => {}
 		}
 		// Erasing or shifting can split a wide character from its spacer.
@@ -267,6 +292,7 @@ impl Term {
 			47 | 1047 | 1049 => self.primary_screen.is_some(),
 			80 => self.sixel_scrolling,
 			1000 | 1002 | 1003 => self.mouse_tracking == mode,
+			1004 => self.focus_reporting,
 			1006 => self.mouse_sgr,
 			2004 => self.bracketed_paste,
 			_ => return None,
@@ -281,4 +307,27 @@ fn version_number() -> u32 {
 		.map(|part| part.parse::<u32>().unwrap_or(0));
 	let mut next = || parts.next().unwrap_or(0);
 	next() * 10_000 + next() * 100 + next()
+}
+
+impl Term {
+	/// DECSTR: resets modes, margins, character sets and attributes without
+	/// clearing the screen or moving the cursor.
+	fn soft_reset(&mut self) {
+		self.cursor_visible = true;
+		self.insert_mode = false;
+		self.origin_mode = false;
+		self.auto_wrap = true;
+		self.application_cursor = false;
+		self.scroll_top = 0;
+		self.scroll_bottom = self.rows - 1;
+		self.charsets = [false; 2];
+		self.active_charset = 0;
+		self.fg = self.default_fg;
+		self.bg = self.default_bg;
+		self.attrs = 0;
+		self.bold = false;
+		self.reverse = false;
+		self.saved_cursor = None;
+		self.wrap_pending = false;
+	}
 }

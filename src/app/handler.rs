@@ -109,6 +109,14 @@ impl ApplicationHandler<UserEvent> for App {
 					super_key: state.super_key(),
 				};
 			}
+			WindowEvent::Focused(focused) => {
+				self.focused = focused;
+				if self.active_term().focus_reporting {
+					let report: &[u8] = if focused { b"\x1b[I" } else { b"\x1b[O" };
+					self.active_session_mut().write(report);
+				}
+				self.request_redraw();
+			}
 			WindowEvent::MouseWheel { delta, .. } => self.handle_mouse_wheel(delta),
 			WindowEvent::Ime(Ime::Commit(text)) => {
 				let bytes = text.into_bytes();

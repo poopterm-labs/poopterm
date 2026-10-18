@@ -125,6 +125,7 @@ impl App {
 				.search_matches
 				.get(self.search_match_index)
 				.map(|selection| selection.ordered()),
+			focused: self.focused,
 		};
 		draw_grid(p, &mut self.fonts, &view);
 	}

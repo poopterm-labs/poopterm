@@ -628,3 +628,62 @@ fn a_character_split_over_several_reads_is_reassembled() {
 	assert_eq!(row(&t, 0), "🙂 X   ");
 	assert_eq!(cell(&t, 0).width, 2);
 }
+
+#[test]
+fn rep_repeats_the_previous_graphic_character() {
+	let mut t = terminal(8, 2);
+	feed(&mut t, b"ab\x1b[3b");
+	assert_eq!(row(&t, 0), "abbbb   ");
+	feed(&mut t, "\r\n猫\x1b[2b".as_bytes());
+	assert_eq!(row(&t, 1), "猫 猫 猫   ");
+}
+
+#[test]
+fn cursor_shape_follows_decscusr() {
+	use crate::term::CursorShape;
+	let mut t = terminal(4, 2);
+	assert_eq!(t.cursor_shape, CursorShape::Block);
+	feed(&mut t, b"\x1b[6 q");
+	assert_eq!(t.cursor_shape, CursorShape::Bar);
+	feed(&mut t, b"\x1b[4 q");
+	assert_eq!(t.cursor_shape, CursorShape::Underline);
+	feed(&mut t, b"\x1b[0 q");
+	assert_eq!(t.cursor_shape, CursorShape::Block);
+}
+
+#[test]
+fn focus_reporting_mode_is_tracked_and_queryable() {
+	let mut t = terminal(4, 2);
+	feed(&mut t, b"\x1b[?1004h\x1b[?1004$p");
+	assert!(t.focus_reporting);
+	assert_eq!(t.responses.pop().unwrap(), b"\x1b[?1004;1$y");
+	feed(&mut t, b"\x1b[?1004l");
+	assert!(!t.focus_reporting);
+}
+
+#[test]
+fn xtversion_reports_name_and_version() {
+	let mut t = terminal(4, 2);
+	feed(&mut t, b"\x1b[>q");
+	let reply = String::from_utf8(t.responses.pop().unwrap()).unwrap();
+	assert_eq!(
+		reply,
+		format!("\x1bP>|poopterm {}\x1b\\", env!("CARGO_PKG_VERSION"))
+	);
+}
+
+#[test]
+fn soft_reset_restores_modes_but_keeps_the_screen() {
+	let mut t = terminal(6, 3);
+	feed(
+		&mut t,
+		b"text\x1b[?25l\x1b[4h\x1b[?6h\x1b[?7l\x1b[?1h\x1b[2;3r\x1b[1;31m\x1b(0",
+	);
+	feed(&mut t, b"\x1b[!p");
+	assert!(t.cursor_visible && t.auto_wrap);
+	assert!(!t.insert_mode && !t.origin_mode && !t.application_cursor);
+	assert_eq!((t.scroll_top, t.scroll_bottom), (0, 2));
+	assert_eq!((t.fg, t.attrs, t.bold), (t.default_fg, 0, false));
+	assert!(!t.charsets[0]);
+	assert_eq!(row(&t, 0), "text  ");
+}

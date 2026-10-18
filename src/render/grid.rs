@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
 	sixel,
-	term::{Cell, NO_EXTRA, Term, attr},
+	term::{Cell, CursorShape, NO_EXTRA, Term, attr},
 	ui::selection::CellPoint,
 };
 
@@ -26,6 +26,8 @@ pub(crate) struct GridView<'a> {
 	pub match_colors: (u32, u32),
 	pub selection: Option<(CellPoint, CellPoint)>,
 	pub search_match: Option<(CellPoint, CellPoint)>,
+	/// Unfocused windows draw a hollow block cursor.
+	pub focused: bool,
 }
 
 fn contains(range: Option<(CellPoint, CellPoint)>, point: CellPoint) -> bool {
@@ -49,16 +51,20 @@ pub(crate) fn draw_grid(p: &mut Painter, fonts: &mut FontSet, view: &GridView) {
 			};
 			let is_cursor =
 				term.cursor_visible && term.scroll_offset == 0 && row == term.cy && col == term.cx;
+			let solid_block = is_cursor && view.focused && term.cursor_shape == CursorShape::Block;
 			let (fg, bg) = if contains(view.selection, point) {
 				view.selection_colors
 			} else if contains(view.search_match, point) {
 				view.match_colors
-			} else if is_cursor {
+			} else if solid_block {
 				(cell.bg, cell.fg)
 			} else {
 				(cell.fg, cell.bg)
 			};
 			draw_cell(p, fonts, view, cell, (col, row), fg, bg);
+			if is_cursor && !solid_block {
+				draw_cursor(p, view, cell, (col, row));
+			}
 		}
 	}
 	draw_images(p, view);
@@ -123,6 +129,26 @@ fn draw_cell(
 		let x = x0 as i32 + (cw as i32 - glyph.metrics.width as i32) / 2;
 		let origin = (x, glyph_top(glyph, y0, view.ascent));
 		p.glyph(glyph, origin, (x0 as i32, (x0 + cw) as i32), false, fg);
+	}
+}
+
+/// Underline, bar, or (when unfocused) hollow block cursors, drawn over the cell.
+fn draw_cursor(p: &mut Painter, view: &GridView, cell: &Cell, (col, row): (usize, usize)) {
+	let (cw, ch) = view.cell;
+	let x = view.origin.0 + col * cw;
+	let y = view.origin.1 + row * ch;
+	let thick = 2 * view.scale.max(1);
+	let width = cw * usize::from(cell.width.max(1));
+	match (view.term.cursor_shape, view.focused) {
+		(CursorShape::Bar, _) => p.rect(x, y, thick, ch, cell.fg),
+		(CursorShape::Underline, _) => p.rect(x, y + ch.saturating_sub(thick), width, thick, cell.fg),
+		(CursorShape::Block, _) => {
+			let line = view.scale.max(1);
+			p.rect(x, y, width, line, cell.fg);
+			p.rect(x, y + ch.saturating_sub(line), width, line, cell.fg);
+			p.rect(x, y, line, ch, cell.fg);
+			p.rect(x + width.saturating_sub(line), y, line, ch, cell.fg);
+		}
 	}
 }
 

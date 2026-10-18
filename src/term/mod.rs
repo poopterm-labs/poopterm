@@ -25,6 +25,15 @@ pub(crate) mod attr {
 	pub const DOUBLE_UNDERLINE: u8 = 128;
 }
 
+/// Cursor shape set by DECSCUSR (`CSI Ps SP q`); blinking variants draw steady.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum CursorShape {
+	#[default]
+	Block,
+	Underline,
+	Bar,
+}
+
 /// One grid cell (16 bytes). `width` is 1 for normal, 2 for the left half
 /// of a wide character and 0 for its right-half spacer. Combining marks and
 /// hyperlinks live in [`Term::extras`], referenced by `extra`.
@@ -107,6 +116,11 @@ pub(crate) struct Term {
 	pub(crate) auto_wrap: bool,
 	pub(crate) insert_mode: bool,
 	pub(crate) kitty_keyboard: bool,
+	pub(crate) cursor_shape: CursorShape,
+	/// `?1004`: report window focus changes as `CSI I` / `CSI O`.
+	pub(crate) focus_reporting: bool,
+	/// The last printed graphic character, repeated by REP (`CSI Ps b`).
+	pub(crate) last_printed: Option<char>,
 	pub(crate) active_hyperlink: u16,
 	/// `extra` id applied to printed cells while a hyperlink is active.
 	pub(crate) active_extra: u16,
@@ -281,6 +295,9 @@ impl Term {
 			auto_wrap: true,
 			insert_mode: false,
 			kitty_keyboard: false,
+			cursor_shape: CursorShape::Block,
+			focus_reporting: false,
+			last_printed: None,
 			active_hyperlink: 0,
 			active_extra: extras::NONE,
 			extras: Arc::default(),
