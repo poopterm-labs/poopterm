@@ -1,3 +1,4 @@
+//! Mouse events: selection, links, wheel scrolling and mouse reporting.
 use super::*;
 use crate::input::mouse::{MouseAction, MouseButtonCode, MouseReport, encode_mouse};
 use crate::input::{paste::paste_bytes, scroll::alternate_scroll_bytes};

@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- End-to-end output throughput rose from 0.3 MB/s to about 100 MB/s for plain text (65 MB/s Unicode, 112 MB/s escape-heavy) on an i3-N305: a non-blocking PTY reader with backpressure, display-paced redraws, a row-based grid with 16-byte cells, batched ASCII printing and a portable-SIMD parser fast path.
+- Glyph lookups use one fast hash per cell; shortcuts are no longer read from disk on every key press.
+
+### Fixed
+
+- Characters split across PTY reads could drop up to two following bytes (worked around a vte 0.15 bug).
+- Pasting into a program that is busy writing output could freeze the window.
+- Legacy (X10) mouse reports sent decimal digits instead of bytes; motion reported the wrong button.
+- Alt+key now sends an ESC prefix, and Ctrl/Alt/Shift with arrows, Home/End and function keys use xterm modifier codes; Home/End honor application cursor mode.
+- Pasted text can no longer end a bracketed paste early and run commands.
+- Touchpad scrolling accumulates small movements; the wheel scrolls `less`, `man` and other alternate-screen programs.
+- The zsh hooks failed on every prompt (`status` is read-only) and prefixed paths with `%23`; the bash command marker was placed before the prompt.
+- The Settings "About" back button responded to clicks offset 24 px from where it is drawn.
+
+### Added
+
+- Secondary device attributes (`CSI > c`) and DECRQM replies for supported modes.
+- `scripts/bench-throughput.py`, a terminal-agnostic throughput benchmark.
+- `AGENTS.md` and `docs/` for contributors and coding agents.
+
+### Maintenance
+
+- `main.rs` was split into small modules (`app`, `term`, `parser`, `pty`, `render`, `input`, `ui`, …) with unit tests beside the code.
+
 ## 0.43.0 — 2026-10-17
 
 ### Added

@@ -1,3 +1,4 @@
+//! winit `ApplicationHandler`: window creation and event dispatch.
 use super::*;
 use crate::input::keys::Modifiers;
 use std::time::Instant;

@@ -1,3 +1,4 @@
+//! Terminal-emulation tests: bytes in, grid state out.
 use crate::{
 	parser::Parser,
 	shell_integration::{self, decode_uri_path},

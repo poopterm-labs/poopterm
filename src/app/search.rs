@@ -1,3 +1,4 @@
+//! Scrollback search state for the active tab.
 use super::*;
 
 impl App {

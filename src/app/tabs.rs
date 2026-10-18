@@ -1,3 +1,4 @@
+//! Opening, switching, closing and persisting tabs.
 use super::*;
 use crate::{pty::spawn_session, session_store::save_session_dirs};
 #[cfg(target_os = "macos")]

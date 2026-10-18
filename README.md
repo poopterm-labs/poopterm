@@ -1,6 +1,6 @@
 # poopterm 💩
 
-Poopterm is a lightweight, ultra-high-throughput terminal emulator written in Rust, optimized for gigabit rendering speeds. It opens your default shell in a native window, with tabs, clipboard support, and seven built-in color themes. Terminal compatibility is growing and is not yet a complete xterm implementation.
+Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it parses plain text at about 100 MB/s end to end on a low-power laptop CPU (see [performance](docs/performance.md)). It opens your default shell in a native window, with tabs, clipboard support, and seven built-in color themes. Terminal compatibility is growing and is not yet a complete xterm implementation.
 
 ![Poopterm app icon](assets/icon.png)
 
@@ -28,7 +28,7 @@ Poopterm is a lightweight, ultra-high-throughput terminal emulator written in Ru
 - Supports PNG, JPEG, and WebP terminal wallpapers with adjustable strength in Settings.
 - Lets macOS users adjust main-window opacity from Settings.
 - Includes a desktop launcher and icon for Linux and FreeBSD.
-- **Gigabit-tier performance:** Utilizes portable SIMD (`std::simd::u32x4`) for vectorized rectangle fills and alpha channel blending, zero-allocation stack buffers for SGR escape sequences, and aggressive compiler optimizations targeting Rust 2024 edition.
+- **Fast output:** a background PTY reader with backpressure, redraws paced to the display, an O(columns) row-based grid with 16-byte cells, and a portable-SIMD fast path for plain text. Run `scripts/bench-throughput.py` in any terminal to compare.
 
 ## Build and run
 
@@ -346,9 +346,9 @@ cargo build --release --locked
 ./target/release/poopterm --version
 ```
 
-The code is separated into `state.rs` (grid/history), `parser.rs` (vte callbacks),
-`osc.rs` (shell integration), `sixel.rs` (bounded image decoding), `config.rs`
-(preferences), and `main.rs` (windowing, PTYs, input, rendering).
+Development is test-driven. Start with [`AGENTS.md`](AGENTS.md) (for humans
+and AI coding agents alike), then see [architecture](docs/architecture.md),
+[testing](docs/testing.md) and [performance](docs/performance.md).
 CI builds and checks macOS and Linux; BSD still needs testing on real systems.
 
 
