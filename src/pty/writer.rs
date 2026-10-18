@@ -10,6 +10,8 @@ use std::{
 	thread,
 };
 
+/// Cloneable: the UI thread sends input and the parser thread sends replies.
+#[derive(Clone)]
 pub(crate) struct PtyWriter {
 	sender: Sender<Vec<u8>>,
 }

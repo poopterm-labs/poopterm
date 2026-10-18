@@ -1,5 +1,9 @@
 //! Main-window frame composition: background, tab bar, grid, overlays, status bar.
 use super::*;
+use super::{
+	canvas::{DrawKey, Plan},
+	repaint::{keeps_contents, present},
+};
 use crate::{
 	render::{
 		grid::{GridView, draw_grid},
@@ -65,20 +69,62 @@ impl App {
 		let Some(mut surface) = self.surface.take() else {
 			return;
 		};
-		if let Ok(mut buffer) = surface.buffer_mut() {
-			let mut painter = Painter::new(&mut buffer, self.width as usize, self.height as usize);
-			self.compose(&mut painter);
-			let _ = buffer.present();
+		let size = (self.width as usize, self.height as usize);
+		self.sessions[self.active].term().snapshot(&mut self.frame);
+		let key = self.draw_key();
+		let plan = self
+			.canvas
+			.plan(&self.frame, key, size, self.wallpaper.is_none());
+		// Debug aid for visual checks: compare against full redraws.
+		let plan = if self.full_redraw_only {
+			Plan::Full
+		} else {
+			plan
+		};
+		let mut pixels = std::mem::take(&mut self.canvas.pixels);
+		let mut painter = Painter::new(&mut pixels, size.0, size.1);
+		let bands = match plan {
+			Plan::Full => {
+				self.compose(&mut painter);
+				None
+			}
+			Plan::Partial(damage) => Some(self.compose_damaged(&mut painter, &damage)),
+		};
+		self.canvas.pixels = pixels;
+		self.canvas.remember(&mut self.frame, key);
+		if let Ok(buffer) = surface.buffer_mut() {
+			let damage_only = self.window.as_deref().is_some_and(keeps_contents);
+			present(
+				buffer,
+				&self.canvas.pixels,
+				size.0,
+				bands.as_deref(),
+				damage_only,
+			);
 		}
 		self.surface = Some(surface);
+	}
+
+	/// Inputs besides the grid's content that change how it is drawn.
+	fn draw_key(&self) -> DrawKey {
+		DrawKey {
+			session: self.sessions[self.active].id,
+			focused: self.focused,
+			selection: self.selection.map(Selection::ordered),
+			search_match: self
+				.search_matches
+				.get(self.search_match_index)
+				.map(|selection| selection.ordered()),
+			overlay: self.search_active || self.command_palette,
+		}
 	}
 
 	fn compose(&mut self, p: &mut Painter) {
 		let scale = self.scale();
 		let ui = self.ui_font(18.0 * scale as f32);
-		self.draw_background(p);
+		self.restore_background(p, 0, p.height);
 		self.draw_tab_bar(p, scale, ui);
-		self.draw_terminal(p, scale);
+		self.draw_terminal(p, scale, None);
 		if self.search_active {
 			self.draw_search_box(p, scale, ui);
 		}
@@ -88,30 +134,9 @@ impl App {
 		self.draw_status_bar(p, scale, ui);
 	}
 
-	/// Border rim, then the wallpaper or the theme background inside it.
-	fn draw_background(&mut self, p: &mut Painter) {
-		p.fill(self.theme.border);
-		let border = self.border;
-		let inner_w = p.width.saturating_sub(2 * border);
-		let inner_h = p.height.saturating_sub(2 * border);
-		let (bg, strength) = (self.theme.bg, self.wallpaper_strength);
-		match self.wallpaper.as_mut() {
-			Some(wallpaper) => {
-				let image = wallpaper.pixels(inner_w as u32, inner_h as u32, bg, strength);
-				let inner_w = inner_w.max(1);
-				for (row, src) in image.chunks_exact(inner_w).take(inner_h).enumerate() {
-					let dst = (row + border) * p.width + border;
-					p.pixels[dst..dst + inner_w].copy_from_slice(src);
-				}
-			}
-			None => p.rect(border, border, inner_w, inner_h, bg),
-		}
-	}
-
-	fn draw_terminal(&mut self, p: &mut Painter, scale: usize) {
-		let term = &self.sessions[self.active].term;
+	pub(super) fn draw_terminal(&mut self, p: &mut Painter, scale: usize, rows: Option<&[bool]>) {
 		let view = GridView {
-			term,
+			frame: &self.frame,
 			origin: (self.margin, self.top),
 			cell: (self.cw, self.ch),
 			px: self.px,
@@ -127,21 +152,13 @@ impl App {
 				.get(self.search_match_index)
 				.map(|selection| selection.ordered()),
 			focused: self.focused,
-			prompt_marks: {
-				let top = term.history_base + term.scrollback.len() - term.scroll_offset;
-				term
-					.shell
-					.prompt_marks(top..top + term.rows)
-					.map(|(row, exit)| (row - top, exit))
-					.collect()
-			},
 			mark_colors: [
 				self.theme.palette[2],
 				self.theme.palette[1],
 				blend(self.theme.bg, self.theme.border, 160),
 			],
 		};
-		draw_grid(p, &mut self.fonts, &view);
+		draw_grid(p, &mut self.fonts, &view, rows);
 	}
 
 	/// Draws a bordered, rounded panel and returns nothing; used by overlays.
@@ -230,7 +247,7 @@ impl App {
 		}
 	}
 
-	fn draw_status_bar(&mut self, p: &mut Painter, scale: usize, ui: UiFont) {
+	pub(super) fn draw_status_bar(&mut self, p: &mut Painter, scale: usize, ui: UiFont) {
 		let status_y = p.height.saturating_sub(self.status_height + self.border);
 		let (bg, border) = (self.theme.bg, self.theme.border);
 		p.rect(
@@ -241,7 +258,7 @@ impl App {
 			blend(bg, border, 28),
 		);
 		p.rect(0, status_y, p.width, scale, blend(bg, border, 100));
-		let term = &self.sessions[self.active].term;
+		let term = self.sessions[self.active].term();
 		let cwd = term
 			.cwd
 			.file_name()
@@ -268,6 +285,7 @@ impl App {
 			term.rows,
 			self.theme.kind.name()
 		);
+		drop(term);
 		let text_y = status_y + self.status_height.saturating_sub(ui.ch) / 2;
 		let right_x = p
 			.width

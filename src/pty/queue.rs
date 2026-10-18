@@ -1,4 +1,4 @@
-//! Bytes read from a PTY, waiting to be parsed.
+//! Bytes read from a PTY, waiting for the parser thread.
 //!
 //! The reader thread keeps reading while the parser thread parses, so the
 //! kernel's PTY buffer keeps draining. When parsing falls behind by `limit`
@@ -16,8 +16,6 @@ pub(crate) struct OutputQueue {
 #[derive(Default)]
 struct State {
 	bytes: Vec<u8>,
-	/// A wake-up for the current batch has been sent and not yet consumed.
-	notified: bool,
 	closed: bool,
 }
 
@@ -31,6 +29,11 @@ impl OutputQueue {
 		}
 	}
 
+	/// Bytes the queue holds before the reader waits.
+	pub(crate) fn limit(&self) -> usize {
+		self.limit
+	}
+
 	fn lock(&self) -> MutexGuard<'_, State> {
 		self
 			.state
@@ -38,9 +41,8 @@ impl OutputQueue {
 			.unwrap_or_else(|poisoned| poisoned.into_inner())
 	}
 
-	/// Appends `data`, waiting while the queue is full. Returns true when the
-	/// caller should wake the UI thread (the first push of a batch).
-	pub(crate) fn push(&self, data: &[u8]) -> bool {
+	/// Appends `data`, waiting while the queue is full.
+	pub(crate) fn push(&self, data: &[u8]) {
 		let mut state = self.lock();
 		while state.bytes.len() >= self.limit && !state.closed {
 			state = self
@@ -50,7 +52,6 @@ impl OutputQueue {
 		}
 		state.bytes.extend_from_slice(data);
 		self.data.notify_one();
-		!std::mem::replace(&mut state.notified, true)
 	}
 
 	/// Waits for queued bytes and moves them into `out`. Returns false once
@@ -67,23 +68,14 @@ impl OutputQueue {
 		if state.bytes.is_empty() {
 			return false;
 		}
+		// Swapping keeps both buffers' capacity.
 		std::mem::swap(out, &mut state.bytes);
-		state.notified = false;
 		self.space.notify_all();
 		true
 	}
 
-	/// Moves all queued bytes into `out` (replacing its contents, keeping
-	/// both buffers' capacity) and starts a new batch.
-	pub(crate) fn take(&self, out: &mut Vec<u8>) {
-		out.clear();
-		let mut state = self.lock();
-		std::mem::swap(out, &mut state.bytes);
-		state.notified = false;
-		self.space.notify_all();
-	}
-
-	/// Releases a reader blocked in [`push`](Self::push), e.g. when the tab closes.
+	/// Ends the stream: wakes a reader blocked in [`push`](Self::push) (e.g.
+	/// when the tab closes) and lets the parser finish once drained.
 	pub(crate) fn close(&self) {
 		self.lock().closed = true;
 		self.space.notify_all();
@@ -97,18 +89,7 @@ mod tests {
 	use std::{sync::Arc, thread, time::Duration};
 
 	#[test]
-	fn only_the_first_push_of_a_batch_requests_a_wakeup() {
-		let queue = OutputQueue::new(1024);
-		assert!(queue.push(b"ab"));
-		assert!(!queue.push(b"cd"));
-		let mut out = Vec::new();
-		queue.take(&mut out);
-		assert_eq!(out, b"abcd");
-		assert!(queue.push(b"e"), "taking starts a new batch");
-	}
-
-	#[test]
-	fn a_full_queue_blocks_the_reader_until_the_ui_takes_bytes() {
+	fn a_full_queue_blocks_the_reader_until_the_parser_takes_bytes() {
 		let queue = Arc::new(OutputQueue::new(4));
 		queue.push(b"1234");
 		let reader = {
@@ -121,9 +102,9 @@ mod tests {
 			"push must wait while the queue is full"
 		);
 		let mut out = Vec::new();
-		queue.take(&mut out);
-		assert!(reader.join().unwrap());
-		queue.take(&mut out);
+		assert!(queue.wait_take(&mut out));
+		reader.join().unwrap();
+		assert!(queue.wait_take(&mut out));
 		assert_eq!(out, b"5");
 	}
 

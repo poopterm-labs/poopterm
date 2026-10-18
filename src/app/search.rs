@@ -4,7 +4,7 @@ use super::*;
 impl App {
 	pub(super) fn search(&mut self, direction: isize, advance: bool) {
 		self.search_dirty = false;
-		let matches = find_matches(self.active_term(), &self.search_query);
+		let matches = find_matches(&self.active_term(), &self.search_query);
 		self.search_matches = matches;
 		if self.search_matches.is_empty() {
 			self.search_match_index = 0;
@@ -21,12 +21,13 @@ impl App {
 			self.search_match_index = 0;
 		}
 		let match_range = self.search_matches[self.search_match_index];
-		let term = &mut self.active_session_mut().term;
+		let mut term = self.active_term();
 		let visible_top = match_range.start.row.saturating_sub(term.rows / 2);
 		term.scroll_offset = term
 			.scrollback
 			.len()
 			.saturating_sub(visible_top.min(term.scrollback.len()));
+		drop(term);
 		if let Some(window) = &self.window {
 			window.request_redraw();
 		}
@@ -41,7 +42,8 @@ impl App {
 			.search_matches
 			.get(self.search_match_index)
 			.map(|m| m.start);
-		self.search_matches = find_matches(self.active_term(), &self.search_query);
+		let matches = find_matches(&self.active_term(), &self.search_query);
+		self.search_matches = matches;
 		self.search_match_index = previous
 			.and_then(|point| self.search_matches.iter().position(|m| m.start == point))
 			.unwrap_or(0);

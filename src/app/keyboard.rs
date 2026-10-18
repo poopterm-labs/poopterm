@@ -82,7 +82,8 @@ impl App {
 						match *command {
 							"Rename active tab" => {
 								self.renaming_tab = true;
-								self.command_query = self.active_term().title.clone();
+								let title = self.active_term().title.clone();
+								self.command_query = title;
 							}
 							"New tab" => {
 								self.command_palette = false;
@@ -179,7 +180,7 @@ impl App {
 				.then_some(direction)
 		});
 		if let Some(direction) = prompt_jump {
-			if self.active_session_mut().term.jump_to_prompt(direction) {
+			if self.active_term().jump_to_prompt(direction) {
 				self.request_redraw();
 			}
 			return;
@@ -236,7 +237,7 @@ impl App {
 			return;
 		}
 		if let Some(bytes) = encode_key(&event.logical_key, self.mods, self.key_modes()) {
-			self.active_session_mut().write(&bytes);
+			self.active_session().write(&bytes);
 		}
 	}
 }

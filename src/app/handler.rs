@@ -63,9 +63,13 @@ impl ApplicationHandler<UserEvent> for App {
 
 		self.set_font_px(Preferences::load().font_size as f32 * scale);
 
+		let (cols, rows) = {
+			let term = self.active_term();
+			(term.cols, term.rows)
+		};
 		let size = PhysicalSize::new(
-			(self.cw * self.active_term().cols + 2 * self.margin) as u32,
-			(self.ch * self.active_term().rows + self.top + self.margin + self.status_height) as u32,
+			(self.cw * cols + 2 * self.margin) as u32,
+			(self.ch * rows + self.top + self.margin + self.status_height) as u32,
 		);
 		let _ = window.request_inner_size(size);
 
@@ -111,16 +115,17 @@ impl ApplicationHandler<UserEvent> for App {
 			}
 			WindowEvent::Focused(focused) => {
 				self.focused = focused;
-				if self.active_term().focus_reporting {
+				let reporting = self.active_term().focus_reporting;
+				if reporting {
 					let report: &[u8] = if focused { b"\x1b[I" } else { b"\x1b[O" };
-					self.active_session_mut().write(report);
+					self.active_session().write(report);
 				}
 				self.request_redraw();
 			}
 			WindowEvent::MouseWheel { delta, .. } => self.handle_mouse_wheel(delta),
 			WindowEvent::Ime(Ime::Commit(text)) => {
 				let bytes = text.into_bytes();
-				self.active_session_mut().write(&bytes);
+				self.active_session().write(&bytes);
 			}
 			WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
 				self.handle_key(event_loop, event)
@@ -138,8 +143,8 @@ impl ApplicationHandler<UserEvent> for App {
 	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
 		let now = Instant::now();
 		let mut expired = false;
-		for session in &mut self.sessions {
-			expired |= session.term.finish_sync_if_expired(now);
+		for session in &self.sessions {
+			expired |= session.term().finish_sync_if_expired(now);
 		}
 		if expired {
 			self.search_dirty = true;
@@ -152,7 +157,7 @@ impl ApplicationHandler<UserEvent> for App {
 		let sync_deadline = self
 			.sessions
 			.iter()
-			.filter_map(|s| s.term.sync_deadline)
+			.filter_map(|s| s.term().sync_deadline)
 			.min();
 		let wake = [sync_deadline, self.pacer.deadline()]
 			.into_iter()

@@ -237,11 +237,10 @@ impl App {
 		if let Some(window) = &self.window {
 			crate::platform::set_window_opacity(window, preferences.opacity);
 		}
-		for session in &mut self.sessions {
-			session.term.set_theme(self.theme);
-			session
-				.term
-				.set_scrollback_limit(preferences.scrollback_lines);
+		for session in &self.sessions {
+			let mut term = session.term();
+			term.set_theme(self.theme);
+			term.set_scrollback_limit(preferences.scrollback_lines);
 		}
 		let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
 		self.set_font_px(preferences.font_size as f32 * scale);

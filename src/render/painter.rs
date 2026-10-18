@@ -135,7 +135,13 @@ impl<'a> Painter<'a> {
 		for ch in text.chars() {
 			let glyph = fonts.glyph(ch, px);
 			let origin = (cursor_x + glyph.metrics.xmin, glyph_top(glyph, y, ascent));
-			self.glyph(glyph, origin, (0, self.width as i32), false, color);
+			self.glyph(
+				glyph,
+				origin,
+				(0, 0, self.width as i32, self.height as i32),
+				false,
+				color,
+			);
 			cursor_x += glyph.metrics.advance_width.ceil() as i32;
 			if cursor_x >= self.width as i32 {
 				break;
@@ -143,19 +149,22 @@ impl<'a> Painter<'a> {
 		}
 	}
 
-	/// Blends `glyph` with its top-left corner at `(x, y)`, clipped horizontally
-	/// to `clip = (left, right)`. `italic` shears rows to simulate slanted text.
+	/// Blends `glyph` with its top-left corner at `(x, y)`, clipped to
+	/// `clip = (left, top, right, bottom)`. `italic` shears rows to simulate
+	/// slanted text.
 	pub(crate) fn glyph(
 		&mut self,
 		glyph: &Glyph,
 		(x, y): (i32, i32),
-		(clip_left, clip_right): (i32, i32),
+		(clip_left, clip_top, clip_right, clip_bottom): (i32, i32, i32, i32),
 		italic: bool,
 		color: u32,
 	) {
 		let metrics = &glyph.metrics;
-		let top = y.max(0);
-		let bottom = (y + metrics.height as i32).min(self.height as i32);
+		let top = y.max(clip_top).max(0);
+		let bottom = (y + metrics.height as i32)
+			.min(clip_bottom)
+			.min(self.height as i32);
 		let clip_left = clip_left.max(0);
 		let clip_right = clip_right.min(self.width as i32);
 		for py in top..bottom {
@@ -199,6 +208,26 @@ mod tests {
 		let mut painter = Painter::new(&mut pixels, 4, 3);
 		painter.rect(2, 1, 10, 10, 7);
 		assert_eq!(pixels, [0, 0, 0, 0, 0, 0, 7, 7, 0, 0, 7, 7]);
+	}
+
+	#[test]
+	fn glyphs_are_clipped_to_a_rectangle() {
+		let glyph = Glyph {
+			metrics: fontdue::Metrics {
+				width: 2,
+				height: 3,
+				..Default::default()
+			},
+			coverage: vec![255; 6],
+		};
+		let mut pixels = vec![0u32; 3 * 4];
+		let mut painter = Painter::new(&mut pixels, 3, 4);
+		painter.glyph(&glyph, (0, 0), (1, 1, 3, 2), false, 0xffffff);
+		assert_eq!(
+			pixels,
+			[0, 0, 0, 0, 0xffffff, 0, 0, 0, 0, 0, 0, 0],
+			"only column 1 of row 1 is inside both the glyph and the clip"
+		);
 	}
 
 	#[test]

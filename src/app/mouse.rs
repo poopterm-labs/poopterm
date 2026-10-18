@@ -133,7 +133,7 @@ impl App {
 		match clipboard_read() {
 			Ok(text) => {
 				let bytes = paste_bytes(&text, self.active_term().bracketed_paste);
-				self.active_session_mut().write(&bytes);
+				self.active_session().write(&bytes);
 			}
 			Err(error) => eprintln!("poopterm: clipboard paste failed: {error}"),
 		}
@@ -169,7 +169,7 @@ impl App {
 			mods: self.mods,
 		};
 		if let Some(bytes) = encode_mouse(report, term.mouse_sgr) {
-			self.active_session_mut().write(&bytes);
+			self.active_session().write(&bytes);
 		}
 		true
 	}
@@ -238,16 +238,19 @@ impl App {
 				break;
 			}
 		}
-		let term = self.active_term();
-		if term.mouse_tracking != 0 && self.point_at(x, y).is_some() {
+		let over_grid = self.point_at(x, y).is_some();
+		let mut term = self.active_term();
+		if term.mouse_tracking != 0 && over_grid {
 			return;
 		}
 		if term.primary_screen.is_some() {
 			let bytes = alternate_scroll_bytes(lines, term.application_cursor);
-			self.active_session_mut().write(&bytes);
+			drop(term);
+			self.active_session().write(&bytes);
 			return;
 		}
-		self.active_session_mut().term.scroll_view(lines);
+		term.scroll_view(lines);
+		drop(term);
 		self.request_redraw();
 	}
 
@@ -342,9 +345,9 @@ impl App {
 			};
 			let handled = self.send_mouse_report(code, kind, (x, y));
 			if state == ElementState::Pressed && button == MouseButton::Left && !handled {
-				let link_click = (self.mods.ctrl || self.mods.super_key)
-					&& self.active_term().mouse_tracking == 0
-					&& self.open_or_copy_token(x, y);
+				let tracking = self.active_term().mouse_tracking != 0;
+				let link_click =
+					(self.mods.ctrl || self.mods.super_key) && !tracking && self.open_or_copy_token(x, y);
 				if !link_click {
 					self.begin_selection(x, y);
 				}

@@ -1,4 +1,5 @@
 //! Application state and the winit event loop.
+mod canvas;
 mod draw;
 mod draw_tabs;
 mod frame_pacer;
@@ -6,6 +7,7 @@ mod handler;
 mod keyboard;
 mod mouse;
 mod output;
+mod repaint;
 mod search;
 mod settings;
 mod settings_view;
@@ -30,10 +32,10 @@ use crate::{
 	input::{
 		keys::Modifiers, mouse::MouseButtonCode, scroll::ScrollAccumulator, shortcuts::Shortcuts,
 	},
-	pty::{Session, UserEvent, spawn_session},
+	pty::{Seen, Session, UserEvent, spawn_session},
 	render::{blend::blend, glyphs::FontSet},
 	session_store::restored_session_dirs,
-	term::Term,
+	term::{Frame, TermGuard},
 	theme::{Theme, ThemeKind},
 	ui::{
 		search::find_matches,
@@ -92,8 +94,12 @@ pub(crate) struct App {
 	/// Hyperlink target under the pointer, shown in the status bar.
 	hovered_link: Option<String>,
 	pacer: frame_pacer::FramePacer,
-	/// Reused buffer for bytes taken from a session's output queue.
-	read_buffer: Vec<u8>,
+	/// The active terminal's visible screen, copied for rendering.
+	frame: Frame,
+	/// Back buffer holding the last frame, for partial redraws.
+	canvas: canvas::Canvas,
+	/// `POOPTERM_FULL_REDRAW` set: never redraw partially (for visual checks).
+	full_redraw_only: bool,
 	selection: Option<Selection>,
 	selecting: bool,
 	search_active: bool,
@@ -107,12 +113,13 @@ pub(crate) struct App {
 }
 
 impl App {
-	pub(super) fn active_term(&self) -> &Term {
-		&self.sessions[self.active].term
+	/// Locks the active terminal. Drop the guard before locking again.
+	pub(super) fn active_term(&self) -> TermGuard<'_> {
+		self.sessions[self.active].term()
 	}
 
-	pub(super) fn active_session_mut(&mut self) -> &mut Session {
-		&mut self.sessions[self.active]
+	pub(super) fn active_session(&self) -> &Session {
+		&self.sessions[self.active]
 	}
 
 	pub(super) fn cycle_theme(&mut self) {
@@ -124,9 +131,10 @@ impl App {
 			eprintln!("poopterm: could not save theme config: {error}");
 		}
 		self.theme = Theme::load();
-		for session in &mut self.sessions {
-			session.term.set_theme(self.theme);
+		for session in &self.sessions {
+			session.term().set_theme(self.theme);
 		}
+		self.canvas.invalidate();
 		if let Some(window) = &self.window {
 			window.request_redraw();
 		}
@@ -151,6 +159,8 @@ impl App {
 	}
 
 	pub(super) fn resize(&mut self, w: u32, h: u32) {
+		// Also reached after font, wallpaper and settings changes.
+		self.canvas.invalidate();
 		self.width = w.max(1);
 		self.height = h.max(1);
 		self.ensure_active_tab_visible();
@@ -160,15 +170,16 @@ impl App {
 			/ self.ch.max(1))
 		.max(2);
 
-		for session in &mut self.sessions {
-			session.term.cell_width = self.cw;
-			session.term.cell_height = self.ch;
-			if let Some(pending) = &mut session.term.synchronized {
+		for session in &self.sessions {
+			let mut term = session.term();
+			term.cell_width = self.cw;
+			term.cell_height = self.ch;
+			if let Some(pending) = &mut term.synchronized {
 				pending.cell_width = self.cw;
 				pending.cell_height = self.ch;
 			}
-			if cols != session.term.cols || rows != session.term.rows {
-				session.term.resize(cols, rows);
+			if cols != term.cols || rows != term.rows {
+				term.resize(cols, rows);
 				let _ = session.master.resize(PtySize {
 					rows: rows as u16,
 					cols: cols as u16,
@@ -269,7 +280,9 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		focused: true,
 		hovered_link: None,
 		pacer: frame_pacer::FramePacer::new(std::time::Duration::from_micros(16_667)),
-		read_buffer: Vec::new(),
+		frame: Frame::default(),
+		canvas: canvas::Canvas::new(),
+		full_redraw_only: std::env::var_os("POOPTERM_FULL_REDRAW").is_some(),
 		selection: None,
 		selecting: false,
 		search_active: false,

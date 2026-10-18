@@ -72,8 +72,8 @@ impl App {
 			}
 			let session = &self.sessions[index];
 			let max_chars = (layout.width.saturating_sub(42 * scale) / ui.cw.max(1)).max(1);
-			let label = ellipsize(session.title(), max_chars);
-			let marker = if session.term.bell {
+			let label = ellipsize(&session.title(), max_chars);
+			let marker = if session.term().bell {
 				Some("!")
 			} else if session.activity {
 				Some("•")

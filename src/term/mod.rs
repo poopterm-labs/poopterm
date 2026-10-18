@@ -1,5 +1,6 @@
 //! Terminal grid, scrollback, cursor and screen state.
 mod extras;
+mod frame;
 mod grid;
 mod images;
 mod screen;
@@ -11,6 +12,7 @@ mod tests;
 
 use crate::theme::Theme;
 pub(crate) use extras::NONE as NO_EXTRA;
+pub(crate) use frame::Frame;
 pub(crate) use grid::Grid;
 pub(crate) use shared::{SharedTerm, TermGuard};
 

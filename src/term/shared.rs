@@ -6,19 +6,26 @@
 //! debug builds track the locks each thread holds and panic instead.
 use std::{
 	ops::{Deref, DerefMut},
-	sync::{Mutex, MutexGuard},
+	sync::{
+		Mutex, MutexGuard,
+		atomic::{AtomicUsize, Ordering},
+	},
+	thread,
 };
 
 use super::Term;
 
 pub(crate) struct SharedTerm {
 	term: Mutex<Term>,
+	/// Threads blocked in [`lock`](Self::lock).
+	waiting: AtomicUsize,
 }
 
 impl SharedTerm {
 	pub(crate) fn new(term: Term) -> Self {
 		Self {
 			term: Mutex::new(term),
+			waiting: AtomicUsize::new(0),
 		}
 	}
 
@@ -27,13 +34,27 @@ impl SharedTerm {
 	pub(crate) fn lock(&self) -> TermGuard<'_> {
 		#[cfg(debug_assertions)]
 		held::acquire(self);
+		self.waiting.fetch_add(1, Ordering::AcqRel);
+		let guard = self
+			.term
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner());
+		self.waiting.fetch_sub(1, Ordering::AcqRel);
 		TermGuard {
-			guard: self
-				.term
-				.lock()
-				.unwrap_or_else(|poisoned| poisoned.into_inner()),
+			guard,
 			#[cfg(debug_assertions)]
 			owner: self,
+		}
+	}
+}
+
+impl SharedTerm {
+	/// Lets threads waiting for the lock take it first. `std` mutexes are
+	/// not fair: a thread that unlocks and relocks in a loop, like the
+	/// parser between chunks, could otherwise keep the UI waiting.
+	pub(crate) fn yield_to_waiters(&self) {
+		while self.waiting.load(Ordering::Acquire) > 0 {
+			thread::yield_now();
 		}
 	}
 }
@@ -95,7 +116,7 @@ mod held {
 mod tests {
 	use super::*;
 	use crate::theme::{Theme, ThemeKind};
-	use std::{sync::Arc, thread};
+	use std::sync::Arc;
 
 	fn shared() -> Arc<SharedTerm> {
 		Arc::new(SharedTerm::new(Term::new(
@@ -121,6 +142,23 @@ mod tests {
 		let term = shared();
 		drop(term.lock());
 		drop(term.lock());
+	}
+
+	#[test]
+	fn a_waiting_thread_gets_the_lock_before_the_holder_relocks() {
+		let term = shared();
+		let guard = term.lock();
+		let ui = {
+			let term = term.clone();
+			thread::spawn(move || term.lock().title = "ui".into())
+		};
+		while term.waiting.load(Ordering::Acquire) == 0 {
+			thread::yield_now();
+		}
+		drop(guard);
+		term.yield_to_waiters();
+		assert_eq!(term.lock().title, "ui");
+		ui.join().unwrap();
 	}
 
 	#[cfg(debug_assertions)]

@@ -1,0 +1,198 @@
+//! A copy of the visible screen, taken under the terminal lock so frames
+//! render without blocking the parser thread.
+use std::collections::HashMap;
+
+use super::{Cell, CursorShape, NO_EXTRA, Term};
+use crate::sixel::Placement;
+
+/// The visible rows of a [`Term`] plus what the renderer needs to draw them.
+/// Buffers are reused between frames.
+#[derive(Clone, Default)]
+pub(crate) struct Frame {
+	pub cols: usize,
+	pub rows: usize,
+	/// `rows * cols` cells, row-major.
+	cells: Vec<Cell>,
+	/// Row index (as used by [`Term::row_cells`] and selections) of the top row.
+	pub first_row: usize,
+	/// A number that grows by one each time a line scrolls into history;
+	/// equal values in two frames mean the same line is at the top.
+	pub top_line: usize,
+	/// Cursor cell, when visible on screen.
+	pub cursor: Option<(usize, usize)>,
+	pub cursor_shape: CursorShape,
+	pub scroll_offset: usize,
+	pub images: Vec<Placement>,
+	/// Visible rows holding a shell prompt, with their command's exit status.
+	pub prompt_marks: Vec<(usize, Option<i32>)>,
+	/// Frame-local extras: `cell.extra` indexes this; 0 means none.
+	extras: Vec<(bool, Box<[char]>)>,
+}
+
+impl Frame {
+	/// The cells of visible row `row`.
+	pub(crate) fn row(&self, row: usize) -> &[Cell] {
+		&self.cells[row * self.cols..][..self.cols]
+	}
+
+	/// Combining marks attached to `cell`.
+	pub(crate) fn marks(&self, cell: &Cell) -> &[char] {
+		self
+			.extras
+			.get(cell.extra as usize)
+			.map_or(&[], |(_, marks)| marks)
+	}
+
+	/// Whether row `row` looks the same as `other`'s row `other_row`: same
+	/// cells, marks and links. Extra ids are frame-local, so they are
+	/// compared by content.
+	pub(crate) fn row_matches(&self, row: usize, other: &Frame, other_row: usize) -> bool {
+		let (mine, theirs) = (self.row(row), other.row(other_row));
+		mine.iter().zip(theirs).all(|(a, b)| {
+			let same_cell = Cell { extra: 0, ..*a } == Cell { extra: 0, ..*b };
+			same_cell
+				&& (a.extra == NO_EXTRA) == (b.extra == NO_EXTRA)
+				&& (a.extra == NO_EXTRA
+					|| (self.marks(a) == other.marks(b) && self.is_link(a) == other.is_link(b)))
+		})
+	}
+
+	/// The prompt mark on visible row `row`: `Some(exit status)` if it has one.
+	pub(crate) fn prompt_mark(&self, row: usize) -> Option<Option<i32>> {
+		self
+			.prompt_marks
+			.iter()
+			.find(|&&(mark_row, _)| mark_row == row)
+			.map(|&(_, exit)| exit)
+	}
+
+	/// Whether `cell` is part of an OSC 8 hyperlink.
+	pub(crate) fn is_link(&self, cell: &Cell) -> bool {
+		self
+			.extras
+			.get(cell.extra as usize)
+			.is_some_and(|&(link, _)| link)
+	}
+}
+
+impl Term {
+	/// Copies the visible screen into `frame`.
+	pub(crate) fn snapshot(&self, frame: &mut Frame) {
+		let (cols, rows) = (self.cols, self.rows);
+		let first_row = self.scrollback.len().saturating_sub(self.scroll_offset);
+		frame.cols = cols;
+		frame.rows = rows;
+		frame.first_row = first_row;
+		frame.top_line = self.history_base + first_row;
+		frame.scroll_offset = self.scroll_offset;
+		frame.cursor_shape = self.cursor_shape;
+		frame.cursor = (self.cursor_visible && self.scroll_offset == 0 && self.cx < cols)
+			.then_some((self.cx, self.cy));
+		frame.images.clone_from(&self.images);
+		let top = self.history_base + first_row;
+		frame.prompt_marks.clear();
+		frame.prompt_marks.extend(
+			self
+				.shell
+				.prompt_marks(top..top + rows)
+				.map(|(row, exit)| (row - top, exit)),
+		);
+
+		frame.cells.clear();
+		let blank = self.blank();
+		for row in first_row..first_row + rows {
+			let cells = self.row_cells(row).unwrap_or(&[]);
+			let cells = &cells[..cells.len().min(cols)];
+			frame.cells.extend_from_slice(cells);
+			frame
+				.cells
+				.resize(frame.cells.len() + cols - cells.len(), blank);
+		}
+
+		// Copy the extras visible cells use instead of sharing the table: the
+		// parser updates it copy-on-write and would otherwise clone it.
+		frame.extras.clear();
+		frame.extras.push((false, Box::default()));
+		let mut local = HashMap::new();
+		for cell in frame.cells.iter_mut().filter(|cell| cell.extra != NO_EXTRA) {
+			cell.extra = *local.entry(cell.extra).or_insert_with(|| {
+				let link = self.extras.hyperlink(cell.extra) != 0;
+				frame
+					.extras
+					.push((link, self.extras.marks(cell.extra).into()));
+				(frame.extras.len() - 1) as u16
+			});
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::{
+		parser::Parser,
+		theme::{Theme, ThemeKind},
+	};
+
+	fn term(cols: usize, rows: usize, input: &str) -> Term {
+		let mut term = Term::new(cols, rows, Theme::from_kind(ThemeKind::Poop), "/".into());
+		Parser::new().advance(&mut term, input.as_bytes());
+		term
+	}
+
+	fn text(frame: &Frame, row: usize) -> String {
+		frame.row(row).iter().map(|cell| cell.ch).collect()
+	}
+
+	#[test]
+	fn the_visible_rows_and_cursor_are_copied() {
+		let term = term(4, 2, "ab\r\ncd");
+		let mut frame = Frame::default();
+		term.snapshot(&mut frame);
+		assert_eq!((frame.cols, frame.rows), (4, 2));
+		assert_eq!(text(&frame, 0), "ab  ");
+		assert_eq!(text(&frame, 1), "cd  ");
+		assert_eq!(frame.cursor, Some((2, 1)));
+	}
+
+	#[test]
+	fn scrolling_back_shows_history_and_hides_the_cursor() {
+		let mut term = term(3, 2, "1\r\n2\r\n3\r\n4");
+		let mut frame = Frame::default();
+		term.snapshot(&mut frame);
+		assert_eq!(frame.first_row, 2);
+		assert_eq!(text(&frame, 0), "3  ");
+		term.scroll_view(1);
+		term.snapshot(&mut frame);
+		assert_eq!(frame.first_row, 1);
+		assert_eq!(text(&frame, 0), "2  ");
+		assert_eq!(text(&frame, 1), "3  ");
+		assert_eq!(frame.cursor, None);
+	}
+
+	#[test]
+	fn top_line_counts_lines_scrolled_into_history() {
+		let mut term = term(3, 2, "1\r\n2");
+		let mut frame = Frame::default();
+		term.snapshot(&mut frame);
+		let before = frame.top_line;
+		term.set_scrollback_limit(1);
+		Parser::new().advance(&mut term, b"\r\n3\r\n4");
+		term.snapshot(&mut frame);
+		assert_eq!(frame.top_line, before + 2, "counts evicted lines too");
+		assert_eq!(text(&frame, 0), "3  ");
+	}
+
+	#[test]
+	fn marks_and_links_survive_without_sharing_the_extras_table() {
+		let term = term(4, 1, "e\u{301}\x1b]8;;https://x\x1b\\L\x1b]8;;\x1b\\");
+		let mut frame = Frame::default();
+		term.snapshot(&mut frame);
+		let row = frame.row(0);
+		assert_eq!(frame.marks(&row[0]), ['\u{301}']);
+		assert!(!frame.is_link(&row[0]));
+		assert!(frame.is_link(&row[1]));
+		assert!(frame.marks(&row[2]).is_empty() && !frame.is_link(&row[2]));
+		assert_eq!(std::sync::Arc::strong_count(&term.extras), 1);
+	}
+}

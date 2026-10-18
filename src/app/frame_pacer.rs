@@ -3,10 +3,19 @@
 //! Without pacing, every chunk of PTY output triggered a full software
 //! render, so a fast producer spent most of its time waiting for frames
 //! nobody could see.
+//!
+//! While a flood of output keeps the parser busy, frames are drawn at a
+//! lower rate: each full-window software frame competes with parsing for
+//! memory bandwidth and shared cache, and nobody reads text scrolling by
+//! that fast.
 use std::time::{Duration, Instant};
+
+/// Minimum time between frames during a flood (30 frames per second).
+pub(super) const FLOOD_INTERVAL: Duration = Duration::from_micros(33_333);
 
 pub(super) struct FramePacer {
 	interval: Duration,
+	flooding: bool,
 	last_frame: Option<Instant>,
 	deadline: Option<Instant>,
 }
@@ -15,6 +24,7 @@ impl FramePacer {
 	pub(super) fn new(interval: Duration) -> Self {
 		Self {
 			interval,
+			flooding: false,
 			last_frame: None,
 			deadline: None,
 		}
@@ -24,12 +34,26 @@ impl FramePacer {
 		self.interval = interval;
 	}
 
+	/// Whether the active session is producing output faster than it can
+	/// be parsed.
+	pub(super) fn set_flooding(&mut self, flooding: bool) {
+		self.flooding = flooding;
+	}
+
+	fn current_interval(&self) -> Duration {
+		if self.flooding {
+			self.interval.max(FLOOD_INTERVAL)
+		} else {
+			self.interval
+		}
+	}
+
 	/// Content changed at `now`. Returns true if a frame should be requested
 	/// now; otherwise the change is folded into the pending deadline.
 	pub(super) fn request(&mut self, now: Instant) -> bool {
 		match self.last_frame {
-			Some(last) if now < last + self.interval => {
-				self.deadline.get_or_insert(last + self.interval);
+			Some(last) if now < last + self.current_interval() => {
+				self.deadline.get_or_insert(last + self.current_interval());
 				false
 			}
 			_ => true,
@@ -76,6 +100,19 @@ mod tests {
 		assert_eq!(pacer.deadline(), Some(start + FRAME));
 		assert!(!pacer.due(start + Duration::from_millis(10)));
 		assert!(pacer.due(start + FRAME));
+	}
+
+	#[test]
+	fn floods_are_drawn_at_a_lower_rate() {
+		let mut pacer = FramePacer::new(FRAME);
+		let start = Instant::now();
+		pacer.set_flooding(true);
+		pacer.drawn(start);
+		assert!(!pacer.request(start + Duration::from_millis(20)));
+		assert_eq!(pacer.deadline(), Some(start + FLOOD_INTERVAL));
+		pacer.set_flooding(false);
+		pacer.drawn(start);
+		assert!(pacer.request(start + Duration::from_millis(20)));
 	}
 
 	#[test]

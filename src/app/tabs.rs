@@ -62,9 +62,10 @@ impl App {
 		self.refresh_directories(true);
 		let id = self.next_session_id;
 		self.next_session_id += 1;
-		let cols = self.active_term().cols;
-		let rows = self.active_term().rows;
-		let cwd = self.active_term().cwd.clone();
+		let (cols, rows, cwd) = {
+			let term = self.active_term();
+			(term.cols, term.rows, term.cwd.clone())
+		};
 		match spawn_session(
 			id,
 			cols,
@@ -106,7 +107,7 @@ impl App {
 		}
 		self.active = index;
 		self.sessions[self.active].activity = false;
-		self.sessions[self.active].term.bell = false;
+		self.sessions[self.active].term().bell = false;
 		self.ensure_active_tab_visible();
 		self.selection = None;
 		self.update_window_title();
@@ -154,10 +155,7 @@ impl App {
 	}
 
 	pub(super) fn update_window_title(&mut self) {
-		let title = self.sessions[self.active]
-			.custom_title
-			.clone()
-			.unwrap_or_else(|| self.active_term().title.clone());
+		let title = self.sessions[self.active].title();
 		if self.reported_title == title {
 			return;
 		}
@@ -168,14 +166,14 @@ impl App {
 	}
 
 	pub(super) fn refresh_directories(&mut self, only_active: bool) {
-		for (index, session) in self.sessions.iter_mut().enumerate() {
+		for (index, session) in self.sessions.iter().enumerate() {
 			if only_active && index != self.active {
 				continue;
 			}
 			if let Some(_pid) = session._child.process_id() {
 				#[cfg(target_os = "linux")]
 				if let Ok(path) = fs::read_link(format!("/proc/{_pid}/cwd")) {
-					session.term.cwd = path;
+					session.term().cwd = path;
 				}
 				#[cfg(target_os = "macos")]
 				if let Ok(output) = Command::new("/usr/sbin/lsof")
@@ -185,7 +183,7 @@ impl App {
 						.lines()
 						.find_map(|line| line.strip_prefix('n'))
 				{
-					session.term.cwd = PathBuf::from(path);
+					session.term().cwd = PathBuf::from(path);
 				}
 			}
 		}
@@ -195,7 +193,7 @@ impl App {
 		let dirs: Vec<_> = self
 			.sessions
 			.iter()
-			.map(|session| session.term.cwd.clone())
+			.map(|session| session.term().cwd.clone())
 			.collect();
 		if let Err(error) = save_session_dirs(&dirs) {
 			eprintln!("poopterm: could not save sessions: {error}");

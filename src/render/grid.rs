@@ -5,13 +5,13 @@ use super::{
 };
 use crate::{
 	sixel,
-	term::{Cell, CursorShape, NO_EXTRA, Term, attr},
+	term::{Cell, CursorShape, Frame, NO_EXTRA, attr},
 	ui::selection::CellPoint,
 };
 
 /// Everything needed to draw one terminal viewport.
 pub(crate) struct GridView<'a> {
-	pub term: &'a Term,
+	pub frame: &'a Frame,
 	/// Pixel position of the top-left cell.
 	pub origin: (usize, usize),
 	/// Cell width and height in pixels.
@@ -28,8 +28,6 @@ pub(crate) struct GridView<'a> {
 	pub search_match: Option<(CellPoint, CellPoint)>,
 	/// Unfocused windows draw a hollow block cursor.
 	pub focused: bool,
-	/// Visible rows holding a shell prompt, with their command's exit status.
-	pub prompt_marks: Vec<(usize, Option<i32>)>,
 	/// Mark colors: succeeded, failed, running or unknown.
 	pub mark_colors: [u32; 3],
 }
@@ -38,24 +36,27 @@ fn contains(range: Option<(CellPoint, CellPoint)>, point: CellPoint) -> bool {
 	range.is_some_and(|(start, end)| point >= start && point <= end)
 }
 
-pub(crate) fn draw_grid(p: &mut Painter, fonts: &mut FontSet, view: &GridView) {
-	let term = view.term;
-	let history_len = term.scrollback.len();
-	let screen_start = history_len.saturating_sub(term.scroll_offset);
-	for row in 0..term.rows {
-		let absolute_row = screen_start + row;
-		let Some(cells) = term.row_cells(absolute_row) else {
-			continue;
-		};
+/// Draws the rows of `view` for which `rows` is true (all rows if `None`).
+/// Glyphs are clipped to their row, so each row can be redrawn alone.
+pub(crate) fn draw_grid(
+	p: &mut Painter,
+	fonts: &mut FontSet,
+	view: &GridView,
+	rows: Option<&[bool]>,
+) {
+	let frame = view.frame;
+	let wanted = |row: usize| rows.is_none_or(|rows| rows[row]);
+	for row in (0..frame.rows).filter(|&row| wanted(row)) {
+		let absolute_row = frame.first_row + row;
+		let cells = frame.row(row);
 		// Right to left, so a wide glyph is drawn after the cell it spills into.
 		for (col, cell) in cells.iter().enumerate().rev() {
 			let point = CellPoint {
 				row: absolute_row,
 				col,
 			};
-			let is_cursor =
-				term.cursor_visible && term.scroll_offset == 0 && row == term.cy && col == term.cx;
-			let solid_block = is_cursor && view.focused && term.cursor_shape == CursorShape::Block;
+			let is_cursor = frame.cursor == Some((col, row));
+			let solid_block = is_cursor && view.focused && frame.cursor_shape == CursorShape::Block;
 			let (fg, bg) = if contains(view.selection, point) {
 				view.selection_colors
 			} else if contains(view.search_match, point) {
@@ -72,15 +73,20 @@ pub(crate) fn draw_grid(p: &mut Painter, fonts: &mut FontSet, view: &GridView) {
 		}
 	}
 	draw_images(p, view);
-	draw_prompt_marks(p, view);
+	draw_prompt_marks(p, view, &wanted);
 }
 
 /// A thin bar in the left margin beside each prompt, colored by exit status.
-fn draw_prompt_marks(p: &mut Painter, view: &GridView) {
+fn draw_prompt_marks(p: &mut Painter, view: &GridView, wanted: &impl Fn(usize) -> bool) {
 	let (left, top) = view.origin;
 	let width = (left / 3).max(1);
 	let x = left.saturating_sub(width) / 2;
-	for &(row, exit) in &view.prompt_marks {
+	for &(row, exit) in view
+		.frame
+		.prompt_marks
+		.iter()
+		.filter(|(row, _)| wanted(*row))
+	{
 		let color = match exit {
 			Some(0) => view.mark_colors[0],
 			Some(_) => view.mark_colors[1],
@@ -128,11 +134,18 @@ fn draw_cell(
 		glyph_top(glyph, y0, view.ascent),
 	);
 	let italic = cell.attrs & attr::ITALIC != 0;
-	p.glyph(glyph, origin, (x0 as i32, (x0 + span) as i32), italic, fg);
+	let (top, bottom) = (y0 as i32, (y0 + ch) as i32);
+	p.glyph(
+		glyph,
+		origin,
+		(x0 as i32, top, (x0 + span) as i32, bottom),
+		italic,
+		fg,
+	);
 	if cell.extra == NO_EXTRA {
 		return;
 	}
-	if view.term.hyperlink_uri(cell).is_some() {
+	if view.frame.is_link(cell) {
 		p.rect(
 			x0,
 			y0 + ch.saturating_sub(2 * view.scale),
@@ -141,14 +154,20 @@ fn draw_cell(
 			view.link_color,
 		);
 	}
-	for &mark in view.term.marks(cell) {
+	for &mark in view.frame.marks(cell) {
 		if mark == '\u{200d}' || mark == '\u{fe0f}' {
 			continue;
 		}
 		let glyph = fonts.glyph(mark, view.px);
 		let x = x0 as i32 + (cw as i32 - glyph.metrics.width as i32) / 2;
 		let origin = (x, glyph_top(glyph, y0, view.ascent));
-		p.glyph(glyph, origin, (x0 as i32, (x0 + cw) as i32), false, fg);
+		p.glyph(
+			glyph,
+			origin,
+			(x0 as i32, top, (x0 + cw) as i32, bottom),
+			false,
+			fg,
+		);
 	}
 }
 
@@ -159,7 +178,7 @@ fn draw_cursor(p: &mut Painter, view: &GridView, cell: &Cell, (col, row): (usize
 	let y = view.origin.1 + row * ch;
 	let thick = 2 * view.scale.max(1);
 	let width = cw * usize::from(cell.width.max(1));
-	match (view.term.cursor_shape, view.focused) {
+	match (view.frame.cursor_shape, view.focused) {
 		(CursorShape::Bar, _) => p.rect(x, y, thick, ch, cell.fg),
 		(CursorShape::Underline, _) => p.rect(x, y + ch.saturating_sub(thick), width, thick, cell.fg),
 		(CursorShape::Block, _) => {
@@ -173,16 +192,16 @@ fn draw_cursor(p: &mut Painter, view: &GridView, cell: &Cell, (col, row): (usize
 }
 
 fn draw_images(p: &mut Painter, view: &GridView) {
-	let term = view.term;
+	let frame = view.frame;
 	let (cw, ch) = view.cell;
 	let (left, top) = view.origin;
-	let bottom = (top + term.rows * ch).min(p.height) as isize;
-	for image in &term.images {
+	let bottom = (top + frame.rows * ch).min(p.height) as isize;
+	for image in &frame.images {
 		let image_x = left + image.col * cw;
 		if image_x >= p.width {
 			continue;
 		}
-		let image_y = top as isize + (image.row + term.scroll_offset as isize) * ch as isize;
+		let image_y = top as isize + (image.row + frame.scroll_offset as isize) * ch as isize;
 		let draw_width = image.bitmap.width.min(p.width - image_x);
 		for sy in 0..image.bitmap.height {
 			let y = image_y + sy as isize;
