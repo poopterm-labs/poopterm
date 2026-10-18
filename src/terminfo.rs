@@ -191,6 +191,48 @@ mod tests {
 		assert!(installed_in(std::slice::from_ref(&dir.0)));
 	}
 
+	#[test]
+	fn infocmp_escapes_are_decoded_in_every_notation() {
+		// ncurses 6 prints ^? and \E; macOS's ncurses 5.7 prints octal.
+		assert_eq!(decode("^?"), "\x7f");
+		assert_eq!(decode("\\177"), "\x7f");
+		assert_eq!(decode("\\E[A"), "\x1b[A");
+		assert_eq!(decode("\\e[1;2D"), "\x1b[1;2D");
+		assert_eq!(decode("^H\\054"), "\x08,");
+	}
+
+	/// Decodes an infocmp string value: `\E`/`\e`, octal `\NNN`, `^X`.
+	fn decode(value: &str) -> String {
+		let mut out = String::new();
+		let mut chars = value.chars().peekable();
+		while let Some(c) = chars.next() {
+			match c {
+				'\\' => match chars.next() {
+					Some('E' | 'e') => out.push('\x1b'),
+					Some(d @ '0'..='7') => {
+						let mut code = d.to_digit(8).unwrap();
+						for _ in 0..2 {
+							if let Some(d) = chars.peek().and_then(|d| d.to_digit(8)) {
+								code = code * 8 + d;
+								chars.next();
+							}
+						}
+						out.push(char::from(code as u8));
+					}
+					Some(other) => out.push(other),
+					None => {}
+				},
+				'^' => match chars.next() {
+					Some('?') => out.push('\x7f'),
+					Some(c) => out.push(char::from(c as u8 & 0x1f)),
+					None => out.push('^'),
+				},
+				c => out.push(c),
+			}
+		}
+		out
+	}
+
 	/// Reads string capabilities from the compiled entry via infocmp.
 	fn capabilities(dir: &Path) -> std::collections::HashMap<String, String> {
 		let output = Command::new("infocmp")
@@ -202,12 +244,7 @@ mod tests {
 		String::from_utf8_lossy(&output.stdout)
 			.lines()
 			.filter_map(|line| line.trim().trim_end_matches(',').split_once('='))
-			.map(|(name, value)| {
-				(
-					name.to_owned(),
-					value.replace("\\E", "\x1b").replace("^?", "\x7f"),
-				)
-			})
+			.map(|(name, value)| (name.to_owned(), decode(value)))
 			.collect()
 	}
 

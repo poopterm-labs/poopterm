@@ -11,12 +11,13 @@ __poopterm_original_ps0=${PS0-}
 # Percent-encodes every byte of $PWD outside the URI-unreserved set, so
 # control characters in directory names cannot end the OSC 7 sequence.
 __poopterm_escape_path() {
-	local LC_ALL=C path=$PWD encoded= char i
+	local LC_ALL=C path=$PWD encoded= char code i
 	for (( i = 0; i < ${#path}; i++ )); do
 		char=${path:i:1}
 		case $char in
 			[a-zA-Z0-9/._~-]) encoded+=$char ;;
-			*) printf -v char '%%%02X' "'$char"; encoded+=$char ;;
+			# bash 3.2 (macOS) sign-extends bytes >= 0x80; keep one byte.
+			*) printf -v code '%d' "'$char"; printf -v char '%%%02X' $(( code & 255 )); encoded+=$char ;;
 		esac
 	done
 	printf '%s' "$encoded"
