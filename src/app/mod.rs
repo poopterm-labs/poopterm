@@ -1,16 +1,18 @@
 //! Application state and the winit event loop.
 mod draw;
 mod draw_tabs;
+mod frame_pacer;
 mod handler;
 mod keyboard;
 mod mouse;
+mod output;
 mod search;
 mod settings;
 mod settings_view;
 mod tabs;
 
 use portable_pty::PtySize;
-use std::{error::Error, io::Write, num::NonZeroU32, path::PathBuf, sync::Arc};
+use std::{error::Error, num::NonZeroU32, path::PathBuf, sync::Arc};
 
 use winit::{
 	event::{ElementState, MouseButton, WindowEvent},
@@ -84,6 +86,9 @@ pub(crate) struct App {
 	cursor_pos: (f64, f64),
 	held_button: Option<MouseButtonCode>,
 	scroll: ScrollAccumulator,
+	pacer: frame_pacer::FramePacer,
+	/// Reused buffer for bytes taken from a session's output queue.
+	read_buffer: Vec<u8>,
 	selection: Option<Selection>,
 	selecting: bool,
 	search_active: bool,
@@ -249,6 +254,8 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		cursor_pos: (0.0, 0.0),
 		held_button: None,
 		scroll: ScrollAccumulator::default(),
+		pacer: frame_pacer::FramePacer::new(std::time::Duration::from_micros(16_667)),
+		read_buffer: Vec::new(),
 		selection: None,
 		selecting: false,
 		search_active: false,

@@ -1,5 +1,6 @@
 use super::*;
 use crate::input::keys::Modifiers;
+use std::time::Instant;
 use winit::{
 	application::ApplicationHandler,
 	dpi::{LogicalSize, PhysicalSize},
@@ -71,6 +72,11 @@ impl ApplicationHandler<UserEvent> for App {
 		self._context = Some(context);
 		self.window = Some(window);
 		self.update_window_title();
+		if let Some(millihertz) = window_refresh_millihertz(self.window.as_deref()) {
+			self.pacer.set_interval(std::time::Duration::from_micros(
+				1_000_000_000 / u64::from(millihertz),
+			));
+		}
 
 		let s = self.window.as_ref().unwrap().inner_size();
 		self.resize(s.width, s.height);
@@ -119,84 +125,34 @@ impl ApplicationHandler<UserEvent> for App {
 	}
 
 	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-		let now = std::time::Instant::now();
-		let mut changed = false;
+		let now = Instant::now();
+		let mut expired = false;
 		for session in &mut self.sessions {
-			changed |= session.term.finish_sync_if_expired(now);
+			expired |= session.term.finish_sync_if_expired(now);
 		}
-		if changed {
-			self.persist_sessions();
+		if expired {
 			self.search_dirty = true;
 			self.update_window_title();
-			if let Some(window) = &self.window {
-				window.request_redraw();
-			}
+			self.schedule_redraw();
 		}
-		if let Some(deadline) = self
+		if self.pacer.due(now) {
+			self.request_redraw();
+		}
+		let sync_deadline = self
 			.sessions
 			.iter()
 			.filter_map(|s| s.term.sync_deadline)
-			.min()
-		{
-			event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-		} else {
-			event_loop.set_control_flow(ControlFlow::Wait);
-		}
+			.min();
+		let wake = [sync_deadline, self.pacer.deadline()]
+			.into_iter()
+			.flatten()
+			.min();
+		event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
 	}
 
 	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
 		match event {
-			UserEvent::Output(id, bytes, ack) => {
-				// Keep one parser per PTY stream to preserve partial escape sequences.
-				let mut active_output = false;
-				let mut became_active = false;
-				let mut cwd_changed = false;
-				let active_id = self.sessions.get(self.active).map(|session| session.id);
-				if let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) {
-					let previous_bell = session.term.bell;
-					let previous_title_generation = session.term.title_generation;
-					let previous_cwd_generation = session.term.cwd_generation;
-
-					session.parser.advance(&mut session.term, &bytes);
-					if let Some(text) = session.term.clipboard_write.take()
-						&& let Err(error) = clipboard_write(&text)
-					{
-						eprintln!("poopterm: OSC 52 clipboard write failed: {error}");
-					}
-
-					cwd_changed = session.term.cwd_generation != previous_cwd_generation;
-					became_active |= session.term.bell != previous_bell
-						|| session.term.title_generation != previous_title_generation;
-					if !session.term.responses.is_empty() {
-						for response in std::mem::take(&mut session.term.responses) {
-							let _ = session.writer.write_all(&response);
-						}
-						let _ = session.writer.flush();
-					}
-					if Some(id) == active_id {
-						active_output = session.term.synchronized.is_none();
-						session.activity = false;
-					} else if !session.activity {
-						session.activity = true;
-						became_active = true;
-					}
-				}
-				if cwd_changed {
-					self.persist_sessions();
-				}
-				if active_output {
-					if self.search_active {
-						self.search_dirty = true;
-					}
-					self.update_window_title();
-				}
-				if (active_output || became_active)
-					&& let Some(win) = &self.window
-				{
-					win.request_redraw();
-				}
-				let _ = ack.send(bytes);
-			}
+			UserEvent::Output(id) => self.process_output(id),
 			UserEvent::Closed(id) => {
 				if let Some(index) = self.sessions.iter().position(|s| s.id == id) {
 					self.close_tab(index, event_loop);
@@ -204,4 +160,12 @@ impl ApplicationHandler<UserEvent> for App {
 			}
 		}
 	}
+}
+
+/// The refresh rate of the monitor showing `window`, in millihertz.
+fn window_refresh_millihertz(window: Option<&Window>) -> Option<u32> {
+	window?
+		.current_monitor()?
+		.refresh_rate_millihertz()
+		.filter(|&rate| rate >= 1000)
 }

@@ -1,0 +1,118 @@
+//! Bytes read from a PTY, waiting for the UI thread to parse them.
+//!
+//! The reader thread keeps reading while the UI thread parses: it appends
+//! to the queue and wakes the UI only once per batch. When the UI falls
+//! behind by `limit` bytes the reader waits, which pushes back on the
+//! program producing output instead of buffering without bound.
+use std::sync::{Condvar, Mutex, MutexGuard};
+
+pub(crate) struct OutputQueue {
+	state: Mutex<State>,
+	space: Condvar,
+	limit: usize,
+}
+
+#[derive(Default)]
+struct State {
+	bytes: Vec<u8>,
+	/// A wake-up for the current batch has been sent and not yet consumed.
+	notified: bool,
+	closed: bool,
+}
+
+impl OutputQueue {
+	pub(crate) fn new(limit: usize) -> Self {
+		Self {
+			state: Mutex::default(),
+			space: Condvar::new(),
+			limit,
+		}
+	}
+
+	fn lock(&self) -> MutexGuard<'_, State> {
+		self
+			.state
+			.lock()
+			.unwrap_or_else(|poisoned| poisoned.into_inner())
+	}
+
+	/// Appends `data`, waiting while the queue is full. Returns true when the
+	/// caller should wake the UI thread (the first push of a batch).
+	pub(crate) fn push(&self, data: &[u8]) -> bool {
+		let mut state = self.lock();
+		while state.bytes.len() >= self.limit && !state.closed {
+			state = self
+				.space
+				.wait(state)
+				.unwrap_or_else(|poisoned| poisoned.into_inner());
+		}
+		state.bytes.extend_from_slice(data);
+		!std::mem::replace(&mut state.notified, true)
+	}
+
+	/// Moves all queued bytes into `out` (replacing its contents, keeping
+	/// both buffers' capacity) and starts a new batch.
+	pub(crate) fn take(&self, out: &mut Vec<u8>) {
+		out.clear();
+		let mut state = self.lock();
+		std::mem::swap(out, &mut state.bytes);
+		state.notified = false;
+		self.space.notify_all();
+	}
+
+	/// Releases a reader blocked in [`push`](Self::push), e.g. when the tab closes.
+	pub(crate) fn close(&self) {
+		self.lock().closed = true;
+		self.space.notify_all();
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use std::{sync::Arc, thread, time::Duration};
+
+	#[test]
+	fn only_the_first_push_of_a_batch_requests_a_wakeup() {
+		let queue = OutputQueue::new(1024);
+		assert!(queue.push(b"ab"));
+		assert!(!queue.push(b"cd"));
+		let mut out = Vec::new();
+		queue.take(&mut out);
+		assert_eq!(out, b"abcd");
+		assert!(queue.push(b"e"), "taking starts a new batch");
+	}
+
+	#[test]
+	fn a_full_queue_blocks_the_reader_until_the_ui_takes_bytes() {
+		let queue = Arc::new(OutputQueue::new(4));
+		queue.push(b"1234");
+		let reader = {
+			let queue = queue.clone();
+			thread::spawn(move || queue.push(b"5"))
+		};
+		thread::sleep(Duration::from_millis(50));
+		assert!(
+			!reader.is_finished(),
+			"push must wait while the queue is full"
+		);
+		let mut out = Vec::new();
+		queue.take(&mut out);
+		assert!(reader.join().unwrap());
+		queue.take(&mut out);
+		assert_eq!(out, b"5");
+	}
+
+	#[test]
+	fn closing_releases_a_blocked_reader() {
+		let queue = Arc::new(OutputQueue::new(1));
+		queue.push(b"x");
+		let reader = {
+			let queue = queue.clone();
+			thread::spawn(move || queue.push(b"y"))
+		};
+		thread::sleep(Duration::from_millis(20));
+		queue.close();
+		reader.join().unwrap();
+	}
+}

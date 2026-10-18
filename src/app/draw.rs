@@ -58,6 +58,7 @@ impl App {
 	}
 
 	pub(super) fn draw(&mut self) {
+		self.pacer.drawn(std::time::Instant::now());
 		self.refresh_search_if_dirty();
 		self.fonts.trim();
 		let Some(mut surface) = self.surface.take() else {

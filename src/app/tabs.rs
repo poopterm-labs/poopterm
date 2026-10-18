@@ -136,7 +136,6 @@ impl App {
 		}
 		self.tab_scroll = self.tab_scroll.min(self.sessions.len().saturating_sub(1));
 		self.ensure_active_tab_visible();
-		self.persist_sessions();
 		self.update_window_title();
 		if let Some(window) = &self.window {
 			window.request_redraw();
