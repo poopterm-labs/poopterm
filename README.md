@@ -192,8 +192,12 @@ POOPTERM_THEME=catppuccin-latte poopterm
   Search is case-insensitive for ASCII and matches within each displayed row
   (up to 10,000 matches per query).
   The usual paste shortcut can paste a search query.
+- **Cmd+Up/Down** on macOS or **Ctrl+Shift+Up/Down** elsewhere: jump to the
+  previous or next shell prompt (needs shell integration).
 - **Cmd-click** / **Ctrl-click** an HTTP(S) URL to open it in your browser, or
-  a displayed path containing `/` to copy it. Mouse-reporting terminal programs
+  a displayed path containing `/` to copy it. Links to executables and
+  launcher files (`.desktop`, `.command`, …) are copied, never opened; the
+  status bar shows a hyperlink's real target while you hover it. Mouse-reporting terminal programs
   retain their own click handling.
 - Click a tab to switch sessions, or click **+** to open one.
 - On macOS, tabs share the transparent titlebar beside the traffic lights. On
@@ -206,12 +210,14 @@ POOPTERM_THEME=catppuccin-latte poopterm
   scrollback unless the running app has enabled mouse reporting.
 - **Ctrl+Shift+T** cycles themes and saves the choice to the config file.
 - **Ctrl+Shift+P** opens the command palette for new tab, settings, About, theme,
-  close-tab, and rename-tab actions. Enter filters and runs the first match; after
+  copy-last-command-output, close-tab, and rename-tab actions. Enter filters and runs the first match; after
   choosing rename, type a title and press Enter.
 
 The `shortcut_new_tab`, `shortcut_command_palette`, `shortcut_cycle_theme`,
-`shortcut_search`, and `shortcut_close_tab` config keys accept `ctrl`, `shift`,
-`alt`, and `super` plus a character key. Defaults use the platform's common
+`shortcut_search`, `shortcut_close_tab`, `shortcut_previous_prompt`, and
+`shortcut_next_prompt` config keys accept `ctrl`, `shift`, `alt`, and `super`
+plus a character key or one of `up`, `down`, `left`, `right`, `pageup`,
+`pagedown`, `home`, `end`, `tab`, `enter`, `space`. Defaults use the platform's common
 shortcuts; the sample values above are for macOS.
 
 On Linux, clipboard shortcuts need a clipboard command-line tool: `wl-clipboard`
@@ -219,9 +225,20 @@ for Wayland (`wl-copy` and `wl-paste`), or `xclip`/`xsel` for X11.
 
 ### Shell integration
 
-Poopterm can print optional hooks that report command start/exit and the current
-working directory. Review the output, then append it to the startup file for the
-shell you use:
+Poopterm's hooks report command start/exit and the current working directory.
+They power prompt jumps, "Copy last command output", the exit-status marks
+beside prompts, and a tab marker (plus a window attention request) when a
+command of 10 s or more finishes while you are not looking.
+
+**zsh and fish load them automatically**, without editing your startup files
+(zsh through a temporary `ZDOTDIR` that then restores yours, fish through
+`XDG_DATA_DIRS`). Set `shell_integration = "off"` in `config.toml` to disable
+this. The hooks also make `ssh` connect with `TERM=xterm-256color`, since
+remote hosts rarely have poopterm's terminfo entry; set
+`POOPTERM_SSH_KEEP_TERM=1` to keep it.
+
+For bash, or to install the hooks by hand, review the output and append it to
+the startup file for the shell you use:
 
 ```sh
 poopterm --print-shell-integration zsh >> ~/.zshrc
@@ -336,6 +353,16 @@ Poopterm is MIT licensed; see [LICENSE](LICENSE).
   overwrite or scrolling out of view; image scrollback and partial bitmap
   erasure are not implemented. See [DEC's Sixel reference](https://vt100.net/docs/vt3xx-gp/chapter14.html).
 
+## Terminfo
+
+Shells run with `TERM=xterm-poopterm`, an entry that advertises only what
+poopterm supports (truecolor, styled underlines, synchronized output, focus
+events, …). If the entry is not installed, poopterm compiles a private copy
+with `tic` on first launch and points `TERMINFO_DIRS` at it; without `tic` it
+falls back to `xterm-256color`. `make install` installs the entry system-wide,
+or run `poopterm --print-terminfo | tic -x -`. Set `term = "xterm-256color"`
+(or any name) in `config.toml` to override.
+
 ## Development and releases
 
 ```sh
@@ -352,6 +379,9 @@ and AI coding agents alike), then see [architecture](docs/architecture.md),
 CI builds and checks macOS and Linux; BSD still needs testing on real systems.
 
 
+Releases are numbered `YEAR.QUARTER.PATCH` (two-digit year) and each gets a
+random codename; 26.10.0 is "Giga Fly". The codename lives in
+`[package.metadata.poopterm]` in `Cargo.toml` and in the changelog heading.
 Update `Cargo.toml`, the Poopterm entry in `Cargo.lock`, and the changelog together.
 Successful CI on `main` creates the matching `vX.Y.Z` tag and GitHub release only
 when the tag does not already exist. Prerelease versions such as `0.4.0-1` are

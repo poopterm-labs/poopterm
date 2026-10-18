@@ -1,33 +1,47 @@
 # Architecture
 
-Poopterm is one process with a UI thread plus two threads per tab (PTY reader
-and PTY writer). Everything is drawn on the CPU into a softbuffer surface.
+Poopterm is one process with a UI thread plus three threads per tab (PTY
+reader, parser, PTY writer). Everything is drawn on the CPU into a softbuffer
+surface.
 
 ## Data flow
 
 ```
-                ┌─────────────── per tab ───────────────┐
- shell ──pty──► │ reader thread ──► OutputQueue (1 MiB) │──wake──┐
-                └───────────────────────────────────────┘        │
-                                                                 ▼
- winit events ─────────────────────────────────────────►  App (UI thread)
-                                                         ├─ process_output: Parser ─► Term
-                                                         ├─ input encoders ─► PtyWriter ─► shell
-                                                         └─ FramePacer ─► draw ─► softbuffer
+            ┌──────────────────────────── per tab ─────────────────────────────┐
+ shell ─pty─┤ reader ──► OutputQueue (1 MiB) ──► parser thread ──► SharedTerm  │
+            │                                     │ replies ──► PtyWriter ─────┼─► shell
+            └─────────────────────────────────────┼──────────────────▲─────────┘
+                                         wake (Output)                │ lock: snapshot / state
+ winit events ──────────────────────────►  App (UI thread) ───────────┘
+                                           ├─ input encoders ─► PtyWriter ─► shell
+                                           └─ FramePacer ─► draw: Frame ─► damage ─► canvas ─► softbuffer
 ```
 
 1. **Reading.** `pty::spawn_session` starts a reader thread that appends each
-   read to the tab's `OutputQueue` and sends `UserEvent::Output(id)` only for
-   the first push of a batch. If the UI falls 1 MiB behind, the reader waits,
-   so a flood pushes back on the producing program instead of using memory.
-2. **Parsing.** `App::process_output` (in `app/output.rs`) takes the whole
-   batch and feeds it to the tab's `parser::Parser`, which updates its
-   `term::Term`. Replies the terminal owes the program (cursor reports,
-   device attributes, color queries) are collected in `Term::responses` and
-   sent through `PtyWriter`.
-3. **Drawing.** Output-driven redraws go through `app::FramePacer`, which
-   allows at most one frame per monitor refresh. Input-driven redraws (typing,
-   clicking) are requested immediately.
+   read to the tab's `OutputQueue`. If parsing falls 1 MiB behind, the reader
+   waits, so a flood pushes back on the producing program instead of using
+   memory. At end of file it closes the queue.
+2. **Parsing.** The tab's parser thread (`pty::pump`) takes everything
+   queued and applies it to the `term::SharedTerm` (a `Mutex<Term>`) in
+   64 KiB chunks, yielding to a waiting UI thread between chunks. Replies the
+   terminal owes the program (cursor reports, device attributes) go straight
+   to `PtyWriter`. After each batch it sends `UserEvent::Output(id)` unless
+   one is still unacknowledged, and it records whether the batch was a
+   backlog (half the queue or more): a *flood*. When the queue is closed and
+   drained it sends `UserEvent::Closed(id)`, so a tab's last output is never
+   lost.
+3. **Reacting.** `App::process_output` (in `app/output.rs`) acknowledges the
+   wake-up, then briefly locks the terminal for OSC 52 clipboard writes,
+   bell/title/cwd changes (compared with `Session::seen`) and long-command
+   notifications.
+4. **Drawing.** Output-driven redraws go through `app::FramePacer`: at most
+   one frame per monitor refresh, or 30 fps while the active tab floods.
+   Input-driven redraws are requested immediately. Each frame copies the
+   visible rows into a `term::Frame` under the lock and renders from that
+   copy (see Rendering).
+
+The UI thread must not lock a terminal twice: `std::sync::Mutex` would
+deadlock, so debug builds track held locks and panic instead.
 
 ## Terminal state (`src/term`)
 
@@ -83,12 +97,23 @@ results.
   and strike styles, hyperlinks, combining marks and Sixel images.
 - `render::blend` blends glyph coverage four pixels at a time with
   `portable_simd`.
-- `app/draw.rs` composes a frame: background or wallpaper, tab bar
+- `app/draw.rs` composes a full frame: background or wallpaper, tab bar
   (`draw_tabs.rs`), terminal grid, search box, command palette, status bar.
   The Settings window is drawn by `app/settings_view.rs`.
 
-The renderer redraws the whole window each frame; see
-[`performance.md`](performance.md) for the cost and the options to change it.
+**Damage tracking.** `app::canvas::Canvas` keeps a back buffer holding the
+last frame and the `Frame` it shows. `render::damage::grid_damage` compares
+the new `Frame` with it row by row (cells, marks, links, prompt marks, cursor).
+When lines scrolled into history (`Frame::top_line` grew), the old pixels are
+shifted up and only the new rows are drawn; with a wallpaper, rows are
+redrawn instead, because the wallpaper does not scroll. `app/repaint.rs`
+restores the background under damaged rows, redraws them and the tab and
+status bars, and copies only changed pixel rows to the window buffer. A full
+frame is drawn after resizes, theme or font changes, on tab switches, focus
+changes, and while a selection, search match or overlay is shown. Glyphs are
+clipped to their row so rows can be redrawn independently. X11 windows get
+the whole image each present (they lose contents when exposed); Wayland and
+macOS get damage rectangles.
 
 ## Input (`src/input`)
 

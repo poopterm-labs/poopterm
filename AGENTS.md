@@ -52,21 +52,23 @@ show a reproducible gain.
 ## Architecture in one screen
 
 ```
-PTY reader thread ──► pty::OutputQueue ──► app::process_output ──► parser::Parser ──► term::Term
-     (pty/mod.rs)       (backpressure)        (UI thread)           (vte + SIMD)       (grid state)
-                                                   │
-input events ──► input::{keys,mouse,paste} ──► pty::PtyWriter (writer thread) ──► shell
-                                                   │
-                         app::FramePacer ──► app::draw ──► render::{painter,grid} ──► softbuffer
+PTY reader thread ──► pty::OutputQueue ──► parser thread (pty::pump) ──► term::SharedTerm
+                        (backpressure)        parser::Parser (vte + SIMD)     (Mutex<Term>)
+                                                   │ wake once per batch          │
+                                                   ▼                              │ snapshot
+input events ──► App (UI thread) ──► input::{keys,mouse,paste} ──► pty::PtyWriter ──► shell
+                     │                                                            │
+                     └─ app::FramePacer ──► app::draw ◄── term::Frame ◄───────────┘
+                          (30 fps in floods)    └─ render::damage + app::canvas ──► softbuffer
 ```
 
 | Path | Responsibility |
 |------|----------------|
-| `src/term/` | Terminal state: `Grid` (one `Vec<Cell>` per row), scrollback, cursor, modes, Sixel placement, synchronized output. `Cell` is 16 bytes; combining marks and hyperlinks live in `term::extras`. |
+| `src/term/` | Terminal state: `Grid` (one `Vec<Cell>` per row), scrollback, cursor, modes, Sixel placement, synchronized output. `Cell` is 16 bytes; combining marks and hyperlinks live in `term::extras`. `SharedTerm` is the lock shared with the parser thread; `Frame` is the copy the renderer draws. |
 | `src/parser/` | Applies escape sequences to `Term`. `mod.rs` holds the ground-state SIMD fast path and the vte bridge; `csi`, `esc`, `osc`, `sgr`, `print` apply each family. |
-| `src/pty/` | Shell process, reader thread, `OutputQueue`, non-blocking `PtyWriter`. |
+| `src/pty/` | Shell process, reader and parser threads (`pump`), `OutputQueue`, non-blocking `PtyWriter`. |
 | `src/input/` | Pure encoders: keys, mouse reports, paste, scroll, shortcuts. |
-| `src/render/` | Pure drawing: `Painter`, `FontSet` glyph cache, grid renderer, SIMD blending. |
+| `src/render/` | Pure drawing: `Painter`, `FontSet` glyph cache, grid renderer, row damage, SIMD blending. |
 | `src/ui/` | Pure UI models: selection, search, tab layout. |
 | `src/app/` | winit event loop and glue. `App` methods are split by concern (`keyboard`, `mouse`, `tabs`, `settings`, `draw`, …). |
 | Top level | `config`, `theme`, `fonts`, `clipboard`, `session_store`, `shell_integration`, `sixel`, `wallpaper`, `platform`. |
@@ -83,7 +85,12 @@ Details: [`docs/architecture.md`](docs/architecture.md).
   `ui::tabs::tab_layout`, `app::settings::settings_target`). `App` methods
   should mostly route events to those functions.
 - **Never block the UI thread** on the PTY. Write through `Session::write`;
-  read through the output queue.
+  the parser thread does the reading and parsing.
+- **Hold the terminal lock briefly, and never twice.** `Session::term()`
+  returns a guard; drop it before calling anything that may lock again
+  (debug builds panic instead of deadlocking). Watch for temporaries:
+  `let x = a(self.active_term().y) && self.b()` keeps the guard alive for
+  the whole statement. Render from a `term::Frame`, never under the lock.
 - **The parser fast path must agree with vte.** Any change to
   `parser::Parser::feed`, `Batch`, or `Term::print_ascii` must keep
   `batched_printing_matches_per_character_printing` green; extend its
@@ -102,6 +109,11 @@ Details: [`docs/architecture.md`](docs/architecture.md).
 - Work lands directly on `main` as small, focused commits; there are no pull
   requests. Write messages that explain *why*, prefixed `fix:`, `perf:`,
   `feat:`, `refactor:`, `docs:`, `bench:` or `chore:`.
+- **Versioning:** `YEAR.QUARTER.PATCH` with a two-digit year, plus a random
+  codename per release (26.10.0 is "Giga Fly"). Put the codename in
+  `[package.metadata.poopterm] codename` in `Cargo.toml` and in the
+  changelog heading (`## 26.10.0 "Giga Fly" — date`); CI uses it in the
+  release title. Patch releases keep their release's codename.
 - CI on `main` creates a `vX.Y.Z` tag and GitHub release when `Cargo.toml`'s
   version has no tag yet. A version bump is therefore a release: update
   `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md` together, and update
@@ -111,5 +123,5 @@ Details: [`docs/architecture.md`](docs/architecture.md).
 
 Unit tests cannot see pixels. For rendering changes, run the app
 (`cargo run --release`) and look, or compare screenshots of a fixed screen
-before and after; the process is described in
+before and after, and partial redraws against `POOPTERM_FULL_REDRAW=1`; the process is described in
 [`docs/testing.md`](docs/testing.md#visual-checks).

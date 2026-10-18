@@ -66,24 +66,43 @@ Measured and rejected: batching scrollback evictions through a row pool,
 because it showed no reproducible end-to-end gain and slowed the parser
 benchmark.
 
+## Threads, damage tracking and floods (26.10)
+
+Parsing moved to a thread per tab and rendering became damage-tracked (see
+[`architecture.md`](architecture.md)). Findings worth knowing before changing
+either:
+
+- **Throughput was not the win; responsiveness was.** Before, the UI thread
+  parsed, and during a flood it barely rendered: on the Unicode payload it
+  drew 2 frames in the last second, with a 1.06 s freeze. Now it draws 29
+  (max gap 39 ms) at the same throughput.
+- **Full frames compete with parsing even on other cores.** A HiDPI window
+  (2232×1432) is 12.8 MB per frame; drawing it at 60 fps during a flood cut
+  Unicode throughput from 66 to 55 MB/s. The parser executed the same
+  instructions but at lower IPC; pinning threads to separate L2 clusters made
+  no difference, which points at the shared L3 and memory bandwidth. Hence
+  floods render at 30 fps (`app::FramePacer::set_flooding`): measured at
+  16/33/100 ms frame intervals, Unicode went 55/64/67 MB/s.
+- **Fills into softbuffer's buffer were slow.** ~75% of frame time was
+  plain fills straight into the X11 shared-memory segment. Rendering into a
+  persistent back buffer and copying only changed rows avoids that.
+
+32 MiB ×3 medians, 100×30, same session: previous build vs 26.10.
+
+| Payload | Before | 26.10 |
+|---------|-------:|------:|
+| ASCII | 97.5 | 94.8 |
+| Unicode | 66.7 | 64.8 |
+| CSI-heavy | 108.7 | 106.6 |
+| Cursor movement | 56.6 | 55.4 |
+
+These differences are within run-to-run noise (the baseline's ASCII figure
+ranged 89–97 MB/s over the day).
+
 ## Where the time goes now
 
-A profile of the ASCII payload, end to end: blanking each new bottom row and
-pushing the scrolled-off row into the scrollback (~35%), writing cells
-(~25%), rendering at 60 fps (~17%).
-
-Options for going further, roughly by payoff:
-
-1. **Parse on a dedicated thread.** Rendering would no longer take time from
-   parsing; this needs a lock or snapshot handoff between the parser and the
-   renderer.
-2. **Damage-tracked rendering.** Redraw only changed rows. This cuts render
-   cost during floods and CPU use while typing; overlays, the cursor and
-   selection must invalidate correctly.
-3. **Lazy row blanking.** Track how much of each row is in use instead of
-   clearing every recycled row. Requires changing how rows are indexed.
-4. **Adaptive frame rate during floods**, e.g. 30 fps while output exceeds
-   a threshold. Trivial, but scrolling looks choppier during floods.
-5. **Replace vte** with an in-tree parser so the SIMD path also covers
-   UTF-8 text and common CSI sequences. Large effort; mostly helps Unicode
-   and CSI-heavy output.
+During a flood the parser thread is the bottleneck: it is ~100% busy and the
+queue stays near full. On Unicode output, vte's `ground_dispatch` plus UTF-8
+validation take ~55% of parser time; on ASCII output, line feeds
+(`scroll_region_up`: scrollback `Arc` allocation and row blanking) take ~20%.
+The plan toward 200 MB/s is in [`TODO.md`](../TODO.md).

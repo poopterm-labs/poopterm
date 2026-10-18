@@ -1,11 +1,22 @@
 # Changelog
 
-## Unreleased
+## 26.10.0 "Giga Fly" — 2026-10-18
+
+Poopterm now numbers releases `YEAR.QUARTER.PATCH`, and each release gets a
+codename.
 
 ### Performance
 
+- Each tab parses its output on its own thread, and frames render from a snapshot, so the window stays responsive during floods: on a Unicode flood it now draws 29 frames per second instead of 2.
+- Damage tracking: only changed rows are redrawn, scrolled lines are shifted instead of redrawn, and only changed pixels are copied to the window. Typing and small updates no longer repaint the whole window.
+- While output arrives faster than it can be parsed, frames are capped at 30 per second, so rendering doesn't slow parsing down.
 - End-to-end output throughput rose from 0.3 MB/s to about 100 MB/s for plain text (65 MB/s Unicode, 112 MB/s escape-heavy) on an i3-N305: a non-blocking PTY reader with backpressure, display-paced redraws, a row-based grid with 16-byte cells, batched ASCII printing and a portable-SIMD parser fast path.
 - Glyph lookups use one fast hash per cell; shortcuts are no longer read from disk on every key press.
+
+### Security
+
+- Ctrl/Cmd-clicking a `file://` link no longer opens executables or launcher files (`.desktop`, `.command`, …); their paths are copied instead. Hovering a hyperlink shows its real target in the status bar.
+- The shell hooks percent-encode every unsafe byte in directory names; a crafted directory name could inject terminal sequences before.
 
 ### Fixed
 
@@ -20,6 +31,10 @@
 
 ### Added
 
+- An `xterm-poopterm` terminfo entry, used as `TERM`. When it isn't installed, poopterm compiles a private copy with `tic` on first launch and falls back to `xterm-256color` without `tic`. `poopterm --print-terminfo` prints it, `make install` installs it, and the `term` config key overrides the choice.
+- zsh and fish load the shell hooks automatically (`shell_integration = "off"` disables this). `ssh` from those shells uses `TERM=xterm-256color`.
+- Jump to the previous or next prompt (Ctrl+Shift+Up/Down, Cmd+Up/Down on macOS; `shortcut_previous_prompt` and `shortcut_next_prompt`), "Copy last command output" in the command palette, exit-status marks beside prompts, and a tab marker plus attention request when a long command finishes unseen.
+- Repeat character (REP), cursor shapes (DECSCUSR), focus reporting (mode 1004), XTVERSION and soft reset (DECSTR).
 - Secondary device attributes (`CSI > c`) and DECRQM replies for supported modes.
 - `scripts/bench-throughput.py`, a terminal-agnostic throughput benchmark.
 - `AGENTS.md` and `docs/` for contributors and coding agents.
