@@ -1,5 +1,10 @@
 //! Operating System Commands: titles, colors, hyperlinks, clipboard, cwd.
-use crate::{shell_integration::decode_uri_path, term::Term};
+use std::sync::Arc;
+
+use crate::{
+	shell_integration::decode_uri_path,
+	term::{NO_EXTRA, Term},
+};
 
 impl Term {
 	pub(super) fn apply_osc_dispatch(&mut self, params: &[&[u8]], _: bool) {
@@ -20,6 +25,7 @@ impl Term {
 				let uri = params[2];
 				if uri.is_empty() {
 					self.active_hyperlink = 0;
+					self.active_extra = NO_EXTRA;
 				} else if uri.len() <= 2048
 					&& let Ok(uri) = std::str::from_utf8(uri)
 					&& !uri.chars().any(char::is_control)
@@ -27,6 +33,9 @@ impl Term {
 				{
 					self.hyperlinks.push(uri.to_owned());
 					self.active_hyperlink = (self.hyperlinks.len() - 1) as u16;
+					self.active_extra = Arc::make_mut(&mut self.extras)
+						.with_hyperlink(NO_EXTRA, self.active_hyperlink)
+						.unwrap_or_default();
 				}
 			}
 			b"133" => self.shell.record(

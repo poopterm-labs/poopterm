@@ -1,21 +1,26 @@
 use crate::{
 	parser::Parser,
 	shell_integration::{self, decode_uri_path},
-	term::Term,
+	term::{Cell, Term},
 	theme::{Theme, ThemeKind},
 };
 
 fn terminal(cols: usize, rows: usize) -> Term {
 	Term::new(cols, rows, Theme::from_kind(ThemeKind::Poop), "/tmp".into())
 }
+/// The cell at flat index `i` (`row * cols + col`).
+fn cell(term: &Term, i: usize) -> Cell {
+	term.grid[i / term.cols][i % term.cols]
+}
+fn assert_grid_shape(term: &Term) {
+	assert_eq!(term.grid.iter().count(), term.rows);
+	assert!(term.grid.iter().all(|row| row.len() == term.cols));
+}
 fn feed(term: &mut Term, bytes: &[u8]) {
 	Parser::new().advance(term, bytes);
 }
 fn row(term: &Term, row: usize) -> String {
-	term.cells[row * term.cols..(row + 1) * term.cols]
-		.iter()
-		.map(|c| c.ch)
-		.collect()
+	term.grid[row].iter().map(|c| c.ch).collect()
 }
 
 #[test]
@@ -77,7 +82,7 @@ fn erased_cells_keep_the_current_background() {
 	let mut t = terminal(4, 2);
 	feed(&mut t, b"abcd\x1b[44m\r\x1b[K");
 	assert!(
-		t.cells[..4]
+		t.grid[0][..4]
 			.iter()
 			.all(|cell| cell.ch == ' ' && cell.bg == t.palette[4])
 	);
@@ -126,7 +131,7 @@ fn cursor_queries_remain_inside_screen_after_full_width_output() {
 	feed(&mut t, b"abcd\x1b[6n");
 	assert_eq!(t.responses.pop().unwrap(), b"\x1b[1;4R");
 	feed(&mut t, b"\x1b[K\x1b[@\x1b[P\x1b[X");
-	assert_eq!(t.cells.len(), 8);
+	assert_grid_shape(&t);
 }
 
 #[test]
@@ -137,22 +142,22 @@ fn partial_parser_chunks_and_wide_overwrite() {
 		parser.advance(&mut t, &[byte]);
 	}
 	assert!(t.bracketed_paste);
-	assert_eq!(t.cells[0].width, 2);
+	assert_eq!(cell(&t, 0).width, 2);
 	feed(&mut t, b"\x1b[2Gx");
-	assert_eq!(t.cells[0].ch, ' ');
-	assert_eq!(t.cells[1].ch, 'x');
-	assert_eq!(t.cells[1].width, 1);
+	assert_eq!(cell(&t, 0).ch, ' ');
+	assert_eq!(cell(&t, 1).ch, 'x');
+	assert_eq!(cell(&t, 1).width, 1);
 }
 
 #[test]
 fn combining_marks_and_joined_emoji_stay_with_their_base_cell() {
 	let mut t = terminal(16, 2);
 	feed(&mut t, "e\u{301}👨‍👩‍👧‍👦".as_bytes());
-	assert_eq!(t.cells[0].ch, 'e');
-	assert_eq!(t.cells[0].combining[0], '\u{301}');
-	assert_eq!(t.cells[1].ch, '👨');
-	assert_eq!(t.cells[1].width, 2);
-	assert!(t.cells[1].combining[..t.cells[1].combining_len as usize].contains(&'👩'));
+	assert_eq!(cell(&t, 0).ch, 'e');
+	assert_eq!(t.marks(&cell(&t, 0)), ['\u{301}']);
+	assert_eq!(cell(&t, 1).ch, '👨');
+	assert_eq!(cell(&t, 1).width, 2);
+	assert!(t.marks(&cell(&t, 1)).contains(&'👩'));
 }
 
 #[test]
@@ -162,10 +167,15 @@ fn osc8_hyperlinks_are_attached_to_printed_cells_and_can_be_closed() {
 		&mut t,
 		b"\x1b]8;id=docs;https://example.com/docs\x1b\\docs\x1b]8;;\x1b\\ plain",
 	);
-	let link = t.cells[0].hyperlink;
-	assert_ne!(link, 0);
-	assert_eq!(t.hyperlinks[link as usize], "https://example.com/docs");
-	assert_eq!(t.cells[5].hyperlink, 0);
+	assert_eq!(
+		t.hyperlink_uri(&cell(&t, 0)),
+		Some("https://example.com/docs")
+	);
+	assert_eq!(
+		t.hyperlink_uri(&cell(&t, 3)),
+		Some("https://example.com/docs")
+	);
+	assert_eq!(t.hyperlink_uri(&cell(&t, 5)), None);
 }
 
 #[test]
@@ -232,7 +242,7 @@ fn randomized_control_streams_keep_grid_and_cursor_in_bounds() {
 		if index % 37 == 0 {
 			t.resize((state as usize % 20) + 1, (state as usize % 8) + 1);
 		}
-		assert_eq!(t.cells.len(), t.cols * t.rows);
+		assert_grid_shape(&t);
 		assert!(t.cx < t.cols && t.cy < t.rows);
 		assert!(t.scroll_top <= t.scroll_bottom && t.scroll_bottom < t.rows);
 	}
@@ -256,20 +266,20 @@ fn erase_and_resize_do_not_leave_half_wide_characters() {
 	let mut t = terminal(4, 2);
 	feed(&mut t, "猫猫".as_bytes());
 	feed(&mut t, b"\x1b[2G\x1b[X");
-	assert_eq!(t.cells[0].ch, ' ');
-	assert_eq!(t.cells[1].width, 1);
+	assert_eq!(cell(&t, 0).ch, ' ');
+	assert_eq!(cell(&t, 1).width, 1);
 	t.resize(3, 2);
-	assert_eq!(t.cells[2].ch, ' ');
-	assert_eq!(t.cells[2].width, 1);
+	assert_eq!(cell(&t, 2).ch, ' ');
+	assert_eq!(cell(&t, 2).width, 1);
 }
 
 #[test]
 fn truecolor_colon_and_semicolon_forms_match() {
 	let mut t = terminal(10, 2);
 	feed(&mut t, b"\x1b[38;2;12;34;56mA\x1b[38:2::12:34:56mB\x1b[38:2:12:34:56mC\x1b[48:2::9:8:7mD\x1b[38:5:196mE");
-	assert!(t.cells[..3].iter().all(|c| c.fg == 0x0c2238));
-	assert_eq!(t.cells[3].bg, 0x090807);
-	assert_eq!(t.cells[4].fg, 0xff0000);
+	assert!(t.grid[0][..3].iter().all(|c| c.fg == 0x0c2238));
+	assert_eq!(cell(&t, 3).bg, 0x090807);
+	assert_eq!(cell(&t, 4).fg, 0xff0000);
 }
 
 #[test]
@@ -280,16 +290,16 @@ fn stateful_vte_parser_handles_fragmented_controls_and_invalid_utf8() {
 		parser.advance(&mut t, &[*byte]);
 	}
 	assert_eq!(t.title, "fragmented title");
-	assert_eq!(t.cells[6].ch, '🐈');
-	assert_eq!(t.cells[8].ch, '�');
-	assert_eq!(t.cells[9].ch, 'X');
+	assert_eq!(cell(&t, 6).ch, '🐈');
+	assert_eq!(cell(&t, 8).ch, '�');
+	assert_eq!(cell(&t, 9).ch, 'X');
 }
 
 #[test]
 fn osc_palette_and_default_color_queries_are_answered() {
 	let mut t = terminal(8, 2);
 	feed(&mut t, b"\x1b]4;1;#123456\x07\x1b[31mA");
-	assert_eq!(t.cells[0].fg, 0x123456);
+	assert_eq!(cell(&t, 0).fg, 0x123456);
 	feed(&mut t, b"\x1b]4;1;?\x1b\\\x1b]10;?\x07");
 	assert_eq!(t.responses[0], b"\x1b]4;1;rgb:12/34/56\x1b\\");
 	assert_eq!(
@@ -310,17 +320,17 @@ fn osc_palette_and_default_color_queries_are_answered() {
 fn osc_palette_supports_extended_slots_and_reset() {
 	let mut t = terminal(8, 2);
 	feed(&mut t, b"\x1b]4;196;rgb:12/34/56\x07\x1b[38;5;196mX");
-	assert_eq!(t.cells[0].fg, 0x123456);
+	assert_eq!(cell(&t, 0).fg, 0x123456);
 	feed(&mut t, b"\x1b]104;196\x07\x1b[38;5;196mY");
-	assert_ne!(t.cells[1].fg, 0x123456);
+	assert_ne!(cell(&t, 1).fg, 0x123456);
 }
 
 #[test]
 fn sgr_extended_styles_clear_independently() {
 	let mut t = terminal(8, 2);
 	feed(&mut t, b"\x1b[4:2;5;53mA\x1b[24;25;55mB");
-	assert_eq!(t.cells[0].attrs & (4 | 32 | 64 | 128), 4 | 32 | 64 | 128);
-	assert_eq!(t.cells[1].attrs & (4 | 32 | 64 | 128), 0);
+	assert_eq!(cell(&t, 0).attrs & (4 | 32 | 64 | 128), 4 | 32 | 64 | 128);
+	assert_eq!(cell(&t, 1).attrs & (4 | 32 | 64 | 128), 0);
 }
 
 #[test]
@@ -336,10 +346,10 @@ fn ansi_insert_mode_shifts_cells_at_the_cursor() {
 fn text_styles_are_set_and_reset_independently() {
 	let mut t = terminal(8, 2);
 	feed(&mut t, b"\x1b[2;3;4;9mA\x1b[22;23;24;29mB\x1b[8mC\x1b[0mD");
-	assert_eq!(t.cells[0].attrs, 1 | 2 | 4 | 16);
-	assert_eq!(t.cells[1].attrs, 0);
-	assert_eq!(t.cells[2].fg, t.cells[2].bg);
-	assert_eq!(t.cells[3].attrs, 0);
+	assert_eq!(cell(&t, 0).attrs, 1 | 2 | 4 | 16);
+	assert_eq!(cell(&t, 1).attrs, 0);
+	assert_eq!(cell(&t, 2).fg, cell(&t, 2).bg);
+	assert_eq!(cell(&t, 3).attrs, 0);
 }
 
 #[test]
@@ -431,9 +441,9 @@ fn sixel_obeys_sync_and_alternate_screen_boundaries() {
 fn saved_cursor_restores_styles_and_coordinates() {
 	let mut t = terminal(8, 3);
 	feed(&mut t, b"\x1b[31;4mAB\x1b7\x1b[0m\x1b[3;8H\x1b8C");
-	assert_eq!(t.cells[2].ch, 'C');
-	assert_eq!(t.cells[2].fg, t.palette[1]);
-	assert_eq!(t.cells[2].attrs, 4);
+	assert_eq!(cell(&t, 2).ch, 'C');
+	assert_eq!(cell(&t, 2).fg, t.palette[1]);
+	assert_eq!(cell(&t, 2).attrs, 4);
 	assert_eq!((t.cx, t.cy), (3, 0));
 }
 
@@ -486,4 +496,9 @@ fn mode_queries_report_set_and_reset_states() {
 	assert_eq!(t.responses.remove(0), b"\x1b[?2004;1$y");
 	assert_eq!(t.responses.remove(0), b"\x1b[?1006;2$y");
 	assert_eq!(t.responses.remove(0), b"\x1b[?9999;0$y");
+}
+
+#[test]
+fn cells_stay_compact() {
+	assert_eq!(std::mem::size_of::<Cell>(), 16);
 }

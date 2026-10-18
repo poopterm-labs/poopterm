@@ -1,5 +1,7 @@
 //! Printable characters and C0/C1 control execution.
-use crate::term::{Cell, Term, attr};
+use std::sync::Arc;
+
+use crate::term::{Cell, NO_EXTRA, Term, attr};
 use unicode_width::UnicodeWidthChar;
 
 impl Term {
@@ -11,29 +13,7 @@ impl Term {
 			c
 		};
 		let width = c.width().unwrap_or(0).min(self.cols);
-		let mut previous = if self.wrap_pending {
-			self.idx(self.cx, self.cy)
-		} else if self.cx > 0 {
-			self.idx(self.cx - 1, self.cy)
-		} else {
-			usize::MAX
-		};
-		if previous < self.cells.len() && self.cells[previous].width == 0 {
-			previous = previous.saturating_sub(1);
-		}
-		let joins_previous = previous < self.cells.len()
-			&& self.cells[previous].combining_len > 0
-			&& self.cells[previous].combining[self.cells[previous].combining_len as usize - 1]
-				== '\u{200d}';
-		if (width == 0 || joins_previous) && previous < self.cells.len() {
-			let cell = &mut self.cells[previous];
-			if (width == 0 || joins_previous) && (cell.combining_len as usize) < cell.combining.len() {
-				cell.combining[cell.combining_len as usize] = c;
-				cell.combining_len += 1;
-			}
-			return;
-		}
-		if width == 0 {
+		if self.attach_to_previous(c, width) || width == 0 {
 			return;
 		}
 		if self.wrap_pending || self.cx + width > self.cols {
@@ -45,29 +25,48 @@ impl Term {
 			}
 		}
 		self.wrap_pending = false;
-		let i = self.idx(self.cx, self.cy);
+		let (x, y, cols) = (self.cx, self.cy, self.cols);
+		let i = self.idx(x, y);
 		if self.insert_mode {
-			let count = width.min(self.cols - self.cx);
-			let row_end = (self.cy + 1) * self.cols;
-			self.cells.copy_within(i..row_end - count, i + count);
+			let count = width.min(cols - x);
+			self.grid[y].copy_within(x..cols - count, x + count);
 			self.clear_range(i, i + count);
-			self.repair_wide_row(self.cy);
+			self.repair_wide_rows(y, y + 1);
 		}
 		self.erase_images(i, i + width);
+		let blank = self.blank();
+		let row = &mut self.grid[y];
 		// Remove both halves when overwriting a wide character.
-		if self.cells[i].width == 0 && self.cx > 0 {
-			self.cells[i - 1] = self.blank();
+		if row[x].width == 0 && x > 0 {
+			row[x - 1] = blank;
 		}
-		if self.cells[i].width == 2 && self.cx + 1 < self.cols {
-			self.cells[i + 1] = self.blank();
+		if row[x].width == 2 && x + 1 < cols {
+			row[x + 1] = blank;
 		}
-		if width == 2
-			&& self.cx + 1 < self.cols
-			&& self.cells[i + 1].width == 2
-			&& self.cx + 2 < self.cols
-		{
-			self.cells[i + 2] = self.blank();
+		if width == 2 && x + 2 < cols && row[x + 1].width == 2 {
+			row[x + 2] = blank;
 		}
+		let template = self.styled_cell();
+		let row = &mut self.grid[y];
+		row[x] = Cell {
+			ch: c,
+			width: width as u8,
+			..template
+		};
+		if width == 2 && x + 1 < cols {
+			row[x + 1] = Cell {
+				width: 0,
+				..template
+			};
+		}
+		self.wrap_pending = x + width >= cols;
+		self.cx = (x + width).min(cols - 1);
+	}
+
+	/// A blank cell carrying the current colors and attributes, with bold
+	/// brightening, reverse video, dim and conceal already applied.
+	#[inline]
+	pub(crate) fn styled_cell(&self) -> Cell {
 		let mut fg = self.fg;
 		let mut bg = self.bg;
 		if self.bold
@@ -84,30 +83,39 @@ impl Term {
 		if self.attrs & attr::CONCEAL != 0 {
 			fg = bg;
 		}
-		self.cells[i] = Cell {
+		Cell {
 			attrs: self.attrs,
-			ch: c,
-			combining: ['\0'; 8],
-			combining_len: 0,
 			fg,
 			bg,
-			width: width as u8,
-			hyperlink: self.active_hyperlink,
-		};
-		if width == 2 && self.cx + 1 < self.cols {
-			self.cells[i + 1] = Cell {
-				attrs: self.attrs,
-				ch: ' ',
-				combining: ['\0'; 8],
-				combining_len: 0,
-				fg,
-				bg,
-				width: 0,
-				hyperlink: self.active_hyperlink,
-			};
+			extra: self.active_extra,
+			..Cell::default()
 		}
-		self.wrap_pending = self.cx + width >= self.cols;
-		self.cx = (self.cx + width).min(self.cols - 1);
+	}
+
+	/// Appends zero-width marks (and anything after a ZWJ) to the previous
+	/// cell's cluster. Returns true when `c` was consumed that way.
+	#[inline]
+	fn attach_to_previous(&mut self, c: char, width: usize) -> bool {
+		let mut x = if self.wrap_pending {
+			self.cx
+		} else if self.cx > 0 {
+			self.cx - 1
+		} else {
+			return false;
+		};
+		let row = &self.grid[self.cy];
+		if row[x].width == 0 {
+			x = x.saturating_sub(1);
+		}
+		let extra = row[x].extra;
+		// Fast path: most cells have no marks, so nothing can join them.
+		if width != 0 && (extra == NO_EXTRA || self.extras.marks(extra).last() != Some(&'\u{200d}')) {
+			return false;
+		}
+		if let Some(id) = Arc::make_mut(&mut self.extras).with_mark(extra, c) {
+			self.grid[self.cy][x].extra = id;
+		}
+		true
 	}
 
 	#[inline]

@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
 	sixel,
-	term::{Cell, Term, attr},
+	term::{Cell, NO_EXTRA, Term, attr},
 	ui::selection::CellPoint,
 };
 
@@ -92,7 +92,7 @@ fn draw_cell(
 	if cell.attrs & attr::STRIKE != 0 {
 		p.rect(x0, y0 + ch / 2, cw, line, fg);
 	}
-	if (cell.ch == ' ' && cell.combining_len == 0) || cell.width == 0 {
+	if (cell.ch == ' ' && cell.extra == NO_EXTRA) || cell.width == 0 {
 		return;
 	}
 	let span = cw * cell.width as usize;
@@ -103,7 +103,10 @@ fn draw_cell(
 	);
 	let italic = cell.attrs & attr::ITALIC != 0;
 	p.glyph(glyph, origin, (x0 as i32, (x0 + span) as i32), italic, fg);
-	if cell.hyperlink != 0 {
+	if cell.extra == NO_EXTRA {
+		return;
+	}
+	if view.term.hyperlink_uri(cell).is_some() {
 		p.rect(
 			x0,
 			y0 + ch.saturating_sub(2 * view.scale),
@@ -112,7 +115,7 @@ fn draw_cell(
 			view.link_color,
 		);
 	}
-	for &mark in &cell.combining[..cell.combining_len as usize] {
+	for &mark in view.term.marks(cell) {
 		if mark == '\u{200d}' || mark == '\u{fe0f}' {
 			continue;
 		}

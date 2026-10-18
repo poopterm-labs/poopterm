@@ -1,4 +1,6 @@
 //! Terminal grid, scrollback, cursor and screen state.
+mod extras;
+mod grid;
 mod images;
 mod screen;
 mod sync;
@@ -6,6 +8,8 @@ mod sync;
 mod tests;
 
 use crate::theme::Theme;
+pub(crate) use extras::NONE as NO_EXTRA;
+pub(crate) use grid::Grid;
 
 use std::{collections::VecDeque, path::PathBuf, sync::Arc, time::Instant};
 
@@ -21,18 +25,30 @@ pub(crate) mod attr {
 	pub const DOUBLE_UNDERLINE: u8 = 128;
 }
 
-/// One grid cell. `width` is 1 for normal, 2 for the left half of a wide
-/// character and 0 for its right-half spacer.
-#[derive(Clone, Copy)]
+/// One grid cell (16 bytes). `width` is 1 for normal, 2 for the left half
+/// of a wide character and 0 for its right-half spacer. Combining marks and
+/// hyperlinks live in [`Term::extras`], referenced by `extra`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Cell {
-	pub(crate) attrs: u8,
 	pub(crate) ch: char,
-	pub(crate) combining: [char; 8],
-	pub(crate) combining_len: u8,
 	pub(crate) fg: u32,
 	pub(crate) bg: u32,
+	pub(crate) attrs: u8,
 	pub(crate) width: u8,
-	pub(crate) hyperlink: u16,
+	pub(crate) extra: u16,
+}
+
+impl Default for Cell {
+	fn default() -> Self {
+		Self {
+			attrs: 0,
+			ch: ' ',
+			fg: 0,
+			bg: 0,
+			width: 1,
+			extra: extras::NONE,
+		}
+	}
 }
 
 #[derive(Clone, Copy)]
@@ -64,11 +80,12 @@ pub(crate) struct Term {
 	pub(crate) history_base: usize,
 	pub(crate) cols: usize,
 	pub(crate) rows: usize,
-	pub(crate) cells: Vec<Cell>,
+	/// The visible screen.
+	pub(crate) grid: Grid,
 	pub(crate) scrollback: VecDeque<Arc<Vec<Cell>>>,
 	pub(crate) scrollback_limit: usize,
 	pub(crate) scroll_offset: usize,
-	pub(crate) primary_screen: Option<(Vec<Cell>, usize, usize, u32, u32)>,
+	pub(crate) primary_screen: Option<(Grid, usize, usize, u32, u32)>,
 	pub(crate) primary_modes: Option<(usize, usize, bool, bool)>,
 	pub(crate) cursor_visible: bool,
 	pub(crate) default_fg: u32,
@@ -91,6 +108,11 @@ pub(crate) struct Term {
 	pub(crate) insert_mode: bool,
 	pub(crate) kitty_keyboard: bool,
 	pub(crate) active_hyperlink: u16,
+	/// `extra` id applied to printed cells while a hyperlink is active.
+	pub(crate) active_extra: u16,
+	/// Combining marks and hyperlinks referenced by [`Cell::extra`]. Shared
+	/// copy-on-write with synchronized-output snapshots.
+	pub(crate) extras: Arc<extras::Extras>,
 	pub(crate) hyperlinks: Vec<String>,
 	pub(crate) wrap_pending: bool,
 	pub(crate) charsets: [bool; 2],
@@ -151,10 +173,7 @@ impl Term {
 			self.scrollback.get(row).map(|line| line.as_slice())
 		} else {
 			let row = row - self.scrollback.len();
-			(row < self.rows).then(|| {
-				let start = row * self.cols;
-				&self.cells[start..start + self.cols]
-			})
+			(row < self.rows).then(|| self.grid[row].as_slice())
 		}
 	}
 
@@ -171,12 +190,16 @@ impl Term {
 				}
 			}
 		};
-		recolor(&mut self.cells);
+		for row in self.grid.iter_mut() {
+			recolor(row);
+		}
 		for line in &mut self.scrollback {
 			recolor(Arc::make_mut(line).as_mut_slice());
 		}
-		if let Some((cells, _, _, fg, bg)) = &mut self.primary_screen {
-			recolor(cells);
+		if let Some((grid, _, _, fg, bg)) = &mut self.primary_screen {
+			for row in grid.iter_mut() {
+				recolor(row);
+			}
 			if *fg == old_fg {
 				*fg = theme.fg;
 			}
@@ -201,12 +224,10 @@ impl Term {
 		Cell {
 			attrs: self.attrs,
 			ch: ' ',
-			combining: ['\0'; 8],
-			combining_len: 0,
 			fg: self.fg,
 			bg: self.bg,
 			width: 1,
-			hyperlink: 0,
+			extra: extras::NONE,
 		}
 	}
 
@@ -226,19 +247,15 @@ impl Term {
 			history_base: 0,
 			cols,
 			rows,
-			cells: vec![
+			grid: Grid::new(
+				cols,
+				rows,
 				Cell {
-					attrs: 0,
-					ch: ' ',
-					combining: ['\0'; 8],
-					combining_len: 0,
 					fg: theme.fg,
 					bg: theme.bg,
-					width: 1,
-					hyperlink: 0,
-				};
-				cols * rows
-			],
+					..Cell::default()
+				},
+			),
 			scrollback: VecDeque::new(),
 			scrollback_limit: 5000,
 			scroll_offset: 0,
@@ -265,6 +282,8 @@ impl Term {
 			insert_mode: false,
 			kitty_keyboard: false,
 			active_hyperlink: 0,
+			active_extra: extras::NONE,
+			extras: Arc::default(),
 			hyperlinks: vec![String::new()],
 			wrap_pending: false,
 			charsets: [false; 2],
@@ -286,5 +305,16 @@ impl Term {
 	#[inline(always)]
 	pub(crate) fn idx(&self, x: usize, y: usize) -> usize {
 		y * self.cols + x
+	}
+
+	/// Combining marks attached to `cell`.
+	pub(crate) fn marks(&self, cell: &Cell) -> &[char] {
+		self.extras.marks(cell.extra)
+	}
+
+	/// The OSC 8 target of `cell`, if any.
+	pub(crate) fn hyperlink_uri(&self, cell: &Cell) -> Option<&str> {
+		let link = self.extras.hyperlink(cell.extra);
+		(link != 0).then(|| self.hyperlinks.get(link as usize).map(String::as_str))?
 	}
 }

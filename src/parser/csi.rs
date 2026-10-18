@@ -183,10 +183,10 @@ impl Term {
 			'J' => match raw0 {
 				0 => {
 					let from = self.idx(self.cx, self.cy);
-					self.clear_range(from, self.cells.len());
+					self.clear_range(from, self.rows * self.cols);
 				}
 				1 => self.clear_range(0, self.idx(self.cx + 1, self.cy)),
-				2 => self.clear_range(0, self.cells.len()),
+				2 => self.clear_range(0, self.rows * self.cols),
 				3 => {
 					self.history_base = self.history_base.saturating_add(self.scrollback.len());
 					self.scrollback.clear();
@@ -207,17 +207,17 @@ impl Term {
 			'@' => {
 				self.erase_images(self.cy * self.cols, (self.cy + 1) * self.cols);
 				let count = p(0, 1).min(self.cols - self.cx);
-				let start = self.idx(self.cx, self.cy);
-				let end = self.idx(self.cols - count, self.cy);
-				self.cells.copy_within(start..end, start + count);
+				let (x, cols) = (self.cx, self.cols);
+				self.grid[self.cy].copy_within(x..cols - count, x + count);
+				let start = self.idx(x, self.cy);
 				self.clear_range(start, start + count);
 			}
 			'P' => {
 				self.erase_images(self.cy * self.cols, (self.cy + 1) * self.cols);
 				let count = p(0, 1).min(self.cols - self.cx);
-				let start = self.idx(self.cx, self.cy);
-				let end = self.idx(self.cols, self.cy);
-				self.cells.copy_within(start + count..end, start);
+				let (x, cols) = (self.cx, self.cols);
+				self.grid[self.cy].copy_within(x + count..cols, x);
+				let end = self.idx(cols, self.cy);
 				self.clear_range(end - count, end);
 			}
 			'X' => {
@@ -228,18 +228,11 @@ impl Term {
 				self.erase_images(self.cy * self.cols, (self.scroll_bottom + 1) * self.cols);
 				let bottom = self.scroll_bottom.max(self.cy).min(self.rows - 1);
 				let count = p(0, 1).min(bottom + 1 - self.cy);
-				let start = self.cy * self.cols;
-				let end = (bottom + 1) * self.cols;
+				let blank = self.blank();
 				if action == 'L' {
-					self
-						.cells
-						.copy_within(start..end - count * self.cols, start + count * self.cols);
-					self.clear_range(start, start + count * self.cols);
+					self.grid.scroll_down(self.cy, bottom, count, blank);
 				} else {
-					self
-						.cells
-						.copy_within(start + count * self.cols..end, start);
-					self.clear_range(end - count * self.cols, end);
+					self.grid.scroll_up(self.cy, bottom, count, blank, Some);
 				}
 			}
 			'm' => self.sgr(params),
@@ -253,8 +246,12 @@ impl Term {
 			'c' => self.responses.push(b"\x1b[?62;4;6c".to_vec()),
 			_ => {}
 		}
-		if matches!(action, '@' | 'P' | 'X' | 'J' | 'K') {
-			self.repair_wide_cells();
+		// Erasing or shifting can split a wide character from its spacer.
+		match action {
+			'@' | 'P' | 'X' | 'K' => self.repair_wide_rows(self.cy, self.cy + 1),
+			// Rows other than the cursor's are erased completely.
+			'J' if raw0 <= 1 => self.repair_wide_rows(self.cy, self.cy + 1),
+			_ => {}
 		}
 	}
 }

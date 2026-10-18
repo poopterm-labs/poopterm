@@ -25,18 +25,10 @@ impl App {
 		let selection = self.selection?;
 		let (start, end) = selection.ordered();
 		let term = self.active_term();
-		let history_len = term.scrollback.len();
 		let mut result = String::new();
 		for row in start.row..=end.row {
-			let cells = if row < history_len {
-				term.scrollback.get(row)?.as_slice()
-			} else {
-				let screen_row = row - history_len;
-				if screen_row >= term.rows {
-					break;
-				}
-				let begin = screen_row * term.cols;
-				&term.cells[begin..begin + term.cols]
+			let Some(cells) = term.row_cells(row) else {
+				break;
 			};
 			let from = if row == start.row { start.col } else { 0 };
 			let to = if row == end.row {
@@ -47,7 +39,7 @@ impl App {
 			for cell in cells.iter().take(to + 1).skip(from) {
 				if cell.width != 0 {
 					result.push(cell.ch);
-					result.extend(cell.combining.iter().take(cell.combining_len as usize));
+					result.extend(term.marks(cell));
 				}
 			}
 			if row != end.row {
@@ -69,7 +61,8 @@ impl App {
 	}
 
 	pub(super) fn token_at(&self, point: CellPoint) -> Option<String> {
-		let cells = self.active_term().row_cells(point.row)?;
+		let term = self.active_term();
+		let cells = term.row_cells(point.row)?;
 		if point.col >= cells.len() || cells[point.col].ch.is_whitespace() {
 			return None;
 		}
@@ -86,15 +79,7 @@ impl App {
 			cells[start..end]
 				.iter()
 				.filter(|cell| cell.width != 0)
-				.flat_map(|cell| {
-					std::iter::once(cell.ch).chain(
-						cell
-							.combining
-							.iter()
-							.take(cell.combining_len as usize)
-							.copied(),
-					)
-				})
+				.flat_map(|cell| std::iter::once(cell.ch).chain(term.marks(cell).iter().copied()))
 				.collect::<String>()
 				.trim_matches(|ch: char| matches!(ch, ')' | ']' | '}' | ',' | '.' | ';' | ':'))
 				.to_owned(),
@@ -112,9 +97,9 @@ impl App {
 		let explicit = term
 			.row_cells(point.row)
 			.and_then(|cells| cells.get(point.col))
-			.and_then(|cell| term.hyperlinks.get(cell.hyperlink as usize))
+			.and_then(|cell| term.hyperlink_uri(cell))
 			.filter(|uri| !uri.is_empty());
-		let token = explicit.map(String::as_str).unwrap_or(&token);
+		let token = explicit.unwrap_or(&token);
 		if token.starts_with("https://") || token.starts_with("http://") {
 			if let Err(error) = open_external(token) {
 				eprintln!("poopterm: could not open link: {error}");

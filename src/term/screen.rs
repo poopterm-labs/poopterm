@@ -1,7 +1,7 @@
 //! Grid geometry: resize, scrolling, alternate screen and erasing.
 use std::sync::Arc;
 
-use super::Term;
+use super::{Term, grid::Grid};
 
 impl Term {
 	pub(crate) fn resize(&mut self, cols: usize, rows: usize) {
@@ -9,22 +9,16 @@ impl Term {
 		let cols = cols.max(1);
 		let rows = rows.max(1);
 		let blank = self.blank();
-		let mut new = vec![blank; cols * rows];
-		let (old_cols, old_rows) = (self.cols, self.rows);
-		for y in 0..rows.min(old_rows) {
-			for x in 0..cols.min(old_cols) {
-				new[y * cols + x] = self.cells[y * old_cols + x];
-			}
-		}
-		self.cells = new;
+		let old_cols = self.cols;
+		self.grid.resize(cols, rows, blank);
 		self.tab_stops.resize_with(cols, || false);
 		for (col, val) in self.tab_stops.iter_mut().enumerate().skip(old_cols) {
 			*val = col > 0 && col % 8 == 0;
 		}
 		for line in &mut self.scrollback {
-			let line = Arc::make_mut(line);
-			line.resize(cols, blank);
-			line.truncate(cols);
+			if line.len() != cols {
+				Arc::make_mut(line).resize(cols, blank);
+			}
 		}
 		self.cols = cols;
 		self.rows = rows;
@@ -32,13 +26,7 @@ impl Term {
 		self.scroll_top = 0;
 		self.scroll_bottom = rows.saturating_sub(1);
 		if let Some((primary, cx, cy, ..)) = &mut self.primary_screen {
-			let mut resized = vec![blank; cols * rows];
-			for y in 0..rows.min(old_rows) {
-				for x in 0..cols.min(old_cols) {
-					resized[y * cols + x] = primary[y * old_cols + x];
-				}
-			}
-			*primary = resized;
+			primary.resize(cols, rows, blank);
 			*cx = (*cx).min(cols - 1);
 			*cy = (*cy).min(rows - 1);
 		}
@@ -47,27 +35,21 @@ impl Term {
 		if let Some(modes) = &mut self.primary_modes {
 			modes.3 = false;
 		}
-		self.repair_wide_cells();
+		self.repair_wide_rows(0, rows);
 	}
 
-	pub(crate) fn repair_wide_cells(&mut self) {
-		for y in 0..self.rows {
-			self.repair_wide_row(y);
-		}
-	}
-
-	pub(crate) fn repair_wide_row(&mut self, y: usize) {
-		if y >= self.rows {
-			return;
-		}
-		let row_start = y * self.cols;
-		let row = &mut self.cells[row_start..row_start + self.cols];
-		for col in 0..row.len() {
-			if (row[col].width == 0 && (col == 0 || row[col - 1].width != 2))
-				|| (row[col].width == 2 && (col + 1 == row.len() || row[col + 1].width != 0))
-			{
-				row[col].ch = ' ';
-				row[col].width = 1;
+	/// Blanks orphaned halves of wide characters in rows `top..bottom`, e.g.
+	/// after an erase or shift split a character from its spacer.
+	pub(crate) fn repair_wide_rows(&mut self, top: usize, bottom: usize) {
+		for y in top..bottom.min(self.rows) {
+			let row = &mut self.grid[y];
+			for col in 0..row.len() {
+				if (row[col].width == 0 && (col == 0 || row[col - 1].width != 2))
+					|| (row[col].width == 2 && (col + 1 == row.len() || row[col + 1].width != 0))
+				{
+					row[col].ch = ' ';
+					row[col].width = 1;
+				}
 			}
 		}
 	}
@@ -101,7 +83,7 @@ impl Term {
 			self.wrap_pending = false;
 			let blank = self.blank();
 			self.primary_screen = Some((
-				std::mem::replace(&mut self.cells, vec![blank; self.cols * self.rows]),
+				std::mem::replace(&mut self.grid, Grid::new(self.cols, self.rows, blank)),
 				self.cx,
 				self.cy,
 				self.fg,
@@ -110,9 +92,9 @@ impl Term {
 			self.cx = 0;
 			self.cy = 0;
 			self.scroll_offset = 0;
-		} else if !enabled && let Some((cells, cx, cy, fg, bg)) = self.primary_screen.take() {
+		} else if !enabled && let Some((grid, cx, cy, fg, bg)) = self.primary_screen.take() {
 			self.images = std::mem::take(&mut self.primary_images);
-			self.cells = cells;
+			self.grid = grid;
 			self.cx = cx;
 			self.cy = cy;
 			self.fg = fg;
@@ -124,7 +106,7 @@ impl Term {
 				self.wrap_pending = wrap;
 			}
 			self.scroll_offset = 0;
-			self.repair_wide_cells();
+			self.repair_wide_rows(0, self.rows);
 		}
 	}
 
@@ -137,68 +119,78 @@ impl Term {
 		}
 	}
 
+	/// Scrolls the scroll region up. When the region is the whole primary
+	/// screen, rows leaving the top move into the scrollback.
 	pub(crate) fn scroll_region_up(&mut self, count: usize) {
-		self.scroll_images(-(count.min(self.scroll_bottom - self.scroll_top + 1) as isize));
-		let count = count.min(self.scroll_bottom - self.scroll_top + 1);
-		let start = self.scroll_top * self.cols;
-		let end = (self.scroll_bottom + 1) * self.cols;
-		let history = if self.scroll_top == 0
-			&& self.scroll_bottom + 1 == self.rows
-			&& self.primary_screen.is_none()
-		{
-			(0..count)
-				.map(|row| {
-					let from = start + row * self.cols;
-					Arc::new(self.cells[from..from + self.cols].to_vec())
-				})
-				.collect::<Vec<_>>()
-		} else {
-			Vec::new()
-		};
-		self
-			.cells
-			.copy_within(start + count * self.cols..end, start);
+		let (top, bottom) = (self.scroll_top, self.scroll_bottom);
+		let count = count.min(bottom - top + 1);
+		self.scroll_images(-(count as isize));
 		let blank = self.blank();
-		self.cells[end - count * self.cols..end].fill(blank);
-		if self.scroll_offset > 0 {
-			self.scroll_offset += history.len();
+		if top != 0 || bottom + 1 != self.rows || self.primary_screen.is_some() {
+			self.grid.scroll_up(top, bottom, count, blank, Some);
+			return;
 		}
-		self.scrollback.extend(history);
-		self.trim_scrollback();
+		let Self {
+			grid,
+			scrollback,
+			scrollback_limit,
+			history_base,
+			..
+		} = self;
+		grid.scroll_up(top, bottom, count, blank, |row| {
+			scrollback.push_back(Arc::new(row));
+			let mut reusable = None;
+			while scrollback.len() > *scrollback_limit {
+				*history_base = history_base.saturating_add(1);
+				// Reuse an evicted line's buffer unless a snapshot still shares it.
+				reusable = scrollback
+					.pop_front()
+					.and_then(|old| Arc::try_unwrap(old).ok());
+			}
+			reusable
+		});
+		if self.scroll_offset > 0 {
+			self.scroll_offset += count;
+		}
+		self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
 	}
 
 	/// Changes the history limit, discarding the oldest lines that no longer fit.
 	pub(crate) fn set_scrollback_limit(&mut self, limit: usize) {
 		self.scrollback_limit = limit;
-		self.trim_scrollback();
-	}
-
-	fn trim_scrollback(&mut self) {
-		let excess = self.scrollback.len().saturating_sub(self.scrollback_limit);
+		let excess = self.scrollback.len().saturating_sub(limit);
 		self.scrollback.drain(..excess);
 		self.history_base = self.history_base.saturating_add(excess);
 		self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
 	}
 
 	pub(crate) fn scroll_region_down(&mut self, count: usize) {
-		self.scroll_images(count.min(self.scroll_bottom - self.scroll_top + 1) as isize);
-		let count = count.min(self.scroll_bottom - self.scroll_top + 1);
-		let start = self.scroll_top * self.cols;
-		let end = (self.scroll_bottom + 1) * self.cols;
-		self
-			.cells
-			.copy_within(start..end - count * self.cols, start + count * self.cols);
+		let (top, bottom) = (self.scroll_top, self.scroll_bottom);
+		let count = count.min(bottom - top + 1);
+		self.scroll_images(count as isize);
 		let blank = self.blank();
-		self.cells[start..start + count * self.cols].fill(blank);
+		self.grid.scroll_down(top, bottom, count, blank);
 	}
 
-	#[inline]
+	/// Blanks cells in the flat range `from..to` (index `y * cols + x`) with
+	/// the current background, removing images that overlap it.
 	pub(crate) fn clear_range(&mut self, from: usize, to: usize) {
 		self.erase_images(from, to);
-		let end = to.min(self.cells.len());
-		if from < end {
-			let blank = self.blank();
-			self.cells[from..end].fill(blank);
+		let end = to.min(self.rows * self.cols);
+		if from >= end {
+			return;
+		}
+		let blank = self.blank();
+		let cols = self.cols;
+		let (first, last) = (from / cols, (end - 1) / cols);
+		for y in first..=last {
+			let start = if y == first { from % cols } else { 0 };
+			let stop = if y == last {
+				(end - 1) % cols + 1
+			} else {
+				cols
+			};
+			self.grid[y][start..stop].fill(blank);
 		}
 	}
 }
