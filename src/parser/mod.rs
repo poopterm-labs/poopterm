@@ -116,3 +116,65 @@ impl Perform for Term {
 		}
 	}
 }
+
+#[cfg(test)]
+mod bench {
+	//! Parser-only throughput, excluding the PTY and rendering. Run with
+	//! `cargo test --release -- --ignored --nocapture parser_throughput`.
+	use super::Parser;
+	use crate::{
+		term::Term,
+		theme::{Theme, ThemeKind},
+	};
+	use std::time::Instant;
+
+	fn payload(kind: &str) -> Vec<u8> {
+		let mut seed = 0x2545_f491_u32;
+		let mut next = move || {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			seed
+		};
+		let mut out = Vec::with_capacity(64 << 20);
+		while out.len() < 64 << 20 {
+			match kind {
+				"ascii" => {
+					for _ in 0..40 + next() % 80 {
+						out.push(0x20 + (next() % 95) as u8);
+					}
+					out.extend_from_slice(b"\r\n");
+				}
+				"unicode" => out.extend_from_slice("héllo wörld 日本語 → λ 🙂 naïve ─┼─\r\n".as_bytes()),
+				_ => out.extend_from_slice(
+					format!(
+						"\x1b[{};{}mab\x1b[0m\x1b[38;2;{};{};{}mx",
+						30 + next() % 8,
+						40 + next() % 8,
+						next() % 256,
+						next() % 256,
+						next() % 256
+					)
+					.as_bytes(),
+				),
+			}
+		}
+		out
+	}
+
+	#[test]
+	#[ignore = "benchmark; run explicitly in release mode"]
+	fn parser_throughput() {
+		for kind in ["ascii", "unicode", "csi"] {
+			let data = payload(kind);
+			let mut term = Term::new(200, 50, Theme::from_kind(ThemeKind::Poop), "/".into());
+			let mut parser = Parser::new();
+			let start = Instant::now();
+			for chunk in data.chunks(1 << 16) {
+				parser.advance(&mut term, chunk);
+			}
+			let rate = data.len() as f64 / start.elapsed().as_secs_f64() / 1e6;
+			println!("parser {kind:<8} {rate:8.1} MB/s");
+		}
+	}
+}
