@@ -33,6 +33,12 @@ pub(crate) struct Session {
 }
 
 impl Session {
+	/// Sends input bytes to the shell.
+	pub(crate) fn write(&mut self, bytes: &[u8]) {
+		let _ = self.writer.write_all(bytes);
+		let _ = self.writer.flush();
+	}
+
 	/// The tab title: a user-chosen name, else the title set by the shell (OSC 0/2).
 	pub(crate) fn title(&self) -> &str {
 		self.custom_title.as_deref().unwrap_or(&self.term.title)

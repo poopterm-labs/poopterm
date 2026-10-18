@@ -216,9 +216,7 @@ impl App {
 			return;
 		}
 		if let Some(bytes) = encode_key(&event.logical_key, self.mods, self.key_modes()) {
-			let session = self.active_session_mut();
-			let _ = session.writer.write_all(&bytes);
-			let _ = session.writer.flush();
+			self.active_session_mut().write(&bytes);
 		}
 	}
 }

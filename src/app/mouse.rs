@@ -1,4 +1,5 @@
 use super::*;
+use crate::input::mouse::{MouseAction, MouseButtonCode, MouseReport, encode_mouse};
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
 
 impl App {
@@ -159,56 +160,44 @@ impl App {
 				if bracketed {
 					bytes.extend_from_slice(b"\x1b[201~");
 				}
-				let session = self.active_session_mut();
-				let _ = session.writer.write_all(&bytes);
-				let _ = session.writer.flush();
+				self.active_session_mut().write(&bytes);
 			}
 			Err(error) => eprintln!("poopterm: clipboard paste failed: {error}"),
 		}
 	}
 
+	/// Reports a mouse event to the application when it enabled mouse tracking.
+	/// Returns true when the event belongs to the application (even if it could
+	/// not be encoded), so the caller skips local selection and scrolling.
 	pub(super) fn send_mouse_report(
 		&mut self,
-		button: u8,
-		x: f64,
-		y: f64,
-		release: bool,
-		motion: bool,
+		button: MouseButtonCode,
+		kind: MouseAction,
+		(x, y): (f64, f64),
 	) -> bool {
 		let Some(point) = self.point_at(x, y) else {
 			return false;
 		};
 		let term = self.active_term();
-		if term.mouse_tracking == 0 {
-			return false;
-		}
-		if motion && term.mouse_tracking != 1002 && term.mouse_tracking != 1003 {
-			return false;
-		}
-		let code = button + if motion { 32 } else { 0 };
-		let visible_start = term.scrollback.len().saturating_sub(term.scroll_offset);
-		let (col, row) = (point.col + 1, point.row.saturating_sub(visible_start) + 1);
-		let payload = if term.mouse_sgr {
-			format!(
-				"\x1b[<{};{};{}{}",
-				code,
-				col,
-				row,
-				if release { "m" } else { "M" }
-			)
-		} else if col <= 223 && row <= 223 {
-			format!(
-				"\x1b[M{}{}{}",
-				(if release { 3 } else { code }) + 32,
-				col + 32,
-				row + 32
-			)
-		} else {
-			return true;
+		let wants = match kind {
+			MouseAction::Motion if button == MouseButtonCode::None => term.mouse_tracking == 1003,
+			MouseAction::Motion => matches!(term.mouse_tracking, 1002 | 1003),
+			_ => term.mouse_tracking != 0,
 		};
-		let session = self.active_session_mut();
-		let _ = session.writer.write_all(payload.as_bytes());
-		let _ = session.writer.flush();
+		if !wants {
+			return false;
+		}
+		let visible_start = term.scrollback.len().saturating_sub(term.scroll_offset);
+		let report = MouseReport {
+			button,
+			kind,
+			col: point.col + 1,
+			row: point.row.saturating_sub(visible_start) + 1,
+			mods: self.mods,
+		};
+		if let Some(bytes) = encode_mouse(report, term.mouse_sgr) {
+			self.active_session_mut().write(&bytes);
+		}
 		true
 	}
 
@@ -259,7 +248,15 @@ impl App {
 			}
 			return;
 		}
-		if self.send_mouse_report(if scroll_up { 64 } else { 65 }, x, y, false, false) {
+		if self.send_mouse_report(
+			if scroll_up {
+				MouseButtonCode::WheelUp
+			} else {
+				MouseButtonCode::WheelDown
+			},
+			MouseAction::Press,
+			(x, y),
+		) {
 			return;
 		}
 		let lines = match delta {
@@ -277,10 +274,9 @@ impl App {
 		self.cursor_pos = (position.x, position.y);
 		if self.selecting {
 			self.extend_selection(position.x, position.y);
-		} else if (self.active_term().mouse_tracking == 1003 || self.mouse_button_down)
-			&& self.send_mouse_report(0, position.x, position.y, false, true)
-		{
-			// Motion reporting is enabled by the running terminal application.
+		} else {
+			let button = self.held_button.unwrap_or(MouseButtonCode::None);
+			self.send_mouse_report(button, MouseAction::Motion, self.cursor_pos);
 		}
 		if (previous.1 < self.top as f64 || position.y < self.top as f64)
 			&& let Some(window) = &self.window
@@ -296,7 +292,13 @@ impl App {
 		button: MouseButton,
 	) {
 		let (x, y) = self.cursor_pos;
-		self.mouse_button_down = state == ElementState::Pressed;
+		let code = match button {
+			MouseButton::Left => MouseButtonCode::Left,
+			MouseButton::Middle => MouseButtonCode::Middle,
+			MouseButton::Right => MouseButtonCode::Right,
+			_ => return,
+		};
+		self.held_button = (state == ElementState::Pressed).then_some(code);
 		let tab_y = self.tab_y() as f64;
 		if state == ElementState::Pressed && button == MouseButton::Left && y < self.top as f64 {
 			let layout = self.tab_layout();
@@ -350,13 +352,12 @@ impl App {
 				let _ = window.drag_window();
 			}
 		} else {
-			let code = match button {
-				MouseButton::Left => 0,
-				MouseButton::Middle => 1,
-				MouseButton::Right => 2,
-				_ => 0,
+			let kind = if state == ElementState::Pressed {
+				MouseAction::Press
+			} else {
+				MouseAction::Release
 			};
-			let handled = self.send_mouse_report(code, x, y, state == ElementState::Released, false);
+			let handled = self.send_mouse_report(code, kind, (x, y));
 			if state == ElementState::Pressed && button == MouseButton::Left && !handled {
 				let link_click = (self.mods.ctrl || self.mods.super_key)
 					&& self.active_term().mouse_tracking == 0
