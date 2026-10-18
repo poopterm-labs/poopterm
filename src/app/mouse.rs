@@ -1,4 +1,5 @@
 use super::*;
+use crate::input::paste::paste_bytes;
 use crate::input::mouse::{MouseAction, MouseButtonCode, MouseReport, encode_mouse};
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
 
@@ -151,15 +152,7 @@ impl App {
 	pub(super) fn paste_clipboard(&mut self) {
 		match clipboard_read() {
 			Ok(text) => {
-				let bracketed = self.active_term().bracketed_paste;
-				let mut bytes = Vec::with_capacity(text.len() + 24);
-				if bracketed {
-					bytes.extend_from_slice(b"\x1b[200~");
-				}
-				bytes.extend_from_slice(text.as_bytes());
-				if bracketed {
-					bytes.extend_from_slice(b"\x1b[201~");
-				}
+				let bytes = paste_bytes(&text, self.active_term().bracketed_paste);
 				self.active_session_mut().write(&bytes);
 			}
 			Err(error) => eprintln!("poopterm: clipboard paste failed: {error}"),
