@@ -19,6 +19,13 @@ impl Term {
 				self.kitty_keyboard = params.iter().any(|p| p.first() == Some(&1));
 				return;
 			}
+			if action == 'c' && intermediates == b">" {
+				// Secondary DA: terminal type 0, version as MMmmpp, ROM cartridge 1.
+				self
+					.responses
+					.push(format!("\x1b[>0;{};1c", version_number()).into_bytes());
+				return;
+			}
 			if action == 'u' && intermediates == b"<" {
 				self.kitty_keyboard = false;
 				return;
@@ -250,4 +257,31 @@ impl Term {
 			self.repair_wide_cells();
 		}
 	}
+}
+
+impl Term {
+	/// The state of a DEC private mode for DECRQM, or `None` if unsupported.
+	pub(crate) fn private_mode(&self, mode: u16) -> Option<bool> {
+		Some(match mode {
+			1 => self.application_cursor,
+			6 => self.origin_mode,
+			7 => self.auto_wrap,
+			25 => self.cursor_visible,
+			47 | 1047 | 1049 => self.primary_screen.is_some(),
+			80 => self.sixel_scrolling,
+			1000 | 1002 | 1003 => self.mouse_tracking == mode,
+			1006 => self.mouse_sgr,
+			2004 => self.bracketed_paste,
+			_ => return None,
+		})
+	}
+}
+
+/// The crate version encoded as `major * 10000 + minor * 100 + patch`.
+fn version_number() -> u32 {
+	let mut parts = env!("CARGO_PKG_VERSION")
+		.split(['.', '-'])
+		.map(|part| part.parse::<u32>().unwrap_or(0));
+	let mut next = || parts.next().unwrap_or(0);
+	next() * 10_000 + next() * 100 + next()
 }

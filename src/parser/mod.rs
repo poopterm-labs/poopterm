@@ -82,10 +82,15 @@ impl Perform for Term {
 		if intermediates == b"?$" && action == 'p' {
 			for param in params.iter() {
 				let mode = param[0];
-				let status = if mode == 2026 {
-					if self.synchronized.is_some() { 1 } else { 2 }
+				let state = if mode == 2026 {
+					Some(self.synchronized.is_some())
 				} else {
-					0
+					self.pending().private_mode(mode)
+				};
+				let status = match state {
+					Some(true) => 1,
+					Some(false) => 2,
+					None => 0,
 				};
 				self
 					.responses

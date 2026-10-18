@@ -467,3 +467,20 @@ fn lowering_the_scrollback_limit_discards_oldest_lines_and_clamps_the_view() {
 	assert_eq!(t.history_base, 2);
 	assert_eq!(t.scroll_offset, 1);
 }
+
+#[test]
+fn secondary_device_attributes_are_answered() {
+	let mut t = terminal(10, 2);
+	feed(&mut t, b"\x1b[>c");
+	let reply = String::from_utf8(t.responses.pop().unwrap()).unwrap();
+	assert!(reply.starts_with("\x1b[>0;") && reply.ends_with(";1c"), "{reply:?}");
+}
+
+#[test]
+fn mode_queries_report_set_and_reset_states() {
+	let mut t = terminal(10, 2);
+	feed(&mut t, b"\x1b[?2004h\x1b[?2004$p\x1b[?1006$p\x1b[?9999$p");
+	assert_eq!(t.responses.remove(0), b"\x1b[?2004;1$y");
+	assert_eq!(t.responses.remove(0), b"\x1b[?1006;2$y");
+	assert_eq!(t.responses.remove(0), b"\x1b[?9999;0$y");
+}
