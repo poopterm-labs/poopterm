@@ -21,220 +21,224 @@ pub(crate) struct KeyModes {
 
 /// Encodes one key press, or returns `None` when the key produces no input.
 pub(crate) fn encode_key(key: &Key, mods: Modifiers, modes: KeyModes) -> Option<Vec<u8>> {
-	if modes.kitty {
-		let modifiers = 1
-			+ u8::from(mods.shift)
-			+ 2 * u8::from(mods.alt)
-			+ 4 * u8::from(mods.ctrl)
-			+ 8 * u8::from(mods.super_key);
-		let letter = match key {
-			Key::Named(NamedKey::ArrowUp) => Some('A'),
-			Key::Named(NamedKey::ArrowDown) => Some('B'),
-			Key::Named(NamedKey::ArrowRight) => Some('C'),
-			Key::Named(NamedKey::ArrowLeft) => Some('D'),
-			Key::Named(NamedKey::Home) => Some('H'),
-			Key::Named(NamedKey::End) => Some('F'),
-			_ => None,
-		};
-		if let Some(letter) = letter {
-			if modifiers > 1 {
-				return Some(format!("\x1b[1;{modifiers}{letter}").into_bytes());
-			}
-			return Some(match key {
-				Key::Named(NamedKey::ArrowUp) if modes.application_cursor => b"\x1bOA".to_vec(),
-				Key::Named(NamedKey::ArrowDown) if modes.application_cursor => b"\x1bOB".to_vec(),
-				Key::Named(NamedKey::ArrowRight) if modes.application_cursor => b"\x1bOC".to_vec(),
-				Key::Named(NamedKey::ArrowLeft) if modes.application_cursor => b"\x1bOD".to_vec(),
-				_ => format!("\x1b[{letter}").into_bytes(),
-			});
-		}
-		match key {
-			Key::Named(NamedKey::Enter) => return Some(b"\r".to_vec()),
-			Key::Named(NamedKey::Backspace) => return Some(vec![0x7f]),
-			Key::Named(NamedKey::Tab) if mods.shift => return Some(b"\x1b[Z".to_vec()),
-			Key::Named(NamedKey::Tab) => return Some(b"\t".to_vec()),
-			Key::Named(NamedKey::Escape) if modifiers > 1 => {
-				return Some(format!("\x1b[27;{modifiers}u").into_bytes());
-			}
-			Key::Named(NamedKey::Escape) => return Some(vec![0x1b]),
-			Key::Named(NamedKey::Insert) => {
-				return Some(
-					format!(
-						"\x1b[2{}~",
-						if modifiers > 1 {
-							format!(";{modifiers}")
-						} else {
-							String::new()
-						}
-					)
-					.into_bytes(),
-				);
-			}
-			Key::Named(NamedKey::Delete) => {
-				return Some(
-					format!(
-						"\x1b[3{}~",
-						if modifiers > 1 {
-							format!(";{modifiers}")
-						} else {
-							String::new()
-						}
-					)
-					.into_bytes(),
-				);
-			}
-			Key::Named(NamedKey::PageUp) => {
-				return Some(
-					format!(
-						"\x1b[5{}~",
-						if modifiers > 1 {
-							format!(";{modifiers}")
-						} else {
-							String::new()
-						}
-					)
-					.into_bytes(),
-				);
-			}
-			Key::Named(NamedKey::PageDown) => {
-				return Some(
-					format!(
-						"\x1b[6{}~",
-						if modifiers > 1 {
-							format!(";{modifiers}")
-						} else {
-							String::new()
-						}
-					)
-					.into_bytes(),
-				);
-			}
-			Key::Named(n @ (NamedKey::F1 | NamedKey::F2 | NamedKey::F3 | NamedKey::F4)) => {
-				let suffix = match n {
-					NamedKey::F1 => 'P',
-					NamedKey::F2 => 'Q',
-					NamedKey::F3 => 'R',
-					_ => 'S',
-				};
-				return Some(if modifiers > 1 {
-					format!("\x1b[1;{modifiers}{suffix}").into_bytes()
-				} else {
-					format!("\x1bO{suffix}").into_bytes()
-				});
-			}
-			Key::Named(
-				n @ (NamedKey::F5
-				| NamedKey::F6
-				| NamedKey::F7
-				| NamedKey::F8
-				| NamedKey::F9
-				| NamedKey::F10
-				| NamedKey::F11
-				| NamedKey::F12),
-			) => {
-				let number = match n {
-					NamedKey::F5 => 15,
-					NamedKey::F6 => 17,
-					NamedKey::F7 => 18,
-					NamedKey::F8 => 19,
-					NamedKey::F9 => 20,
-					NamedKey::F10 => 21,
-					NamedKey::F11 => 23,
-					_ => 24,
-				};
-				return Some(
-					format!(
-						"\x1b[{number}{}~",
-						if modifiers > 1 {
-							format!(";{modifiers}")
-						} else {
-							String::new()
-						}
-					)
-					.into_bytes(),
-				);
-			}
-			Key::Character(text) if mods.ctrl || mods.alt || mods.super_key => {
-				if let Some(ch) = text.chars().next() {
-					return Some(
-						format!("\x1b[{};{modifiers}u", ch.to_ascii_lowercase() as u32).into_bytes(),
-					);
-				}
-			}
-			_ => {}
-		}
+	// xterm's modifier parameter: 1 + shift + 2·alt + 4·ctrl + 8·super.
+	let param = 1
+		+ u8::from(mods.shift)
+		+ 2 * u8::from(mods.alt)
+		+ 4 * u8::from(mods.ctrl)
+		+ 8 * u8::from(mods.super_key);
+	if let Key::Named(named) = key
+		&& let Some(sequence) = special_key(*named, param, modes.application_cursor)
+	{
+		return Some(sequence);
 	}
-	match key {
-		Key::Named(n) => match n {
-			NamedKey::Enter => Some(b"\r".to_vec()),
-			NamedKey::Backspace => Some(vec![0x7f]),
-			NamedKey::Tab => Some(if mods.shift {
-				b"\x1b[Z".to_vec()
-			} else {
-				b"\t".to_vec()
-			}),
-			NamedKey::Escape => Some(vec![0x1b]),
-			NamedKey::Space => Some(vec![if mods.ctrl { 0 } else { b' ' }]),
-			NamedKey::ArrowUp => Some(if modes.application_cursor {
-				b"\x1bOA".to_vec()
-			} else {
-				b"\x1b[A".to_vec()
-			}),
-			NamedKey::ArrowDown => Some(if modes.application_cursor {
-				b"\x1bOB".to_vec()
-			} else {
-				b"\x1b[B".to_vec()
-			}),
-			NamedKey::ArrowRight => Some(if modes.application_cursor {
-				b"\x1bOC".to_vec()
-			} else {
-				b"\x1b[C".to_vec()
-			}),
-			NamedKey::ArrowLeft => Some(if modes.application_cursor {
-				b"\x1bOD".to_vec()
-			} else {
-				b"\x1b[D".to_vec()
-			}),
-			NamedKey::Home => Some(b"\x1b[H".to_vec()),
-			NamedKey::End => Some(b"\x1b[F".to_vec()),
-			NamedKey::PageUp => Some(b"\x1b[5~".to_vec()),
-			NamedKey::PageDown => Some(b"\x1b[6~".to_vec()),
-			NamedKey::Insert => Some(b"\x1b[2~".to_vec()),
-			NamedKey::Delete => Some(b"\x1b[3~".to_vec()),
-			NamedKey::F1 => Some(b"\x1bOP".to_vec()),
-			NamedKey::F2 => Some(b"\x1bOQ".to_vec()),
-			NamedKey::F3 => Some(b"\x1bOR".to_vec()),
-			NamedKey::F4 => Some(b"\x1bOS".to_vec()),
-			NamedKey::F5 => Some(b"\x1b[15~".to_vec()),
-			NamedKey::F6 => Some(b"\x1b[17~".to_vec()),
-			NamedKey::F7 => Some(b"\x1b[18~".to_vec()),
-			NamedKey::F8 => Some(b"\x1b[19~".to_vec()),
-			NamedKey::F9 => Some(b"\x1b[20~".to_vec()),
-			NamedKey::F10 => Some(b"\x1b[21~".to_vec()),
-			NamedKey::F11 => Some(b"\x1b[23~".to_vec()),
-			NamedKey::F12 => Some(b"\x1b[24~".to_vec()),
-			_ => None,
-		},
-		Key::Character(s) => {
-			let s = s.as_str();
-			if mods.ctrl && s.len() == 1 {
-				let c = s.as_bytes()[0];
-				if c.is_ascii_alphabetic() {
-					return Some(vec![c.to_ascii_lowercase() & 0x1f]);
-				}
-				return match c {
-					b' ' | b'@' | b'2' => Some(vec![0]),
-					b'[' | b'3' => Some(vec![27]),
-					b'\\' | b'4' => Some(vec![28]),
-					b']' | b'5' => Some(vec![29]),
-					b'^' | b'6' => Some(vec![30]),
-					b'_' | b'/' | b'7' => Some(vec![31]),
-					b'?' | b'8' => Some(vec![127]),
-					_ => None,
-				};
+	if modes.kitty
+		&& let Some(sequence) = kitty_key(key, mods, param)
+	{
+		return Some(sequence);
+	}
+	let mut bytes = legacy_key(key, mods)?;
+	if mods.alt && !modes.kitty {
+		bytes.insert(0, 0x1b);
+	}
+	Some(bytes)
+}
+
+/// Cursor, editing and function keys, which use the same `CSI` forms in
+/// legacy xterm mode and the kitty protocol.
+fn special_key(key: NamedKey, param: u8, application_cursor: bool) -> Option<Vec<u8>> {
+	let modified = param > 1;
+	let letter = match key {
+		NamedKey::ArrowUp => Some('A'),
+		NamedKey::ArrowDown => Some('B'),
+		NamedKey::ArrowRight => Some('C'),
+		NamedKey::ArrowLeft => Some('D'),
+		NamedKey::Home => Some('H'),
+		NamedKey::End => Some('F'),
+		_ => None,
+	};
+	if let Some(letter) = letter {
+		return Some(
+			match (modified, application_cursor) {
+				(true, _) => format!("\x1b[1;{param}{letter}"),
+				(false, true) => format!("\x1bO{letter}"),
+				(false, false) => format!("\x1b[{letter}"),
 			}
-			Some(s.as_bytes().to_vec())
+			.into_bytes(),
+		);
+	}
+	if let Some(letter) = match key {
+		NamedKey::F1 => Some('P'),
+		NamedKey::F2 => Some('Q'),
+		NamedKey::F3 => Some('R'),
+		NamedKey::F4 => Some('S'),
+		_ => None,
+	} {
+		return Some(
+			if modified {
+				format!("\x1b[1;{param}{letter}")
+			} else {
+				format!("\x1bO{letter}")
+			}
+			.into_bytes(),
+		);
+	}
+	let number = match key {
+		NamedKey::Insert => 2,
+		NamedKey::Delete => 3,
+		NamedKey::PageUp => 5,
+		NamedKey::PageDown => 6,
+		NamedKey::F5 => 15,
+		NamedKey::F6 => 17,
+		NamedKey::F7 => 18,
+		NamedKey::F8 => 19,
+		NamedKey::F9 => 20,
+		NamedKey::F10 => 21,
+		NamedKey::F11 => 23,
+		NamedKey::F12 => 24,
+		_ => return None,
+	};
+	Some(
+		if modified {
+			format!("\x1b[{number};{param}~")
+		} else {
+			format!("\x1b[{number}~")
+		}
+		.into_bytes(),
+	)
+}
+
+/// Kitty "disambiguate escape codes": modified text keys and Escape become `CSI u`.
+fn kitty_key(key: &Key, mods: Modifiers, param: u8) -> Option<Vec<u8>> {
+	match key {
+		Key::Named(NamedKey::Escape) if param > 1 => Some(format!("\x1b[27;{param}u").into_bytes()),
+		Key::Character(text) if mods.ctrl || mods.alt || mods.super_key => {
+			let ch = text.chars().next()?.to_ascii_lowercase();
+			Some(format!("\x1b[{};{param}u", ch as u32).into_bytes())
 		}
 		_ => None,
+	}
+}
+
+/// Keys that produce plain characters or C0 controls.
+fn legacy_key(key: &Key, mods: Modifiers) -> Option<Vec<u8>> {
+	match key {
+		Key::Named(NamedKey::Enter) => Some(b"\r".to_vec()),
+		Key::Named(NamedKey::Backspace) => Some(vec![0x7f]),
+		Key::Named(NamedKey::Tab) if mods.shift => Some(b"\x1b[Z".to_vec()),
+		Key::Named(NamedKey::Tab) => Some(b"\t".to_vec()),
+		Key::Named(NamedKey::Escape) => Some(vec![0x1b]),
+		Key::Named(NamedKey::Space) => Some(vec![if mods.ctrl { 0 } else { b' ' }]),
+		Key::Character(text) if mods.ctrl && text.len() == 1 => {
+			control_byte(text.as_bytes()[0]).map(|b| vec![b])
+		}
+		Key::Character(text) => Some(text.as_bytes().to_vec()),
+		_ => None,
+	}
+}
+
+/// The C0 control a Ctrl+key chord produces, following xterm's mapping.
+fn control_byte(key: u8) -> Option<u8> {
+	if key.is_ascii_alphabetic() {
+		return Some(key.to_ascii_lowercase() & 0x1f);
+	}
+	match key {
+		b' ' | b'@' | b'2' => Some(0),
+		b'[' | b'3' => Some(27),
+		b'\\' | b'4' => Some(28),
+		b']' | b'5' => Some(29),
+		b'^' | b'6' => Some(30),
+		b'_' | b'/' | b'7' => Some(31),
+		b'?' | b'8' => Some(127),
+		_ => None,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn named(key: NamedKey) -> Key {
+		Key::Named(key)
+	}
+
+	fn legacy(key: Key, mods: Modifiers) -> Vec<u8> {
+		encode_key(&key, mods, KeyModes::default()).unwrap()
+	}
+
+	const CTRL: Modifiers = Modifiers {
+		ctrl: true,
+		shift: false,
+		alt: false,
+		super_key: false,
+	};
+	const ALT: Modifiers = Modifiers {
+		ctrl: false,
+		shift: false,
+		alt: true,
+		super_key: false,
+	};
+
+	#[test]
+	fn alt_prefixes_characters_with_escape() {
+		assert_eq!(legacy(Key::Character("b".into()), ALT), b"\x1bb");
+		assert_eq!(legacy(named(NamedKey::Backspace), ALT), b"\x1b\x7f");
+		let ctrl_alt = Modifiers { alt: true, ..CTRL };
+		assert_eq!(legacy(Key::Character("c".into()), ctrl_alt), b"\x1b\x03");
+	}
+
+	#[test]
+	fn modified_cursor_keys_use_xterm_parameters() {
+		assert_eq!(legacy(named(NamedKey::ArrowLeft), CTRL), b"\x1b[1;5D");
+		assert_eq!(legacy(named(NamedKey::End), ALT), b"\x1b[1;3F");
+		assert_eq!(legacy(named(NamedKey::Delete), CTRL), b"\x1b[3;5~");
+		assert_eq!(legacy(named(NamedKey::F5), CTRL), b"\x1b[15;5~");
+	}
+
+	#[test]
+	fn application_cursor_mode_applies_to_home_and_end() {
+		let modes = KeyModes {
+			application_cursor: true,
+			kitty: false,
+		};
+		let none = Modifiers::default();
+		assert_eq!(
+			encode_key(&named(NamedKey::Home), none, modes).unwrap(),
+			b"\x1bOH"
+		);
+		assert_eq!(
+			encode_key(&named(NamedKey::ArrowUp), none, modes).unwrap(),
+			b"\x1bOA"
+		);
+	}
+
+	#[test]
+	fn plain_keys_are_unchanged() {
+		let none = Modifiers::default();
+		assert_eq!(legacy(Key::Character("x".into()), none), b"x");
+		assert_eq!(legacy(Key::Character("c".into()), CTRL), b"\x03");
+		assert_eq!(legacy(named(NamedKey::ArrowLeft), none), b"\x1b[D");
+		assert_eq!(legacy(named(NamedKey::Enter), none), b"\r");
+	}
+
+	#[test]
+	fn kitty_mode_disambiguates_modified_text_keys() {
+		let kitty = KeyModes {
+			application_cursor: false,
+			kitty: true,
+		};
+		let shift = Modifiers {
+			shift: true,
+			..Default::default()
+		};
+		let encode = |key: Key, mods| encode_key(&key, mods, kitty).unwrap();
+		assert_eq!(encode(Key::Character("c".into()), CTRL), b"\x1b[99;5u");
+		assert_eq!(encode(Key::Character("x".into()), ALT), b"\x1b[120;3u");
+		assert_eq!(encode(named(NamedKey::Escape), shift), b"\x1b[27;2u");
+		assert_eq!(
+			encode(named(NamedKey::Escape), Modifiers::default()),
+			b"\x1b"
+		);
+		assert_eq!(encode(named(NamedKey::ArrowUp), CTRL), b"\x1b[1;5A");
 	}
 }
