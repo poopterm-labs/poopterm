@@ -1,5 +1,5 @@
 //! System clipboard and URL opening through platform helper programs.
-#[cfg(target_os = "linux")]
+#[cfg(all(unix, not(target_os = "macos")))]
 use std::env;
 use std::{
 	io::Write,
@@ -67,7 +67,7 @@ pub(crate) fn clipboard_read() -> std::io::Result<String> {
 	clipboard_read_with("pbpaste", &[])
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) fn clipboard_write(text: &str) -> std::io::Result<()> {
 	if env::var_os("WAYLAND_DISPLAY").is_some()
 		&& let Ok(()) = clipboard_write_with("wl-copy", &[], text)
@@ -78,7 +78,7 @@ pub(crate) fn clipboard_write(text: &str) -> std::io::Result<()> {
 		.or_else(|_| clipboard_write_with("xsel", &["--clipboard", "--input"], text))
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) fn clipboard_read() -> std::io::Result<String> {
 	if env::var_os("WAYLAND_DISPLAY").is_some()
 		&& let Ok(text) = clipboard_read_with("wl-paste", &["--no-newline"])
@@ -89,14 +89,14 @@ pub(crate) fn clipboard_read() -> std::io::Result<String> {
 		.or_else(|_| clipboard_read_with("xsel", &["--clipboard", "--output"]))
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(unix))]
 pub(crate) fn clipboard_write(_: &str) -> std::io::Result<()> {
 	Err(std::io::Error::other(
 		"clipboard support is unavailable on this platform",
 	))
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(unix))]
 pub(crate) fn clipboard_read() -> std::io::Result<String> {
 	Err(std::io::Error::other(
 		"clipboard support is unavailable on this platform",

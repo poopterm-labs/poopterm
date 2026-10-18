@@ -2,6 +2,8 @@
 use super::*;
 use crate::input::keys::Modifiers;
 use std::time::Instant;
+#[cfg(target_os = "macos")]
+use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::{
 	application::ApplicationHandler,
 	dpi::{LogicalSize, PhysicalSize},

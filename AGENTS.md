@@ -22,7 +22,11 @@ cargo test --release -- --ignored --nocapture parser_throughput   # parser bench
 - Formatting: hard tabs, width 100 (`rustfmt.toml`). Always run `cargo fmt`.
 - Linux build deps: `pkg-config libx11-dev libxkbcommon-dev libwayland-dev`.
 - CI (`.github/workflows/ci.yml`) runs fmt, test, clippy and a release build
-  on Linux and macOS. All four must pass.
+  on Linux and macOS (plus a FreeBSD clippy check). All must pass.
+- **Platform-gated code** (`#[cfg(target_os = ...)]`) is not compiled on your
+  host. Before committing such changes, check the other targets too:
+  `rustup target add aarch64-apple-darwin x86_64-unknown-freebsd`, then
+  `cargo clippy --target <triple> --all-targets -- -D warnings` for each.
 
 ## Workflow: test-driven development
 

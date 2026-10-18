@@ -34,6 +34,12 @@ jobs:
       - name: Run clippy
         run: cargo +nightly clippy --locked --all-targets -- -D warnings
 
+      - name: Check BSD-specific code
+        if: runner.os == 'Linux'
+        run: |
+          rustup +nightly target add x86_64-unknown-freebsd
+          cargo +nightly clippy --locked --target x86_64-unknown-freebsd --all-targets -- -D warnings
+
       - name: Build release binary
         run: cargo +nightly build --release --locked
 

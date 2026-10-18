@@ -1,9 +1,11 @@
 //! Opening, switching, closing and persisting tabs.
 use super::*;
 use crate::{pty::spawn_session, session_store::save_session_dirs};
+#[cfg(target_os = "linux")]
+use std::fs;
 #[cfg(target_os = "macos")]
 use std::process::Command;
-use std::{fs, thread};
+use std::thread;
 
 impl App {
 	pub(super) fn tab_left_reserve(&self) -> usize {
