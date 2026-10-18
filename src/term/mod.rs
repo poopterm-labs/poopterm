@@ -3,6 +3,7 @@ mod extras;
 mod grid;
 mod images;
 mod screen;
+mod shared;
 mod shell;
 mod sync;
 #[cfg(test)]
@@ -11,6 +12,7 @@ mod tests;
 use crate::theme::Theme;
 pub(crate) use extras::NONE as NO_EXTRA;
 pub(crate) use grid::Grid;
+pub(crate) use shared::{SharedTerm, TermGuard};
 
 use std::{collections::VecDeque, path::PathBuf, sync::Arc, time::Instant};
 

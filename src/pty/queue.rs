@@ -1,14 +1,15 @@
-//! Bytes read from a PTY, waiting for the UI thread to parse them.
+//! Bytes read from a PTY, waiting to be parsed.
 //!
-//! The reader thread keeps reading while the UI thread parses: it appends
-//! to the queue and wakes the UI only once per batch. When the UI falls
-//! behind by `limit` bytes the reader waits, which pushes back on the
-//! program producing output instead of buffering without bound.
+//! The reader thread keeps reading while the parser thread parses, so the
+//! kernel's PTY buffer keeps draining. When parsing falls behind by `limit`
+//! bytes the reader waits, which pushes back on the program producing
+//! output instead of buffering without bound.
 use std::sync::{Condvar, Mutex, MutexGuard};
 
 pub(crate) struct OutputQueue {
 	state: Mutex<State>,
 	space: Condvar,
+	data: Condvar,
 	limit: usize,
 }
 
@@ -25,6 +26,7 @@ impl OutputQueue {
 		Self {
 			state: Mutex::default(),
 			space: Condvar::new(),
+			data: Condvar::new(),
 			limit,
 		}
 	}
@@ -47,7 +49,28 @@ impl OutputQueue {
 				.unwrap_or_else(|poisoned| poisoned.into_inner());
 		}
 		state.bytes.extend_from_slice(data);
+		self.data.notify_one();
 		!std::mem::replace(&mut state.notified, true)
+	}
+
+	/// Waits for queued bytes and moves them into `out`. Returns false once
+	/// the queue is closed and fully drained.
+	pub(crate) fn wait_take(&self, out: &mut Vec<u8>) -> bool {
+		out.clear();
+		let mut state = self.lock();
+		while state.bytes.is_empty() && !state.closed {
+			state = self
+				.data
+				.wait(state)
+				.unwrap_or_else(|poisoned| poisoned.into_inner());
+		}
+		if state.bytes.is_empty() {
+			return false;
+		}
+		std::mem::swap(out, &mut state.bytes);
+		state.notified = false;
+		self.space.notify_all();
+		true
 	}
 
 	/// Moves all queued bytes into `out` (replacing its contents, keeping
@@ -64,6 +87,7 @@ impl OutputQueue {
 	pub(crate) fn close(&self) {
 		self.lock().closed = true;
 		self.space.notify_all();
+		self.data.notify_all();
 	}
 }
 
@@ -114,5 +138,26 @@ mod tests {
 		thread::sleep(Duration::from_millis(20));
 		queue.close();
 		reader.join().unwrap();
+	}
+
+	#[test]
+	fn the_parser_waits_for_data_and_drains_after_close() {
+		let queue = Arc::new(OutputQueue::new(1024));
+		let parser = {
+			let queue = queue.clone();
+			thread::spawn(move || {
+				let mut out = Vec::new();
+				let mut seen = Vec::new();
+				while queue.wait_take(&mut out) {
+					seen.extend_from_slice(&out);
+				}
+				seen
+			})
+		};
+		thread::sleep(Duration::from_millis(20));
+		queue.push(b"ab");
+		queue.push(b"cd");
+		queue.close();
+		assert_eq!(parser.join().unwrap(), b"abcd");
 	}
 }
