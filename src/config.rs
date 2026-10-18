@@ -137,6 +137,20 @@ pub fn config_path() -> PathBuf {
 	}
 }
 
+/// Per-user data directory for generated files: `$XDG_DATA_HOME/poopterm`
+/// (default `~/.local/share/poopterm`), or `~/Library/Application Support/poopterm` on macOS.
+pub fn data_dir() -> Option<PathBuf> {
+	let home = env::var_os("HOME").map(PathBuf::from);
+	let base = if cfg!(target_os = "macos") {
+		home?.join("Library/Application Support")
+	} else {
+		env::var_os("XDG_DATA_HOME")
+			.map(PathBuf::from)
+			.or_else(|| home.map(|home| home.join(".local/share")))?
+	};
+	Some(base.join("poopterm"))
+}
+
 pub fn read_config_value(key: &str) -> Option<String> {
 	value(&fs::read_to_string(config_path()).ok()?, key)
 }

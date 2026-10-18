@@ -1,0 +1,230 @@
+//! Runs the shipped hooks in real shells (skipped when a shell is missing).
+use std::process::Command;
+
+/// Runs `script` in `shell`, or returns `None` when the shell is not installed.
+fn run(shell: &str, args: &[&str], script: &str) -> Option<(String, String)> {
+	let output = Command::new(shell).args(args).arg(script).output().ok()?;
+	Some((
+		String::from_utf8_lossy(&output.stdout).into_owned(),
+		String::from_utf8_lossy(&output.stderr).into_owned(),
+	))
+}
+
+#[test]
+fn zsh_hooks_report_exit_status_and_directory_without_errors() {
+	let script = concat!(
+		"source shell-integration/zsh.zsh; cd /tmp; false; _poopterm_precmd; ",
+		"print -rn -- \"[$PATH]\""
+	);
+	let Some((stdout, stderr)) = run("zsh", &["-fc"], script) else {
+		return;
+	};
+	assert_eq!(stderr, "");
+	assert!(stdout.contains("\x1b]133;D;1\x07"), "{stdout:?}");
+	assert!(stdout.contains("\x1b]7;file:///tmp\x07"), "{stdout:?}");
+	assert!(!stdout.contains("[/tmp]"), "hook must not clobber $PATH");
+}
+
+#[test]
+fn bash_marks_command_input_after_the_prompt() {
+	let script = concat!(
+		"PS1='P> '; source shell-integration/bash.sh; printf '%s|' \"$PS1\"; ",
+		"false; __poopterm_prompt_command"
+	);
+	let Some((stdout, stderr)) = run("bash", &["--norc", "-c"], script) else {
+		return;
+	};
+	assert_eq!(stderr, "");
+	let (ps1, prompt) = stdout.split_once('|').unwrap();
+	assert_eq!(ps1, "P> \\[\\e]133;B\\a\\]");
+	assert!(prompt.starts_with("\x1b]133;D;1\x07"), "{prompt:?}");
+}
+
+/// A directory whose name contains BEL, ESC and other bytes outside the
+/// URI-safe set. Raw control bytes in OSC 7 would end the sequence early
+/// and let the rest of the name run as terminal commands.
+struct HostileDirectory {
+	root: std::path::PathBuf,
+	path: std::path::PathBuf,
+}
+
+impl HostileDirectory {
+	fn new(shell: &str) -> Self {
+		let root = std::env::temp_dir().join(format!("poopterm-hooks-{}-{shell}", std::process::id()));
+		let path = root.join("a b\x07\x1b]52;c;eA==\x07é%");
+		std::fs::create_dir_all(&path).unwrap();
+		Self { root, path }
+	}
+}
+
+impl Drop for HostileDirectory {
+	fn drop(&mut self) {
+		let _ = std::fs::remove_dir_all(&self.root);
+	}
+}
+
+const ENCODED_TAIL: &str = "/a%20b%07%1B%5D52%3Bc%3BeA%3D%3D%07%C3%A9%25";
+
+#[test]
+fn zsh_percent_encodes_unsafe_directory_bytes() {
+	let dir = HostileDirectory::new("zsh");
+	let script = "source shell-integration/zsh.zsh; cd -- \"$TARGET\"; _poopterm_precmd";
+	let Some(output) = Command::new("zsh")
+		.args(["-fc", script])
+		.env("TARGET", &dir.path)
+		.output()
+		.ok()
+	else {
+		return;
+	};
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let osc7 = stdout.split("\x1b]7;").nth(1).unwrap_or_default();
+	assert!(osc7.ends_with(&format!("{ENCODED_TAIL}\x07")), "{stdout:?}");
+	assert_eq!(osc7.matches('\x07').count(), 1, "{stdout:?}");
+}
+
+#[test]
+fn bash_percent_encodes_unsafe_directory_bytes() {
+	let dir = HostileDirectory::new("bash");
+	let script = "source shell-integration/bash.sh; cd -- \"$TARGET\"; __poopterm_prompt_command";
+	let Some(output) = Command::new("bash")
+		.args(["--norc", "-c", script])
+		.env("TARGET", &dir.path)
+		.output()
+		.ok()
+	else {
+		return;
+	};
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	let osc7 = stdout.split("\x1b]7;").nth(1).unwrap_or_default();
+	assert!(osc7.ends_with(&format!("{ENCODED_TAIL}\x07")), "{stdout:?}");
+	assert_eq!(osc7.matches('\x07').count(), 1, "{stdout:?}");
+}
+
+/// A scratch directory removed on drop.
+struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+	fn new(name: &str) -> Self {
+		let dir = std::env::temp_dir().join(format!("poopterm-inject-{}-{name}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).unwrap();
+		Self(dir)
+	}
+}
+
+impl Drop for Scratch {
+	fn drop(&mut self) {
+		let _ = std::fs::remove_dir_all(&self.0);
+	}
+}
+
+/// A fake `ssh` on PATH that prints the TERM it was started with.
+fn fake_ssh(dir: &std::path::Path) -> std::ffi::OsString {
+	let bin = dir.join("bin");
+	std::fs::create_dir_all(&bin).unwrap();
+	let ssh = bin.join("ssh");
+	std::fs::write(&ssh, "#!/bin/sh\necho \"ssh-term=$TERM\"\n").unwrap();
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt;
+		std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
+	}
+	let mut path = bin.into_os_string();
+	path.push(":");
+	path.push(std::env::var_os("PATH").unwrap_or_default());
+	path
+}
+
+#[test]
+fn ssh_uses_a_common_term_while_term_is_poopterm() {
+	let scratch = Scratch::new("ssh");
+	let path = fake_ssh(&scratch.0);
+	for (shell, args, script) in [
+		(
+			"zsh",
+			&["-fc"][..],
+			"source shell-integration/zsh.zsh; ssh host",
+		),
+		(
+			"bash",
+			&["--norc", "-c"][..],
+			"source shell-integration/bash.sh; ssh host",
+		),
+	] {
+		let run = |term: &str, extra: &str| {
+			Command::new(shell)
+				.args(args)
+				.arg(format!("{extra}{script}"))
+				.env("TERM", term)
+				.env("PATH", &path)
+				.output()
+				.ok()
+				.map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+		};
+		let Some(wrapped) = run("xterm-poopterm", "") else {
+			continue;
+		};
+		assert!(
+			wrapped.contains("ssh-term=xterm-256color"),
+			"{shell}: {wrapped:?}"
+		);
+		let other = run("screen-256color", "").unwrap();
+		assert!(
+			other.contains("ssh-term=screen-256color"),
+			"{shell}: {other:?}"
+		);
+		let custom = run("xterm-poopterm", "ssh() { echo custom; }; ").unwrap();
+		assert!(
+			custom.contains("custom"),
+			"{shell} keeps a user's ssh function: {custom:?}"
+		);
+	}
+}
+
+#[test]
+fn zsh_injection_loads_hooks_and_restores_the_users_startup_files() {
+	use super::inject::{Shell, injection_env, install_scripts};
+	if Command::new("zsh").arg("--version").output().is_err() {
+		return;
+	}
+	let scratch = Scratch::new("zsh");
+	let scripts = scratch.0.join("scripts");
+	install_scripts(&scripts).unwrap();
+	let home = scratch.0.join("home");
+	let custom = scratch.0.join("custom");
+	for dir in [&home, &custom] {
+		std::fs::create_dir_all(dir).unwrap();
+		std::fs::write(dir.join(".zshenv"), format!("ENV_FROM={}\n", dir.display())).unwrap();
+		std::fs::write(dir.join(".zshrc"), format!("RC_FROM={}\n", dir.display())).unwrap();
+	}
+	let probe = "print -r -- \"$+functions[_poopterm_precmd] ${ZDOTDIR-unset} $RC_FROM $ENV_FROM\"";
+	for original in [None, Some(&custom)] {
+		let mut command = Command::new("zsh");
+		command
+			.args(["-i", "-c", probe])
+			.env("HOME", &home)
+			.env_remove("ZDOTDIR");
+		if let Some(dir) = original {
+			command.env("ZDOTDIR", dir);
+		}
+		let lookup = |name: &str| {
+			(name == "ZDOTDIR")
+				.then(|| original.map(|dir| dir.clone().into_os_string()))
+				.flatten()
+		};
+		for (name, value) in injection_env(Shell::Zsh, &scripts, lookup) {
+			command.env(name, value);
+		}
+		let output = command.output().unwrap();
+		let stdout = String::from_utf8_lossy(&output.stdout);
+		let expected_dir = original.map_or("unset".to_owned(), |d| d.display().to_string());
+		let user_dir = original.unwrap_or(&home);
+		assert_eq!(
+			stdout.trim(),
+			format!("1 {expected_dir} {0} {0}", user_dir.display()),
+			"stderr: {}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+	}
+}

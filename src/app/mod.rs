@@ -208,7 +208,11 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 				None
 			}
 		});
-	let term_env = crate::terminfo::resolve(read_config_value("term").as_deref());
+	let mut term_env = crate::terminfo::resolve(read_config_value("term").as_deref());
+	term_env.extra = crate::shell_integration::inject::prepare(
+		&std::env::var("SHELL").unwrap_or_default(),
+		read_config_value("shell_integration").as_deref(),
+	);
 	let mut sessions = Vec::new();
 	let (initial_cols, initial_rows) = (100, 30);
 	for (index, cwd) in restored_session_dirs().into_iter().enumerate() {

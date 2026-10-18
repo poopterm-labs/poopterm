@@ -22,6 +22,17 @@ impl App {
 		for response in std::mem::take(&mut session.term.responses) {
 			session.write(&response);
 		}
+		// A long command finished where the user may not be looking: mark the
+		// tab and ask the window manager for attention.
+		let unseen = Some(id) != active_id || !self.focused;
+		if session.term.shell.take_long_command_finished() && unseen {
+			session.term.bell = true;
+			if !self.focused
+				&& let Some(window) = &self.window
+			{
+				window.request_user_attention(Some(winit::window::UserAttentionType::Informational));
+			}
+		}
 		let term = &session.term;
 		let cwd_changed = term.cwd_generation != cwd;
 		let mut tab_changed = term.bell != bell || term.title_generation != title;

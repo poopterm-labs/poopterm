@@ -80,6 +80,9 @@ pub(crate) fn spawn_session(
 	if let Some(dirs) = &term_env.terminfo_dirs {
 		cmd.env("TERMINFO_DIRS", dirs);
 	}
+	for (name, value) in &term_env.extra {
+		cmd.env(name, value);
+	}
 	cmd.env("COLORTERM", "truecolor");
 	cmd.env("TERM_PROGRAM", "poopterm");
 	cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));

@@ -9,11 +9,12 @@ use crate::{
 };
 
 /// Commands offered by the command palette, in display order.
-pub(super) const PALETTE_COMMANDS: [&str; 6] = [
+pub(super) const PALETTE_COMMANDS: [&str; 7] = [
 	"New tab",
 	"Settings",
 	"About poopterm",
 	"Cycle theme",
+	"Copy last command output",
 	"Close tab",
 	"Rename active tab",
 ];
@@ -126,6 +127,19 @@ impl App {
 				.get(self.search_match_index)
 				.map(|selection| selection.ordered()),
 			focused: self.focused,
+			prompt_marks: {
+				let top = term.history_base + term.scrollback.len() - term.scroll_offset;
+				term
+					.shell
+					.prompt_marks(top..top + term.rows)
+					.map(|(row, exit)| (row - top, exit))
+					.collect()
+			},
+			mark_colors: [
+				self.theme.palette[2],
+				self.theme.palette[1],
+				blend(self.theme.bg, self.theme.border, 160),
+			],
 		};
 		draw_grid(p, &mut self.fonts, &view);
 	}

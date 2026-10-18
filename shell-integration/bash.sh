@@ -31,6 +31,12 @@ __poopterm_prompt_command() {
 	printf '\033]133;A\007\033]7;file://%s\007' "$( __poopterm_escape_path )"
 }
 
+# Remote hosts rarely have poopterm's terminfo entry; connect with a common
+# TERM instead. Set POOPTERM_SSH_KEEP_TERM=1 to keep xterm-poopterm.
+if [[ $TERM == xterm-poopterm && -z ${POOPTERM_SSH_KEEP_TERM-} ]] && ! declare -F ssh >/dev/null; then
+	ssh() { TERM=xterm-256color command ssh "$@"; }
+fi
+
 PROMPT_COMMAND=__poopterm_prompt_command
 # B marks where command input starts, so it belongs at the end of the prompt.
 PS1="$PS1"'\[\e]133;B\a\]'

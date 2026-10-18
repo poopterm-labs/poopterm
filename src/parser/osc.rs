@@ -42,6 +42,7 @@ impl Term {
 				params,
 				self.history_base + self.scrollback.len() + self.cy,
 				self.cx,
+				std::time::Instant::now(),
 			),
 			b"0" | b"1" | b"2" if params.len() >= 2 => {
 				let title = String::from_utf8_lossy(params[1]);

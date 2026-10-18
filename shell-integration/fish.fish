@@ -14,4 +14,11 @@ end
 function __poopterm_preexec --on-event fish_preexec
 	printf '\033]133;C\007'
 end
+# Remote hosts rarely have poopterm's terminfo entry; connect with a common
+# TERM instead. Set POOPTERM_SSH_KEEP_TERM=1 to keep xterm-poopterm.
+if test "$TERM" = xterm-poopterm; and not set -q POOPTERM_SSH_KEEP_TERM; and not functions -q ssh
+	function ssh --wraps ssh
+		env TERM=xterm-256color ssh $argv
+	end
+end
 # <<< poopterm shell integration <<<

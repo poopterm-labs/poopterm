@@ -3,6 +3,7 @@ mod extras;
 mod grid;
 mod images;
 mod screen;
+mod shell;
 mod sync;
 #[cfg(test)]
 mod tests;

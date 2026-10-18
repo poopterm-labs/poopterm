@@ -31,6 +31,12 @@ _poopterm_line_init() {
 	print -rn -- $'\e]133;B\a'
 }
 
+# Remote hosts rarely have poopterm's terminfo entry; connect with a common
+# TERM instead. Set POOPTERM_SSH_KEEP_TERM=1 to keep xterm-poopterm.
+if [[ $TERM == xterm-poopterm && -z ${POOPTERM_SSH_KEEP_TERM-} ]] && (( ! $+functions[ssh] )); then
+	ssh() { TERM=xterm-256color command ssh "$@"; }
+fi
+
 add-zsh-hook precmd _poopterm_precmd
 add-zsh-hook preexec _poopterm_preexec
 add-zle-hook-widget zle-line-init _poopterm_line_init

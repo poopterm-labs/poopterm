@@ -24,6 +24,8 @@ pub(crate) struct TermEnv {
 	pub term: String,
 	/// A value for `TERMINFO_DIRS` when a private copy is in use.
 	pub terminfo_dirs: Option<OsString>,
+	/// Further variables, e.g. for automatic shell integration.
+	pub extra: Vec<(String, OsString)>,
 }
 
 /// Picks `TERM`: an explicit config value wins; `auto` (or none) means
@@ -44,6 +46,7 @@ pub(crate) fn resolve(configured: Option<&str>) -> TermEnv {
 		return TermEnv {
 			term: choose_term(configured, true).to_owned(),
 			terminfo_dirs: None,
+			extra: Vec::new(),
 		};
 	}
 	let private = private_dir();
@@ -62,6 +65,7 @@ pub(crate) fn resolve(configured: Option<&str>) -> TermEnv {
 	TermEnv {
 		term: choose_term(configured, compiled).to_owned(),
 		terminfo_dirs,
+		extra: Vec::new(),
 	}
 }
 
@@ -100,17 +104,9 @@ fn search_dirs() -> Vec<PathBuf> {
 	dirs
 }
 
-/// `$XDG_DATA_HOME/poopterm/terminfo`, or the platform equivalent.
+/// Where a private copy of the entry is compiled.
 fn private_dir() -> Option<PathBuf> {
-	let home = env::var_os("HOME").map(PathBuf::from);
-	let base = if cfg!(target_os = "macos") {
-		home?.join("Library/Application Support")
-	} else {
-		env::var_os("XDG_DATA_HOME")
-			.map(PathBuf::from)
-			.or_else(|| home.map(|home| home.join(".local/share")))?
-	};
-	Some(base.join("poopterm/terminfo"))
+	crate::config::data_dir().map(|dir| dir.join("terminfo"))
 }
 
 /// Whether `dir` holds a copy compiled from the current [`SOURCE`].

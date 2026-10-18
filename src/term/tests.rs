@@ -9,6 +9,16 @@ use crate::{
 fn terminal(cols: usize, rows: usize) -> Term {
 	Term::new(cols, rows, Theme::from_kind(ThemeKind::Poop), "/tmp".into())
 }
+/// Text of visible row `y`, accounting for scrollback viewing.
+fn view_row(term: &Term, y: usize) -> String {
+	let top = term.scrollback.len() - term.scroll_offset;
+	term
+		.row_cells(top + y)
+		.unwrap()
+		.iter()
+		.map(|c| c.ch)
+		.collect()
+}
 /// The cell at flat index `i` (`row * cols + col`).
 fn cell(term: &Term, i: usize) -> Cell {
 	term.grid[i / term.cols][i % term.cols]
@@ -686,4 +696,38 @@ fn soft_reset_restores_modes_but_keeps_the_screen() {
 	assert_eq!((t.fg, t.attrs, t.bold), (t.default_fg, 0, false));
 	assert!(!t.charsets[0]);
 	assert_eq!(row(&t, 0), "text  ");
+}
+
+#[test]
+fn last_command_output_is_extracted_across_scrollback() {
+	let mut t = terminal(10, 3);
+	feed(
+		&mut t,
+		b"\x1b]133;A\x07$ ls\x1b]133;B\x07\r\n\x1b]133;C\x07one\r\ntwo  \r\nthree\r\n\x1b]133;D;0\x07\x1b]133;A\x07$ ",
+	);
+	assert!(
+		!t.scrollback.is_empty(),
+		"the output scrolled partly into history"
+	);
+	assert_eq!(t.last_command_output().as_deref(), Some("one\ntwo\nthree"));
+}
+
+#[test]
+fn prompt_jumps_scroll_the_view_to_the_prompt() {
+	let mut t = terminal(10, 2);
+	feed(
+		&mut t,
+		b"\x1b]133;A\x07$ a\r\nout\r\nout\r\n\x1b]133;A\x07$ b\r\nout\r\nout\r\n\x1b]133;A\x07$ ",
+	);
+	assert!(t.jump_to_prompt(-1));
+	assert_eq!(
+		view_row(&t, 0).trim_end(),
+		"$ b",
+		"previous prompt at the top"
+	);
+	assert!(t.jump_to_prompt(-1));
+	assert_eq!(view_row(&t, 0).trim_end(), "$ a");
+	assert!(!t.jump_to_prompt(-1), "no earlier prompt");
+	assert!(t.jump_to_prompt(1));
+	assert_eq!(view_row(&t, 0).trim_end(), "$ b");
 }

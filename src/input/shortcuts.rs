@@ -1,5 +1,5 @@
 //! Configurable application shortcuts such as `ctrl+shift+p`.
-use winit::keyboard::Key;
+use winit::keyboard::{Key, NamedKey};
 
 use super::keys::Modifiers;
 use crate::config;
@@ -31,8 +31,30 @@ impl Shortcut {
 
 	pub(crate) fn matches(&self, key: &Key, mods: Modifiers) -> bool {
 		mods == self.mods
-			&& matches!(key, Key::Character(value) if value.eq_ignore_ascii_case(&self.key))
+			&& match key {
+				Key::Character(value) => value.eq_ignore_ascii_case(&self.key),
+				Key::Named(named) => named_key(&self.key) == Some(*named),
+				_ => false,
+			}
 	}
+}
+
+/// Named keys accepted in bindings, e.g. `ctrl+shift+up`.
+fn named_key(name: &str) -> Option<NamedKey> {
+	Some(match name {
+		"up" => NamedKey::ArrowUp,
+		"down" => NamedKey::ArrowDown,
+		"left" => NamedKey::ArrowLeft,
+		"right" => NamedKey::ArrowRight,
+		"pageup" => NamedKey::PageUp,
+		"pagedown" => NamedKey::PageDown,
+		"home" => NamedKey::Home,
+		"end" => NamedKey::End,
+		"tab" => NamedKey::Tab,
+		"enter" => NamedKey::Enter,
+		"space" => NamedKey::Space,
+		_ => return None,
+	})
 }
 
 /// Shortcut table, read from the config once instead of on every key press.
@@ -43,6 +65,8 @@ pub(crate) struct Shortcuts {
 	pub cycle_theme: Shortcut,
 	pub search: Shortcut,
 	pub close_tab: Shortcut,
+	pub previous_prompt: Shortcut,
+	pub next_prompt: Shortcut,
 }
 
 impl Shortcuts {
@@ -69,6 +93,14 @@ impl Shortcuts {
 			close_tab: get(
 				"shortcut_close_tab",
 				if mac { "super+w" } else { "ctrl+shift+w" },
+			),
+			previous_prompt: get(
+				"shortcut_previous_prompt",
+				if mac { "super+up" } else { "ctrl+shift+up" },
+			),
+			next_prompt: get(
+				"shortcut_next_prompt",
+				if mac { "super+down" } else { "ctrl+shift+down" },
 			),
 		}
 	}
@@ -123,5 +155,25 @@ mod tests {
 			})
 			.unwrap()
 		);
+	}
+
+	#[test]
+	fn named_keys_can_be_bound() {
+		use winit::keyboard::NamedKey;
+		let up = Shortcut::parse("ctrl+shift+up").unwrap();
+		let ctrl_shift = Modifiers {
+			ctrl: true,
+			shift: true,
+			..Default::default()
+		};
+		assert!(up.matches(&Key::Named(NamedKey::ArrowUp), ctrl_shift));
+		assert!(!up.matches(&Key::Named(NamedKey::ArrowDown), ctrl_shift));
+		assert!(!up.matches(&chr("u"), ctrl_shift));
+		let page = Shortcut::parse("shift+pagedown").unwrap();
+		let shift = Modifiers {
+			shift: true,
+			..Default::default()
+		};
+		assert!(page.matches(&Key::Named(NamedKey::PageDown), shift));
 	}
 }

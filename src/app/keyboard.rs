@@ -1,4 +1,5 @@
 //! Keyboard events: application shortcuts, overlays, then PTY input.
+use super::draw::PALETTE_COMMANDS;
 use super::*;
 use crate::input::keys::{KeyModes, encode_key};
 use winit::event::KeyEvent;
@@ -9,6 +10,16 @@ impl App {
 		KeyModes {
 			application_cursor: term.application_cursor,
 			kitty: term.kitty_keyboard,
+		}
+	}
+
+	/// Copies the output of the most recent command (needs shell integration).
+	fn copy_last_command_output(&self) {
+		let Some(text) = self.active_term().last_command_output() else {
+			return;
+		};
+		if let Err(error) = clipboard_write(&text) {
+			eprintln!("poopterm: could not copy command output: {error}");
 		}
 	}
 
@@ -64,15 +75,7 @@ impl App {
 				Key::Named(NamedKey::Enter) => {
 					let query = self.command_query.to_ascii_lowercase();
 					self.command_palette = false;
-					let commands = [
-						"New tab",
-						"Settings",
-						"About poopterm",
-						"Cycle theme",
-						"Close tab",
-						"Rename active tab",
-					];
-					if let Some(command) = commands
+					if let Some(command) = PALETTE_COMMANDS
 						.iter()
 						.find(|command| command.to_ascii_lowercase().contains(&query))
 					{
@@ -105,6 +108,7 @@ impl App {
 								self.command_palette = false;
 								self.close_active_tab(event_loop);
 							}
+							"Copy last command output" => self.copy_last_command_output(),
 							_ => {}
 						}
 					}
@@ -162,6 +166,22 @@ impl App {
 			.matches(&event.logical_key, self.mods)
 		{
 			self.cycle_theme();
+			return;
+		}
+		let prompt_jump = [
+			(&self.shortcuts.previous_prompt, -1),
+			(&self.shortcuts.next_prompt, 1),
+		]
+		.into_iter()
+		.find_map(|(shortcut, direction)| {
+			shortcut
+				.matches(&event.logical_key, self.mods)
+				.then_some(direction)
+		});
+		if let Some(direction) = prompt_jump {
+			if self.active_session_mut().term.jump_to_prompt(direction) {
+				self.request_redraw();
+			}
 			return;
 		}
 		if self
