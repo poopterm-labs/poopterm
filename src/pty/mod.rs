@@ -8,7 +8,8 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
-	config::Preferences, parser::Parser, session_store::default_cwd, term::Term, theme::Theme,
+	config::Preferences, parser::Parser, session_store::default_cwd, term::Term, terminfo::TermEnv,
+	theme::Theme,
 };
 
 pub(crate) use queue::OutputQueue;
@@ -63,6 +64,7 @@ pub(crate) fn spawn_session(
 	theme: Theme,
 	proxy: EventLoopProxy<UserEvent>,
 	cwd: PathBuf,
+	term_env: &TermEnv,
 ) -> Result<Session, Box<dyn Error>> {
 	let cwd = if cwd.is_dir() { cwd } else { default_cwd() };
 	let pty = native_pty_system();
@@ -74,8 +76,13 @@ pub(crate) fn spawn_session(
 	})?;
 	let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
 	let mut cmd = CommandBuilder::new(shell);
-	cmd.env("TERM", "xterm-256color");
+	cmd.env("TERM", &term_env.term);
+	if let Some(dirs) = &term_env.terminfo_dirs {
+		cmd.env("TERMINFO_DIRS", dirs);
+	}
+	cmd.env("COLORTERM", "truecolor");
 	cmd.env("TERM_PROGRAM", "poopterm");
+	cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
 	cmd.arg("-l");
 	cmd.cwd(&cwd);
 	let child = pair.slave.spawn_command(cmd)?;

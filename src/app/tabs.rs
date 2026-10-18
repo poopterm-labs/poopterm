@@ -65,7 +65,15 @@ impl App {
 		let cols = self.active_term().cols;
 		let rows = self.active_term().rows;
 		let cwd = self.active_term().cwd.clone();
-		match spawn_session(id, cols, rows, self.theme, self.proxy.clone(), cwd) {
+		match spawn_session(
+			id,
+			cols,
+			rows,
+			self.theme,
+			self.proxy.clone(),
+			cwd,
+			&self.term_env,
+		) {
 			Ok(session) => {
 				self.sessions.push(session);
 				self.active = self.sessions.len() - 1;

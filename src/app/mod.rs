@@ -84,6 +84,8 @@ pub(crate) struct App {
 	shortcuts: Shortcuts,
 	cursor_pos: (f64, f64),
 	held_button: Option<MouseButtonCode>,
+	/// `TERM` and terminfo path for new shells.
+	term_env: crate::terminfo::TermEnv,
 	scroll: ScrollAccumulator,
 	/// Whether the main window has keyboard focus.
 	focused: bool,
@@ -206,6 +208,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 				None
 			}
 		});
+	let term_env = crate::terminfo::resolve(read_config_value("term").as_deref());
 	let mut sessions = Vec::new();
 	let (initial_cols, initial_rows) = (100, 30);
 	for (index, cwd) in restored_session_dirs().into_iter().enumerate() {
@@ -216,6 +219,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 			theme,
 			proxy.clone(),
 			cwd,
+			&term_env,
 		)?);
 	}
 	let next_session_id = sessions.len() as u64 + 1;
@@ -256,6 +260,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		shortcuts: Shortcuts::load(),
 		cursor_pos: (0.0, 0.0),
 		held_button: None,
+		term_env,
 		scroll: ScrollAccumulator::default(),
 		focused: true,
 		hovered_link: None,

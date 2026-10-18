@@ -20,18 +20,21 @@ mod session_store;
 mod shell_integration;
 mod sixel;
 mod term;
+mod terminfo;
 mod theme;
 mod ui;
 mod wallpaper;
 
 use std::{env, error::Error};
 
-const HELP: &str = "Usage: poopterm [--version | --help | --print-shell-integration SHELL]
+const HELP: &str =
+	"Usage: poopterm [--version | --help | --print-terminfo | --print-shell-integration SHELL]
 
 Launches your login shell. Configure appearance and session restore with Settings.
 POOPTERM_CONFIG overrides the config path; POOPTERM_THEME overrides the theme.
 
-Print shell hooks with --print-shell-integration zsh|bash|fish.";
+Print shell hooks with --print-shell-integration zsh|bash|fish.
+Install the terminfo entry with: poopterm --print-terminfo | tic -x -";
 
 fn main() -> Result<(), Box<dyn Error>> {
 	let mut args = env::args().skip(1);
@@ -41,6 +44,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 	match argument.as_str() {
 		"--version" | "-V" => println!("poopterm {}", env!("CARGO_PKG_VERSION")),
 		"--help" | "-h" => println!("Poopterm {}\n\n{HELP}", env!("CARGO_PKG_VERSION")),
+		"--print-terminfo" => print!("{}", terminfo::SOURCE),
 		"--print-shell-integration" => {
 			let shell = args
 				.next()
