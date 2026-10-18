@@ -2,4 +2,5 @@
 pub(crate) mod keys;
 pub(crate) mod mouse;
 pub(crate) mod paste;
+pub(crate) mod scroll;
 pub(crate) mod shortcuts;

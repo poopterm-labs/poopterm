@@ -1,6 +1,6 @@
 use super::*;
-use crate::input::paste::paste_bytes;
 use crate::input::mouse::{MouseAction, MouseButtonCode, MouseReport, encode_mouse};
+use crate::input::{paste::paste_bytes, scroll::alternate_scroll_bytes};
 use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
 
 impl App {
@@ -241,25 +241,34 @@ impl App {
 			}
 			return;
 		}
-		if self.send_mouse_report(
-			if scroll_up {
-				MouseButtonCode::WheelUp
-			} else {
-				MouseButtonCode::WheelDown
-			},
-			MouseAction::Press,
-			(x, y),
-		) {
+		let lines = match delta {
+			MouseScrollDelta::LineDelta(_, lines) => self.scroll.lines(lines.into()),
+			MouseScrollDelta::PixelDelta(p) => self.scroll.pixels(p.y, self.ch as f64),
+		};
+		if lines == 0 {
 			return;
 		}
-		let lines = match delta {
-			MouseScrollDelta::LineDelta(_, y) => y.round() as isize,
-			MouseScrollDelta::PixelDelta(p) => (p.y / 24.0).round() as isize,
+		let button = if lines > 0 {
+			MouseButtonCode::WheelUp
+		} else {
+			MouseButtonCode::WheelDown
 		};
-		self.active_session_mut().term.scroll_view(lines);
-		if let Some(win) = &self.window {
-			win.request_redraw();
+		for _ in 0..lines.unsigned_abs() {
+			if !self.send_mouse_report(button, MouseAction::Press, (x, y)) {
+				break;
+			}
 		}
+		let term = self.active_term();
+		if term.mouse_tracking != 0 && self.point_at(x, y).is_some() {
+			return;
+		}
+		if term.primary_screen.is_some() {
+			let bytes = alternate_scroll_bytes(lines, term.application_cursor);
+			self.active_session_mut().write(&bytes);
+			return;
+		}
+		self.active_session_mut().term.scroll_view(lines);
+		self.request_redraw();
 	}
 
 	pub(super) fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
