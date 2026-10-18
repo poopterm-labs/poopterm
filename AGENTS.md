@@ -109,7 +109,7 @@ Details: [`docs/architecture.md`](docs/architecture.md).
 - Work lands directly on `main` as small, focused commits; there are no pull
   requests. Write messages that explain *why*, prefixed `fix:`, `perf:`,
   `feat:`, `refactor:`, `docs:`, `bench:` or `chore:`.
-- **Versioning:** `YEAR.QUARTER.PATCH` with a two-digit year, plus a random
+- **Versioning:** `YEAR.MONTH.PATCH` (two-digit year, month without a leading zero, e.g. 26.1.0 for January), plus a random
   codename per release (26.10.0 is "Giga Fly"). Put the codename in
   `[package.metadata.poopterm] codename` in `Cargo.toml` and in the
   changelog heading (`## 26.10.0 "Giga Fly" — date`); CI uses it in the

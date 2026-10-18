@@ -2,7 +2,7 @@
 
 ## 26.10.0 "Giga Fly" — 2026-10-18
 
-Poopterm now numbers releases `YEAR.QUARTER.PATCH`, and each release gets a
+Poopterm now numbers releases `YEAR.MONTH.PATCH`, and each release gets a
 codename.
 
 ### Performance

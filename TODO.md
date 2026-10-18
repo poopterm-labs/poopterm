@@ -55,3 +55,20 @@ well above 250 MB/s.
 - Update `Formula/poopterm.rb` to v26.10.0 once CI has tagged it.
 - Bash shell integration still needs manual setup; consider injecting it
   via `--rcfile` like zsh's `ZDOTDIR` loader.
+
+## CI and platforms (requested, not started)
+
+- **Automatic monthly releases:** after every fully green CI run on `main`,
+  CI bumps the patch (`YY.M.P+1`), or starts `YY.M.0` with a new random
+  codename in a new month. It commits the bump to Cargo.toml, Cargo.lock and
+  the CHANGELOG with `GITHUB_TOKEN` (those pushes don't retrigger CI), tags
+  it and creates the release. It skips the release if `main` moved during the
+  run. Then it updates `Formula/poopterm.rb`. Contributors must
+  `git pull --rebase` before pushing.
+- **FreeBSD CI:** build and test in a VM (e.g. `vmactions/freebsd-vm`) with
+  the xorg, libxkbcommon and wayland packages; today only cross-clippy runs.
+- **Android:** `rfd` does not compile for Android (make it a non-Android
+  dependency). Also needed: an `android_main` entry through winit's
+  `android-native-activity`, clipboard/file-dialog/cwd fallbacks,
+  `/system/bin/sh` and `/system/fonts`, an APK build in CI (cargo-apk or
+  xbuild), and testing on a device or emulator.

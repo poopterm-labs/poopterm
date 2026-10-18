@@ -379,7 +379,7 @@ and AI coding agents alike), then see [architecture](docs/architecture.md),
 CI builds and checks macOS and Linux; BSD still needs testing on real systems.
 
 
-Releases are numbered `YEAR.QUARTER.PATCH` (two-digit year) and each gets a
+Releases are numbered `YEAR.MONTH.PATCH` (two-digit year) and each gets a
 random codename; 26.10.0 is "Giga Fly". The codename lives in
 `[package.metadata.poopterm]` in `Cargo.toml` and in the changelog heading.
 Update `Cargo.toml`, the Poopterm entry in `Cargo.lock`, and the changelog together.

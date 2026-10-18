@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 
 [package.metadata.poopterm]
-# Each release gets a random codename; patch releases keep it.
+# Versions are YEAR.MONTH.PATCH; each month gets a random codename, patches keep it.
 codename = "Giga Fly"
 
 [dependencies]
