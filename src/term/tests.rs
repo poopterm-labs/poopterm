@@ -502,3 +502,116 @@ fn mode_queries_report_set_and_reset_states() {
 fn cells_stay_compact() {
 	assert_eq!(std::mem::size_of::<Cell>(), 16);
 }
+
+/// Feeds the same random streams through the batched `Parser` and through
+/// vte driving `Term` directly (one `print` per character), and requires
+/// identical terminal state. Guards every print fast path.
+#[test]
+fn batched_printing_matches_per_character_printing() {
+	let fragments: &[&[u8]] = &[
+		b"hello world ",
+		b"x",
+		b"\r\n",
+		b"\n",
+		b"\t",
+		b"\x08",
+		b"\x1b[31m",
+		b"\x1b[1;7m",
+		b"\x1b[0m",
+		b"\x1b[2D",
+		b"\x1b[5G",
+		b"\x1b[K",
+		b"\x1b[2;3H",
+		b"\x1b[?7l",
+		b"\x1b[?7h",
+		b"\x1b[4h",
+		b"\x1b[4l",
+		b"\x1b(0lqk\x1b(B",
+		"猫".as_bytes(),
+		"e\u{301}".as_bytes(),
+		"👨\u{200d}👩".as_bytes(),
+		b"\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\",
+		b"\x7f",
+		b"\x1b[3;5r",
+		b"\x1b[r",
+	];
+	let mut seed = 0x9e37_79b9_u32;
+	for _ in 0..200 {
+		let mut stream = Vec::new();
+		for _ in 0..60 {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			stream.extend_from_slice(fragments[seed as usize % fragments.len()]);
+		}
+		let mut batched = terminal(9, 5);
+		batched.scrollback_limit = 20;
+		let mut reference = batched.clone();
+		let mut parser = Parser::new();
+		for chunk in stream.chunks(7) {
+			parser.advance(&mut batched, chunk);
+		}
+		vte::Parser::new().advance(&mut reference, &stream);
+		assert_eq!(
+			(batched.cx, batched.cy, batched.wrap_pending),
+			(reference.cx, reference.cy, reference.wrap_pending),
+			"cursor after {:?}",
+			String::from_utf8_lossy(&stream)
+		);
+		// `extra` ids depend on interning order, so compare what they resolve to.
+		let resolve = |t: &Term, row: &[Cell]| -> Vec<_> {
+			row
+				.iter()
+				.map(|c| {
+					(
+						c.ch,
+						c.fg,
+						c.bg,
+						c.attrs,
+						c.width,
+						t.marks(c).to_vec(),
+						t.hyperlink_uri(c).map(str::to_owned),
+					)
+				})
+				.collect()
+		};
+		let context = String::from_utf8_lossy(&stream);
+		for y in 0..batched.rows {
+			assert_eq!(
+				resolve(&batched, &batched.grid[y]),
+				resolve(&reference, &reference.grid[y]),
+				"row {y} after {context:?}"
+			);
+		}
+		assert_eq!(batched.scrollback.len(), reference.scrollback.len());
+		for (a, b) in batched.scrollback.iter().zip(&reference.scrollback) {
+			assert_eq!(
+				resolve(&batched, a),
+				resolve(&reference, b),
+				"history after {context:?}"
+			);
+		}
+	}
+}
+
+#[test]
+fn controls_after_a_utf8_character_split_across_reads_are_not_dropped() {
+	// vte 0.15 swallows bytes copied after a split character; see Parser::advance.
+	let mut t = terminal(8, 2);
+	let mut parser = Parser::new();
+	parser.advance(&mut t, b"e\xcc");
+	// The lookahead vte copies (`81 08 e7`) ends inside 猫, which triggers the bug.
+	parser.advance(&mut t, b"\x81\x08\xe7\x8c\xab");
+	assert_eq!(row(&t, 0), "猫       ");
+}
+
+#[test]
+fn a_character_split_over_several_reads_is_reassembled() {
+	let mut t = terminal(6, 1);
+	let mut parser = Parser::new();
+	for byte in "🙂X".bytes() {
+		parser.advance(&mut t, &[byte]);
+	}
+	assert_eq!(row(&t, 0), "🙂 X   ");
+	assert_eq!(cell(&t, 0).width, 2);
+}

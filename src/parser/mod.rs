@@ -17,18 +17,71 @@ use vte::{Params, Perform};
 /// escape sequences and UTF-8 codepoints split across reads remain intact.
 pub(crate) struct Parser {
 	inner: vte::Parser,
+	/// An incomplete UTF-8 sequence from the end of the previous read.
+	carry: [u8; 4],
+	carry_len: usize,
 }
 
 impl Parser {
 	pub(crate) fn new() -> Self {
 		Self {
 			inner: vte::Parser::new(),
+			carry: [0; 4],
+			carry_len: 0,
 		}
 	}
 
-	pub(crate) fn advance(&mut self, term: &mut Term, bytes: &[u8]) {
-		self.inner.advance(term, bytes);
+	/// Feeds one PTY read to the terminal.
+	///
+	/// vte 0.15 mishandles characters split across `advance` calls: its
+	/// lookahead can consume (and drop) up to two bytes that follow the split
+	/// character. So a trailing incomplete sequence is held back and completed
+	/// from the next read; vte only ever sees whole characters.
+	pub(crate) fn advance(&mut self, term: &mut Term, mut bytes: &[u8]) {
+		if self.carry_len > 0 {
+			let needed = utf8_len(self.carry[0]) - self.carry_len;
+			let take = needed.min(bytes.len());
+			self.carry[self.carry_len..self.carry_len + take].copy_from_slice(&bytes[..take]);
+			self.carry_len += take;
+			bytes = &bytes[take..];
+			if take < needed {
+				return;
+			}
+			self.inner.advance(term, &self.carry[..self.carry_len]);
+			self.carry_len = 0;
+		}
+		let complete = complete_prefix(bytes);
+		self.inner.advance(term, &bytes[..complete]);
+		let tail = &bytes[complete..];
+		self.carry[..tail.len()].copy_from_slice(tail);
+		self.carry_len = tail.len();
 	}
+}
+
+/// Byte length of the UTF-8 sequence that `lead` starts (1 for non-leads).
+fn utf8_len(lead: u8) -> usize {
+	match lead {
+		0xc0..=0xdf => 2,
+		0xe0..=0xef => 3,
+		0xf0..=0xf7 => 4,
+		_ => 1,
+	}
+}
+
+/// Length of `bytes` without a trailing, incomplete UTF-8 sequence.
+fn complete_prefix(bytes: &[u8]) -> usize {
+	for start in (bytes.len().saturating_sub(3)..bytes.len()).rev() {
+		let byte = bytes[start];
+		if byte & 0xc0 == 0x80 {
+			continue; // continuation byte: keep looking for its lead
+		}
+		return if bytes.len() - start < utf8_len(byte) {
+			start
+		} else {
+			bytes.len()
+		};
+	}
+	bytes.len()
 }
 
 impl Perform for Term {
