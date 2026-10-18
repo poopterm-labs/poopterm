@@ -455,3 +455,15 @@ fn osc_directory_and_bell_are_tracked() {
 	assert_eq!(term.cwd, std::path::PathBuf::from("/tmp/my dir"));
 	assert!(term.bell);
 }
+
+#[test]
+fn lowering_the_scrollback_limit_discards_oldest_lines_and_clamps_the_view() {
+	let mut t = terminal(4, 1);
+	feed(&mut t, b"a\r\nb\r\nc\r\nd");
+	t.scroll_view(3);
+	t.set_scrollback_limit(1);
+	assert_eq!(t.scrollback.len(), 1);
+	assert_eq!(t.scrollback[0][0].ch, 'c');
+	assert_eq!(t.history_base, 2);
+	assert_eq!(t.scroll_offset, 1);
+}

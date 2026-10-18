@@ -1,4 +1,71 @@
+//! Drawing the Settings window. Row positions are logical pixels, multiplied by
+//! the window scale; `settings.rs` hit-tests clicks against the same constants.
 use super::*;
+use crate::render::painter::Painter;
+
+pub(super) const THEME_ROW: usize = 138;
+pub(super) const WALLPAPER_ROW: usize = 228;
+pub(super) const FONT_ROW: usize = 270;
+pub(super) const SCROLLBACK_ROW: usize = 326;
+pub(super) const RESTORE_ROW: usize = 382;
+pub(super) const STRENGTH_ROW: usize = 438;
+pub(super) const OPACITY_ROW: usize = 494;
+/// Height of a settings row's controls.
+pub(super) const ROW_HEIGHT: usize = 40;
+
+/// Themes in the order the Settings picker cycles through them.
+pub(super) const THEMES: [ThemeKind; 8] = [
+	ThemeKind::MacOsDark,
+	ThemeKind::MacOsLight,
+	ThemeKind::CatppuccinLatte,
+	ThemeKind::CatppuccinFrappe,
+	ThemeKind::CatppuccinMacchiato,
+	ThemeKind::CatppuccinMocha,
+	ThemeKind::Poop,
+	ThemeKind::Custom,
+];
+
+/// Returns the theme `step` positions away from `current` in [`THEMES`].
+pub(super) fn step_theme(current: ThemeKind, step: isize) -> ThemeKind {
+	let index = THEMES
+		.iter()
+		.position(|&theme| theme == current)
+		.unwrap_or(0);
+	THEMES[(index as isize + step).rem_euclid(THEMES.len() as isize) as usize]
+}
+
+fn theme_label(kind: ThemeKind) -> String {
+	match kind {
+		ThemeKind::MacOsDark => "Dark Mode".to_owned(),
+		ThemeKind::MacOsLight => "Light Mode".to_owned(),
+		ThemeKind::Custom => "Custom".to_owned(),
+		_ => kind.name().replace("catppuccin-", "Catppuccin "),
+	}
+}
+
+/// Text drawing for one Settings frame; every label shares the base ascent.
+struct Pen<'a> {
+	fonts: &'a mut crate::render::glyphs::FontSet,
+	px: f32,
+	ascent: i32,
+	color: u32,
+	scale: usize,
+}
+
+impl Pen<'_> {
+	/// Draws `text` at logical `(x, y)` scaled by `size` relative to the base px.
+	fn text(&mut self, p: &mut Painter, x: usize, y: usize, text: &str, size: f32) {
+		p.text(
+			self.fonts,
+			x,
+			y * self.scale,
+			text,
+			self.px * size,
+			self.ascent,
+			self.color,
+		);
+	}
+}
 
 impl App {
 	pub(super) fn draw_settings(&mut self) {
@@ -7,19 +74,22 @@ impl App {
 			.as_ref()
 			.map_or(1, |window| window.scale_factor().round() as usize)
 			.max(1);
-		let Some(surface) = self.settings_surface.as_mut() else {
+		let Some(mut surface) = self.settings_surface.take() else {
 			return;
 		};
-		let Ok(mut buffer) = surface.buffer_mut() else {
-			return;
-		};
-		let pixels: &mut [u32] = &mut buffer;
-		let (width, height) = (self.settings_width as usize, self.settings_height as usize);
-		pixels.fill(self.theme.border);
-		fill_rect(
-			pixels,
-			width,
-			height,
+		if let Ok(mut buffer) = surface.buffer_mut() {
+			let (width, height) = (self.settings_width as usize, self.settings_height as usize);
+			let mut painter = Painter::new(&mut buffer, width, height);
+			self.compose_settings(&mut painter, scale);
+			let _ = buffer.present();
+		}
+		self.settings_surface = Some(surface);
+	}
+
+	fn compose_settings(&mut self, p: &mut Painter, scale: usize) {
+		let (width, height) = (p.width, p.height);
+		p.fill(self.theme.border);
+		p.rect(
 			2 * scale,
 			2 * scale,
 			width.saturating_sub(4 * scale),
@@ -28,28 +98,33 @@ impl App {
 		);
 		let px = 18.0 * scale as f32;
 		let ascent = self
-			.font
+			.fonts
+			.primary()
 			.horizontal_line_metrics(px)
 			.map_or(self.ascent, |metrics| metrics.ascent.round() as i32);
-		let cell_width = self.font.metrics('M', px).advance_width.ceil() as usize;
+		let cell_width = self.fonts.primary().metrics('M', px).advance_width.ceil() as usize;
+		let style = self.button_style(scale);
+		let cursor = self.settings_cursor_pos;
+		let hovered = |x: usize, y: usize, w: usize, h: usize| {
+			cursor.0 >= x as f64
+				&& cursor.0 < (x + w) as f64
+				&& cursor.1 >= y as f64
+				&& cursor.1 < (y + h) as f64
+		};
+		let editor = &self.settings_editor;
+		let mut pen = Pen {
+			fonts: &mut self.fonts,
+			px,
+			ascent,
+			color: self.theme.fg,
+			scale,
+		};
 		let x = 24 * scale;
 		let content_w = width.saturating_sub(48 * scale);
-		let font = &self.font;
-		let glyphs = &mut self.glyphs;
-		if self.settings_editor.about {
-			draw_text(
-				pixels,
-				width,
-				height,
-				x,
-				28 * scale,
-				"About poopterm",
-				px * 1.3,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
+		let s = scale;
+
+		if editor.about {
+			pen.text(p, x, 28, "About poopterm", 1.3);
 			for (line, text) in [
 				(104, concat!("Version ", env!("CARGO_PKG_VERSION"))),
 				(148, "A small, native terminal emulator written in Rust."),
@@ -58,562 +133,136 @@ impl App {
 				(256, "Source: github.com/poopterm-labs/poopterm"),
 				(292, "Built with Rust, winit, softbuffer, fontdue, and vte."),
 			] {
-				draw_text(
-					pixels,
-					width,
-					height,
-					x,
-					line * scale,
-					text,
-					px * 0.82,
-					ascent,
-					self.theme.fg,
-					font,
-					glyphs,
-				);
+				pen.text(p, x, line, text, 0.82);
 			}
-			let back_x = width.saturating_sub(164 * scale);
-			draw_kde_button(
-				pixels,
-				width,
-				height,
-				back_x,
-				20 * scale,
-				140 * scale,
-				36 * scale,
-				scale,
-				self.theme.bg,
-				self.theme.border,
-				self.theme.palette[4],
-				false,
-			);
-			draw_text(
-				pixels,
-				width,
-				height,
-				back_x + 22 * scale,
-				27 * scale,
-				"Settings",
-				px * 0.8,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
-			let _ = buffer.present();
+			let back_x = width.saturating_sub(164 * s);
+			p.button((back_x, 20 * s, 140 * s, 36 * s), style, false);
+			pen.text(p, back_x + 22 * s, 27, "Settings", 0.8);
 			return;
 		}
-		draw_text(
-			pixels,
-			width,
-			height,
-			x,
-			24 * scale,
-			"Poopterm Settings",
-			px,
-			ascent,
-			self.theme.fg,
-			font,
-			glyphs,
-		);
-		let about_x = width.saturating_sub(140 * scale);
-		draw_kde_button(
-			pixels,
-			width,
-			height,
-			about_x,
-			20 * scale,
-			116 * scale,
-			36 * scale,
-			scale,
-			self.theme.bg,
-			self.theme.border,
-			self.theme.palette[4],
-			self.settings_cursor_pos.0 >= about_x as f64
-				&& self.settings_cursor_pos.0 < (about_x + 116 * scale) as f64
-				&& self.settings_cursor_pos.1 >= (20 * scale) as f64
-				&& self.settings_cursor_pos.1 < (56 * scale) as f64,
-		);
-		draw_text(
-			pixels,
-			width,
-			height,
-			about_x + 25 * scale,
-			27 * scale,
-			"About",
-			px * 0.8,
-			ascent,
-			self.theme.fg,
-			font,
-			glyphs,
-		);
-		draw_text(
-			pixels,
-			width,
-			height,
-			x,
-			62 * scale,
-			"Appearance",
-			px * 0.82,
-			ascent,
-			self.theme.fg,
-			font,
-			glyphs,
-		);
-		draw_text(
-			pixels,
-			width,
-			height,
-			x,
-			112 * scale,
-			"Color theme",
-			px * 0.76,
-			ascent,
-			self.theme.fg,
-			font,
-			glyphs,
-		);
-		let theme_y = 138 * scale;
-		let button_w = 48 * scale;
-		let themes = [
-			ThemeKind::MacOsDark,
-			ThemeKind::MacOsLight,
-			ThemeKind::CatppuccinLatte,
-			ThemeKind::CatppuccinFrappe,
-			ThemeKind::CatppuccinMacchiato,
-			ThemeKind::CatppuccinMocha,
-			ThemeKind::Poop,
-			ThemeKind::Custom,
-		];
-		let index = themes
-			.iter()
-			.position(|theme| *theme == self.settings_editor.theme)
-			.unwrap_or(0);
+
+		pen.text(p, x, 24, "Poopterm Settings", 1.0);
+		let about_x = width.saturating_sub(140 * s);
+		let about = (about_x, 20 * s, 116 * s, 36 * s);
+		p.button(about, style, hovered(about.0, about.1, about.2, about.3));
+		pen.text(p, about_x + 25 * s, 27, "About", 0.8);
+		pen.text(p, x, 62, "Appearance", 0.82);
+		pen.text(p, x, 112, "Color theme", 0.76);
+
+		let button_w = 48 * s;
+		let theme_y = THEME_ROW * s;
 		for (bx, label) in [(x, "‹"), (x + content_w - button_w, "›")] {
-			draw_kde_button(
-				pixels,
-				width,
-				height,
-				bx,
-				theme_y,
-				button_w,
-				40 * scale,
-				scale,
-				self.theme.bg,
-				self.theme.border,
-				self.theme.palette[4],
-				false,
-			);
-			draw_text(
-				pixels,
-				width,
-				height,
-				bx + 18 * scale,
-				theme_y + 7 * scale,
-				label,
-				px,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
+			p.button((bx, theme_y, button_w, ROW_HEIGHT * s), style, false);
+			pen.text(p, bx + 18 * s, THEME_ROW + 7, label, 1.0);
 		}
-		let theme_x = x + button_w + 8 * scale;
-		let theme_w = content_w.saturating_sub(2 * button_w + 16 * scale);
-		draw_kde_button(
-			pixels,
-			width,
-			height,
-			theme_x,
-			theme_y,
-			theme_w,
-			40 * scale,
-			scale,
-			self.theme.bg,
-			self.theme.border,
-			self.theme.palette[4],
-			false,
+		let theme_x = x + button_w + 8 * s;
+		let theme_w = content_w.saturating_sub(2 * button_w + 16 * s);
+		p.button((theme_x, theme_y, theme_w, ROW_HEIGHT * s), style, false);
+		pen.text(
+			p,
+			theme_x + 12 * s,
+			THEME_ROW + 9,
+			&theme_label(editor.theme),
+			0.82,
 		);
-		let theme_name = match self.settings_editor.theme {
-			ThemeKind::MacOsDark => "Dark Mode".to_owned(),
-			ThemeKind::MacOsLight => "Light Mode".to_owned(),
-			ThemeKind::Custom => "Custom".to_owned(),
-			_ => self
-				.settings_editor
-				.theme
-				.name()
-				.replace("catppuccin-", "Catppuccin "),
-		};
-		draw_text(
-			pixels,
-			width,
-			height,
-			theme_x + 12 * scale,
-			theme_y + 9 * scale,
-			&theme_name,
-			px * 0.82,
-			ascent,
-			self.theme.fg,
-			font,
-			glyphs,
-		);
-		let _ = index;
-		draw_text(
-			pixels,
-			width,
-			height,
-			x,
-			210 * scale,
-			"Background wallpaper",
-			px * 0.76,
-			ascent,
-			self.theme.fg,
-			font,
-			glyphs,
-		);
+
+		pen.text(p, x, 210, "Background wallpaper", 0.76);
 		for (bx, bw, label) in [
-			(x, 152 * scale, "Choose image…"),
-			(x + 164 * scale, 96 * scale, "Clear"),
+			(x, 152 * s, "Choose image…"),
+			(x + 164 * s, 96 * s, "Clear"),
 		] {
-			draw_kde_button(
-				pixels,
-				width,
-				height,
-				bx,
-				228 * scale,
-				bw,
-				32 * scale,
-				scale,
-				self.theme.bg,
-				self.theme.border,
-				self.theme.palette[4],
-				false,
-			);
-			draw_text(
-				pixels,
-				width,
-				height,
-				bx + 12 * scale,
-				234 * scale,
-				label,
-				px * 0.68,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
+			p.button((bx, WALLPAPER_ROW * s, bw, 32 * s), style, false);
+			pen.text(p, bx + 12 * s, WALLPAPER_ROW + 6, label, 0.68);
 		}
-		let wallpaper_name = self
-			.settings_editor
+		let wallpaper_name: String = editor
 			.wallpaper_path
 			.as_ref()
 			.and_then(|path| path.file_name())
 			.and_then(|name| name.to_str())
-			.unwrap_or("No image selected");
-		let wallpaper_name: String = wallpaper_name.chars().take(32).collect();
-		draw_text(
-			pixels,
-			width,
-			height,
-			x + 272 * scale,
-			234 * scale,
-			&wallpaper_name,
-			px * 0.66,
-			ascent,
-			self.theme.fg,
-			font,
-			glyphs,
-		);
-		for (row, label, value) in [
+			.unwrap_or("No image selected")
+			.chars()
+			.take(32)
+			.collect();
+		pen.text(p, x + 272 * s, WALLPAPER_ROW + 6, &wallpaper_name, 0.66);
+
+		let prefs = editor.preferences;
+		let mut steppers = vec![
+			(FONT_ROW, "Font size", prefs.font_size.to_string()),
 			(
-				270,
-				"Font size",
-				self.settings_editor.preferences.font_size.to_string(),
-			),
-			(
-				326,
+				SCROLLBACK_ROW,
 				"Scrollback lines",
-				self
-					.settings_editor
-					.preferences
-					.scrollback_lines
-					.to_string(),
+				prefs.scrollback_lines.to_string(),
 			),
 			(
-				382,
-				"Restore tabs on launch",
-				if self.settings_editor.preferences.restore_sessions {
-					"On".into()
-				} else {
-					"Off".into()
-				},
-			),
-		] {
-			draw_text(
-				pixels,
-				width,
-				height,
-				x,
-				(row + 8) * scale,
-				label,
-				px * 0.82,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
-			if row == 382 {
-				let bx = width.saturating_sub(240 * scale);
-				draw_kde_button(
-					pixels,
-					width,
-					height,
-					bx,
-					row * scale,
-					216 * scale,
-					40 * scale,
-					scale,
-					self.theme.bg,
-					self.theme.border,
-					self.theme.palette[4],
-					self.settings_editor.preferences.restore_sessions,
-				);
-				draw_text(
-					pixels,
-					width,
-					height,
-					bx + 16 * scale,
-					(row + 8) * scale,
-					if self.settings_editor.preferences.restore_sessions {
-						"Enabled"
-					} else {
-						"Disabled"
-					},
-					px * 0.82,
-					ascent,
-					self.theme.fg,
-					font,
-					glyphs,
-				);
-				continue;
-			}
-			for (bx, text) in [
-				(width.saturating_sub(240 * scale), "−"),
-				(width.saturating_sub(72 * scale), "+"),
-			] {
-				draw_kde_button(
-					pixels,
-					width,
-					height,
-					bx,
-					row * scale,
-					48 * scale,
-					40 * scale,
-					scale,
-					self.theme.bg,
-					self.theme.border,
-					self.theme.palette[4],
-					false,
-				);
-				draw_text(
-					pixels,
-					width,
-					height,
-					bx + 16 * scale,
-					(row + 7) * scale,
-					text,
-					px,
-					ascent,
-					self.theme.fg,
-					font,
-					glyphs,
-				);
-			}
-			draw_text(
-				pixels,
-				width,
-				height,
-				width.saturating_sub(180 * scale),
-				(row + 8) * scale,
-				&value,
-				px * 0.82,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
-		}
-		{
-			let row = 438;
-			draw_text(
-				pixels,
-				width,
-				height,
-				x,
-				(row + 8) * scale,
+				STRENGTH_ROW,
 				"Wallpaper strength",
-				px * 0.82,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
-			for (bx, text) in [
-				(width.saturating_sub(240 * scale), "−"),
-				(width.saturating_sub(72 * scale), "+"),
-			] {
-				draw_kde_button(
-					pixels,
-					width,
-					height,
-					bx,
-					row * scale,
-					48 * scale,
-					40 * scale,
-					scale,
-					self.theme.bg,
-					self.theme.border,
-					self.theme.palette[4],
-					false,
-				);
-				draw_text(
-					pixels,
-					width,
-					height,
-					bx + 16 * scale,
-					(row + 7) * scale,
-					text,
-					px,
-					ascent,
-					self.theme.fg,
-					font,
-					glyphs,
-				);
-			}
-			draw_text(
-				pixels,
-				width,
-				height,
-				width.saturating_sub(180 * scale),
-				(row + 8) * scale,
-				&format!("{}%", self.settings_editor.wallpaper_strength),
-				px * 0.82,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
+				format!("{}%", editor.wallpaper_strength),
+			),
+		];
+		if cfg!(target_os = "macos") {
+			steppers.push((OPACITY_ROW, "Window opacity", format!("{}%", prefs.opacity)));
 		}
-		#[cfg(target_os = "macos")]
-		{
-			let row = 494;
-			draw_text(
-				pixels,
-				width,
-				height,
-				x,
-				(row + 8) * scale,
-				"Window opacity",
-				px * 0.82,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
-			for (bx, text) in [
-				(width.saturating_sub(240 * scale), "−"),
-				(width.saturating_sub(72 * scale), "+"),
+		for (row, label, value) in steppers {
+			pen.text(p, x, row + 8, label, 0.82);
+			for (bx, sign) in [
+				(width.saturating_sub(240 * s), "−"),
+				(width.saturating_sub(72 * s), "+"),
 			] {
-				draw_kde_button(
-					pixels,
-					width,
-					height,
-					bx,
-					row * scale,
-					48 * scale,
-					40 * scale,
-					scale,
-					self.theme.bg,
-					self.theme.border,
-					self.theme.palette[4],
-					false,
-				);
-				draw_text(
-					pixels,
-					width,
-					height,
-					bx + 16 * scale,
-					(row + 7) * scale,
-					text,
-					px,
-					ascent,
-					self.theme.fg,
-					font,
-					glyphs,
-				);
+				p.button((bx, row * s, button_w, ROW_HEIGHT * s), style, false);
+				pen.text(p, bx + 16 * s, row + 7, sign, 1.0);
 			}
-			draw_text(
-				pixels,
-				width,
-				height,
-				width.saturating_sub(180 * scale),
-				(row + 8) * scale,
-				&format!("{}%", self.settings_editor.preferences.opacity),
-				px * 0.82,
-				ascent,
-				self.theme.fg,
-				font,
-				glyphs,
-			);
+			pen.text(p, width.saturating_sub(180 * s), row + 8, &value, 0.82);
 		}
-		let save_x = width.saturating_sub(140 * scale);
-		let save_y = height.saturating_sub(52 * scale);
-		let save_w = 120 * scale;
-		let save_h = 36 * scale;
-		let hovered = self.settings_cursor_pos.0 >= save_x as f64
-			&& self.settings_cursor_pos.0 < (save_x + save_w) as f64
-			&& self.settings_cursor_pos.1 >= save_y as f64
-			&& self.settings_cursor_pos.1 < (save_y + save_h) as f64;
-		draw_kde_button(
-			pixels,
-			width,
-			height,
-			save_x,
-			save_y,
-			save_w,
-			save_h,
-			scale,
-			self.theme.bg,
-			self.theme.border,
-			self.theme.palette[4],
-			hovered,
+
+		pen.text(p, x, RESTORE_ROW + 8, "Restore tabs on launch", 0.82);
+		let toggle_x = width.saturating_sub(240 * s);
+		let restore = prefs.restore_sessions;
+		p.button(
+			(toggle_x, RESTORE_ROW * s, 216 * s, ROW_HEIGHT * s),
+			style,
+			restore,
 		);
-		draw_text(
-			pixels,
-			width,
-			height,
-			save_x + (save_w - 4 * cell_width) / 2,
-			save_y + 6 * scale,
+		let state = if restore { "Enabled" } else { "Disabled" };
+		pen.text(p, toggle_x + 16 * s, RESTORE_ROW + 8, state, 0.82);
+
+		let (save_x, save_y) = (width.saturating_sub(140 * s), height.saturating_sub(52 * s));
+		let (save_w, save_h) = (120 * s, 36 * s);
+		p.button(
+			(save_x, save_y, save_w, save_h),
+			style,
+			hovered(save_x, save_y, save_w, save_h),
+		);
+		let save_text_x = save_x + save_w.saturating_sub(4 * cell_width) / 2;
+		p.text(
+			pen.fonts,
+			save_text_x,
+			save_y + 6 * s,
 			"Save",
 			px,
 			ascent,
-			self.theme.fg,
-			font,
-			glyphs,
+			pen.color,
 		);
-		draw_text(
-			pixels,
-			width,
-			height,
+		let status_y = height.saturating_sub(40 * s);
+		p.text(
+			pen.fonts,
 			x,
-			height.saturating_sub(40 * scale),
-			&self.settings_editor.status,
+			status_y,
+			&editor.status,
 			px * 0.68,
 			ascent,
-			self.theme.fg,
-			font,
-			glyphs,
+			pen.color,
 		);
-		let _ = buffer.present();
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn theme_picker_wraps_in_both_directions() {
+		assert_eq!(step_theme(ThemeKind::MacOsDark, -1), ThemeKind::Custom);
+		assert_eq!(step_theme(ThemeKind::Custom, 1), ThemeKind::MacOsDark);
+		assert_eq!(step_theme(ThemeKind::Poop, 1), ThemeKind::Custom);
 	}
 }

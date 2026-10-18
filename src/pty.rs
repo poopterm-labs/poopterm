@@ -32,6 +32,13 @@ pub(crate) struct Session {
 	pub(crate) activity: bool,
 }
 
+impl Session {
+	/// The tab title: a user-chosen name, else the title set by the shell (OSC 0/2).
+	pub(crate) fn title(&self) -> &str {
+		self.custom_title.as_deref().unwrap_or(&self.term.title)
+	}
+}
+
 pub(crate) fn spawn_session(
 	id: u64,
 	cols: usize,

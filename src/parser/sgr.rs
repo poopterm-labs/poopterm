@@ -1,5 +1,8 @@
 //! Select Graphic Rendition (`CSI … m`): colors and text attributes.
-use crate::{term::Term, theme::xterm_color};
+use crate::{
+	term::{Term, attr::*},
+	theme::xterm_color,
+};
 use vte::Params;
 
 impl Term {
@@ -104,9 +107,9 @@ impl Term {
 			}
 			if code == 4 && group.len() > 1 {
 				match group[1] {
-					0 => self.attrs &= !(4 | 128),
-					2 => self.attrs |= 4 | 128,
-					_ => self.attrs |= 4,
+					0 => self.attrs &= !(UNDERLINE | DOUBLE_UNDERLINE),
+					2 => self.attrs |= UNDERLINE | DOUBLE_UNDERLINE,
+					_ => self.attrs |= UNDERLINE,
 				}
 				i += 1;
 				continue;
@@ -120,26 +123,26 @@ impl Term {
 					self.reverse = false;
 				}
 				1 => self.bold = true,
-				2 => self.attrs |= 1,
-				3 => self.attrs |= 2,
-				4 => self.attrs |= 4,
-				21 => self.attrs |= 4 | 128,
-				5 | 6 => self.attrs |= 32,
+				2 => self.attrs |= DIM,
+				3 => self.attrs |= ITALIC,
+				4 => self.attrs |= UNDERLINE,
+				21 => self.attrs |= UNDERLINE | DOUBLE_UNDERLINE,
+				5 | 6 => self.attrs |= BLINK,
 				7 => self.reverse = true,
-				8 => self.attrs |= 8,
-				9 => self.attrs |= 16,
+				8 => self.attrs |= CONCEAL,
+				9 => self.attrs |= STRIKE,
 				22 => {
 					self.bold = false;
-					self.attrs &= !1;
+					self.attrs &= !DIM;
 				}
-				23 => self.attrs &= !2,
-				24 => self.attrs &= !(4 | 128),
-				25 => self.attrs &= !32,
+				23 => self.attrs &= !ITALIC,
+				24 => self.attrs &= !(UNDERLINE | DOUBLE_UNDERLINE),
+				25 => self.attrs &= !BLINK,
 				27 => self.reverse = false,
-				28 => self.attrs &= !8,
-				29 => self.attrs &= !16,
-				53 => self.attrs |= 64,
-				55 => self.attrs &= !64,
+				28 => self.attrs &= !CONCEAL,
+				29 => self.attrs &= !STRIKE,
+				53 => self.attrs |= OVERLINE,
+				55 => self.attrs &= !OVERLINE,
 				30..=37 => self.fg = self.indexed_color((code - 30) as u8),
 				39 => self.fg = self.default_fg,
 				40..=47 => self.bg = self.indexed_color((code - 40) as u8),

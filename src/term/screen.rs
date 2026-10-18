@@ -164,10 +164,19 @@ impl Term {
 			self.scroll_offset += history.len();
 		}
 		self.scrollback.extend(history);
-		while self.scrollback.len() > self.scrollback_limit {
-			self.scrollback.pop_front();
-			self.history_base = self.history_base.saturating_add(1);
-		}
+		self.trim_scrollback();
+	}
+
+	/// Changes the history limit, discarding the oldest lines that no longer fit.
+	pub(crate) fn set_scrollback_limit(&mut self, limit: usize) {
+		self.scrollback_limit = limit;
+		self.trim_scrollback();
+	}
+
+	fn trim_scrollback(&mut self) {
+		let excess = self.scrollback.len().saturating_sub(self.scrollback_limit);
+		self.scrollback.drain(..excess);
+		self.history_base = self.history_base.saturating_add(excess);
 		self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
 	}
 

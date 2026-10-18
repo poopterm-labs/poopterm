@@ -9,6 +9,20 @@ use crate::theme::Theme;
 
 use std::{collections::VecDeque, path::PathBuf, sync::Arc, time::Instant};
 
+/// Bit flags stored in [`Cell::attrs`] and [`Term::attrs`].
+pub(crate) mod attr {
+	pub const DIM: u8 = 1;
+	pub const ITALIC: u8 = 2;
+	pub const UNDERLINE: u8 = 4;
+	pub const CONCEAL: u8 = 8;
+	pub const STRIKE: u8 = 16;
+	pub const BLINK: u8 = 32;
+	pub const OVERLINE: u8 = 64;
+	pub const DOUBLE_UNDERLINE: u8 = 128;
+}
+
+/// One grid cell. `width` is 1 for normal, 2 for the left half of a wide
+/// character and 0 for its right-half spacer.
 #[derive(Clone, Copy)]
 pub(crate) struct Cell {
 	pub(crate) attrs: u8,

@@ -1,5 +1,6 @@
 //! Application state and the winit event loop.
 mod draw;
+mod draw_tabs;
 mod handler;
 mod keyboard;
 mod mouse;
@@ -9,11 +10,8 @@ mod settings_view;
 mod tabs;
 
 use portable_pty::PtySize;
-use std::{
-	collections::HashMap, error::Error, io::Write, num::NonZeroU32, path::PathBuf, sync::Arc,
-};
+use std::{error::Error, io::Write, num::NonZeroU32, path::PathBuf, sync::Arc};
 
-use fontdue::{Font, Metrics};
 use winit::{
 	event::{ElementState, MouseButton, WindowEvent},
 	event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
@@ -29,7 +27,7 @@ use crate::{
 	fonts::load_fonts,
 	input::{keys::Modifiers, shortcuts::Shortcuts},
 	pty::{Session, UserEvent, spawn_session},
-	render::{blend::blend, primitives::*},
+	render::{blend::blend, glyphs::FontSet},
 	session_store::restored_session_dirs,
 	shell_integration::decode_uri_path,
 	term::Term,
@@ -48,10 +46,7 @@ pub(crate) struct App {
 	theme: Theme,
 	wallpaper: Option<Wallpaper>,
 	wallpaper_strength: usize,
-	font: Font,
-	fallback_fonts: Vec<Font>,
-	font_choices: HashMap<char, usize>,
-	glyphs: HashMap<(char, u32, usize), (Metrics, Vec<u8>)>,
+	fonts: FontSet,
 	px: f32,
 	cw: usize,
 	ch: usize,
@@ -122,6 +117,24 @@ impl App {
 		if let Some(window) = &self.window {
 			window.request_redraw();
 		}
+	}
+
+	pub(super) fn request_redraw(&self) {
+		if let Some(window) = &self.window {
+			window.request_redraw();
+		}
+	}
+
+	/// Sets the terminal font size in physical pixels and recomputes cell metrics.
+	pub(super) fn set_font_px(&mut self, px: f32) {
+		self.px = px;
+		let font = self.fonts.primary();
+		if let Some(metrics) = font.horizontal_line_metrics(px) {
+			self.ascent = metrics.ascent.round() as i32;
+			self.ch = metrics.new_line_size.ceil() as usize;
+		}
+		self.cw = font.metrics('M', px).advance_width.ceil() as usize;
+		self.fonts.clear();
 	}
 
 	pub(super) fn resize(&mut self, w: u32, h: u32) {
@@ -199,10 +212,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		theme,
 		wallpaper,
 		wallpaper_strength,
-		font,
-		fallback_fonts,
-		font_choices: HashMap::new(),
-		glyphs: HashMap::new(),
+		fonts: FontSet::new(font, fallback_fonts),
 		px: 18.0,
 		cw: 10,
 		ch: 20,

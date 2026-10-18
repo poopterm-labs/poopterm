@@ -31,6 +31,22 @@ impl App {
 		}
 	}
 
+	/// Re-runs the search after new output, keeping the selected match if it still exists.
+	pub(super) fn refresh_search_if_dirty(&mut self) {
+		if !(self.search_active && self.search_dirty) {
+			return;
+		}
+		let previous = self
+			.search_matches
+			.get(self.search_match_index)
+			.map(|m| m.start);
+		self.search_matches = find_matches(self.active_term(), &self.search_query);
+		self.search_match_index = previous
+			.and_then(|point| self.search_matches.iter().position(|m| m.start == point))
+			.unwrap_or(0);
+		self.search_dirty = false;
+	}
+
 	pub(super) fn begin_search(&mut self) {
 		self.search_active = true;
 		self.search_query.clear();

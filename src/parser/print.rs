@@ -1,5 +1,5 @@
 //! Printable characters and C0/C1 control execution.
-use crate::term::{Cell, Term};
+use crate::term::{Cell, Term, attr};
 use unicode_width::UnicodeWidthChar;
 
 impl Term {
@@ -78,10 +78,10 @@ impl Term {
 		if self.reverse {
 			std::mem::swap(&mut fg, &mut bg);
 		}
-		if self.attrs & 1 != 0 {
+		if self.attrs & attr::DIM != 0 {
 			fg = crate::render::blend::blend(bg, fg, 160);
 		}
-		if self.attrs & 8 != 0 {
+		if self.attrs & attr::CONCEAL != 0 {
 			fg = bg;
 		}
 		self.cells[i] = Cell {

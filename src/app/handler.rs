@@ -33,10 +33,9 @@ impl ApplicationHandler<UserEvent> for App {
 				.expect("failed to create window"),
 		);
 		#[cfg(target_os = "macos")]
-		set_window_opacity(&window, Preferences::load().opacity);
+		crate::platform::set_window_opacity(&window, Preferences::load().opacity);
 
 		let scale = window.scale_factor() as f32;
-		self.px = Preferences::load().font_size as f32 * scale;
 		self.margin = (8.0 * scale) as usize;
 		self.border = scale as usize;
 		self.titlebar_height = if cfg!(target_os = "macos") {
@@ -58,13 +57,7 @@ impl ApplicationHandler<UserEvent> for App {
 			+ self.margin;
 		self.status_height = (26.0 * scale) as usize;
 
-		let lm = self
-			.font
-			.horizontal_line_metrics(self.px)
-			.expect("font line metrics");
-		self.ascent = lm.ascent.round() as i32;
-		self.ch = lm.new_line_size.ceil() as usize;
-		self.cw = self.font.metrics('M', self.px).advance_width.ceil() as usize;
+		self.set_font_px(Preferences::load().font_size as f32 * scale);
 
 		let size = PhysicalSize::new(
 			(self.cw * self.active_term().cols + 2 * self.margin) as u32,
