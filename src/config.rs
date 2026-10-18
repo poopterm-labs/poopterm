@@ -1,5 +1,10 @@
 //! Small, flat configuration format. Unknown keys and comments survive saves.
-use std::{fs, io, path::Path};
+use std::{
+	env, fs, io,
+	path::{Path, PathBuf},
+};
+
+use crate::theme::ThemeKind;
 
 #[derive(Clone, Copy)]
 pub struct Preferences {
@@ -42,7 +47,7 @@ impl Preferences {
 		}
 	}
 	pub fn load() -> Self {
-		Self::parse(&fs::read_to_string(super::config_path()).unwrap_or_default())
+		Self::parse(&fs::read_to_string(config_path()).unwrap_or_default())
 	}
 }
 
@@ -111,6 +116,47 @@ pub fn save(path: &Path, values: &[(&str, String)]) -> io::Result<()> {
 	let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
 	fs::write(&temporary, updated(&previous, values))?;
 	fs::rename(&temporary, path)
+}
+
+/// Config file location: `$POOPTERM_CONFIG`, then `$XDG_CONFIG_HOME/poopterm`,
+/// then the platform default.
+pub fn config_path() -> PathBuf {
+	if let Some(path) = env::var_os("POOPTERM_CONFIG") {
+		return PathBuf::from(path);
+	}
+	if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
+		return PathBuf::from(xdg).join("poopterm/config.toml");
+	}
+	let home = env::var_os("HOME")
+		.map(PathBuf::from)
+		.unwrap_or_else(|| PathBuf::from("."));
+	if cfg!(target_os = "macos") {
+		home.join("Library/Application Support/poopterm/config.toml")
+	} else {
+		home.join(".config/poopterm/config.toml")
+	}
+}
+
+pub fn read_config_value(key: &str) -> Option<String> {
+	value(&fs::read_to_string(config_path()).ok()?, key)
+}
+
+pub fn read_config_theme() -> Option<ThemeKind> {
+	ThemeKind::parse(&read_config_value("theme")?)
+}
+
+pub fn save_config_theme(kind: ThemeKind) -> io::Result<()> {
+	save(&config_path(), &[("theme", format!("\"{}\"", kind.name()))])
+}
+
+pub fn quote_config_string(value: &str) -> String {
+	let escaped = value
+		.replace('\\', "\\\\")
+		.replace('"', "\\\"")
+		.replace('\n', "\\n")
+		.replace('\r', "\\r")
+		.replace('\t', "\\t");
+	format!("\"{escaped}\"")
 }
 
 #[cfg(test)]

@@ -1,0 +1,224 @@
+//! Keyboard events: application shortcuts, overlays, then PTY input.
+use super::*;
+use crate::input::keys::{KeyModes, encode_key};
+use winit::event::KeyEvent;
+
+impl App {
+	pub(super) fn key_modes(&self) -> KeyModes {
+		let term = self.active_term();
+		KeyModes {
+			application_cursor: term.application_cursor,
+			kitty: term.kitty_keyboard,
+		}
+	}
+
+	pub(super) fn handle_key(&mut self, event_loop: &ActiveEventLoop, event: KeyEvent) {
+		if self
+			.shortcuts
+			.command_palette
+			.matches(&event.logical_key, self.mods)
+		{
+			self.end_search();
+			self.command_palette = true;
+			self.command_query.clear();
+			if let Some(window) = &self.window {
+				window.request_redraw();
+			}
+			return;
+		}
+		if self.command_palette {
+			if self.renaming_tab {
+				match &event.logical_key {
+					Key::Named(NamedKey::Escape) => {
+						self.renaming_tab = false;
+						self.command_palette = false;
+					}
+					Key::Named(NamedKey::Backspace) => {
+						self.command_query.pop();
+					}
+					Key::Named(NamedKey::Enter) => {
+						let title = self.command_query.trim().to_owned();
+						self.sessions[self.active].custom_title = (!title.is_empty()).then_some(title);
+						self.renaming_tab = false;
+						self.command_palette = false;
+						self.update_window_title();
+					}
+					Key::Character(value) if !self.mods.ctrl && !self.mods.super_key => {
+						let available = 64usize.saturating_sub(self.command_query.chars().count());
+						self
+							.command_query
+							.extend(value.chars().filter(|c| !c.is_control()).take(available));
+					}
+					_ => {}
+				}
+				if let Some(window) = &self.window {
+					window.request_redraw();
+				}
+				return;
+			}
+			match &event.logical_key {
+				Key::Named(NamedKey::Escape) => self.command_palette = false,
+				Key::Named(NamedKey::Backspace) => {
+					self.command_query.pop();
+				}
+				Key::Named(NamedKey::Enter) => {
+					let query = self.command_query.to_ascii_lowercase();
+					self.command_palette = false;
+					let commands = [
+						"New tab",
+						"Settings",
+						"About poopterm",
+						"Cycle theme",
+						"Close tab",
+						"Rename active tab",
+					];
+					if let Some(command) = commands
+						.iter()
+						.find(|command| command.to_ascii_lowercase().contains(&query))
+					{
+						match *command {
+							"Rename active tab" => {
+								self.renaming_tab = true;
+								self.command_query = self.active_term().title.clone();
+							}
+							"New tab" => {
+								self.command_palette = false;
+								self.add_tab();
+							}
+							"Settings" => {
+								self.command_palette = false;
+								self.open_settings_window(event_loop);
+							}
+							"About poopterm" => {
+								self.command_palette = false;
+								self.open_settings_window(event_loop);
+								self.settings_editor.about = true;
+								if let Some(window) = &self.settings_window {
+									window.request_redraw();
+								}
+							}
+							"Cycle theme" => {
+								self.command_palette = false;
+								self.cycle_theme();
+							}
+							"Close tab" => {
+								self.command_palette = false;
+								self.close_active_tab(event_loop);
+							}
+							_ => {}
+						}
+					}
+				}
+				Key::Character(value) if !self.mods.ctrl && !self.mods.super_key => {
+					let available = 64usize.saturating_sub(self.command_query.chars().count());
+					self
+						.command_query
+						.extend(value.chars().filter(|c| !c.is_control()).take(available));
+				}
+				_ => {}
+			}
+			if let Some(window) = &self.window {
+				window.request_redraw();
+			}
+			return;
+		}
+		let search_shortcut = self.shortcuts.search.matches(&event.logical_key, self.mods);
+		if search_shortcut {
+			self.begin_search();
+			return;
+		}
+		if self.search_active {
+			if (self.mods.super_key || (self.mods.ctrl && self.mods.shift))
+				&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("v"))
+			{
+				if let Ok(text) = clipboard_read() {
+					let available = 128usize.saturating_sub(self.search_query.chars().count());
+					self
+						.search_query
+						.extend(text.chars().filter(|c| !c.is_control()).take(available));
+					self.search(1, false);
+				}
+				return;
+			}
+			match &event.logical_key {
+				Key::Named(NamedKey::Escape) => self.end_search(),
+				Key::Named(NamedKey::Enter) => self.search(if self.mods.shift { -1 } else { 1 }, true),
+				Key::Named(NamedKey::Backspace) => {
+					self.search_query.pop();
+					self.search(1, false);
+				}
+				Key::Character(value) if !self.mods.ctrl && !self.mods.super_key => {
+					let available = 128usize.saturating_sub(self.search_query.chars().count());
+					self.search_query.extend(value.chars().take(available));
+					self.search(1, false);
+				}
+				_ => {}
+			}
+			return;
+		}
+		if self
+			.shortcuts
+			.cycle_theme
+			.matches(&event.logical_key, self.mods)
+		{
+			self.cycle_theme();
+			return;
+		}
+		if self
+			.shortcuts
+			.new_tab
+			.matches(&event.logical_key, self.mods)
+		{
+			self.add_tab();
+			return;
+		}
+		let copy_shortcut = self.mods.super_key
+			&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("c"))
+			|| self.mods.ctrl
+				&& self.mods.shift
+				&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("c"));
+		if copy_shortcut {
+			if self.selection.is_some() {
+				self.copy_selection();
+			}
+			return;
+		}
+		let paste_shortcut = self.mods.super_key
+			&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("v"))
+			|| self.mods.ctrl
+				&& self.mods.shift
+				&& matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("v"));
+		if paste_shortcut {
+			self.paste_clipboard();
+			return;
+		}
+		if matches!(&event.logical_key, Key::Named(NamedKey::Tab)) && self.mods.ctrl {
+			self.switch_tab(if self.mods.shift { -1 } else { 1 });
+			return;
+		}
+		if (self.mods.super_key || self.mods.ctrl)
+			&& !self.mods.shift
+			&& let Key::Character(value) = &event.logical_key
+			&& value.len() == 1
+			&& let Some(index) = value.chars().next().and_then(|ch| ch.to_digit(10))
+			&& (1..=9).contains(&index)
+			&& (index as usize) <= self.sessions.len()
+		{
+			self.activate_tab(index as usize - 1);
+			return;
+		}
+		if self
+			.shortcuts
+			.close_tab
+			.matches(&event.logical_key, self.mods)
+		{
+			self.close_active_tab(event_loop);
+			return;
+		}
+		if let Some(bytes) = encode_key(&event.logical_key, self.mods, self.key_modes()) {
+			let session = self.active_session_mut();
+			let _ = session.writer.write_all(&bytes);
+			let _ = session.writer.flush();
+		}
+	}
+}

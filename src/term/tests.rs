@@ -1,4 +1,9 @@
-use super::*;
+use crate::{
+	parser::Parser,
+	shell_integration::{self, decode_uri_path},
+	term::Term,
+	theme::{Theme, ThemeKind},
+};
 
 fn terminal(cols: usize, rows: usize) -> Term {
 	Term::new(cols, rows, Theme::from_kind(ThemeKind::Poop), "/tmp".into())
@@ -375,7 +380,7 @@ fn semantic_markers_record_boundaries_and_exit_status() {
 		&mut t,
 		b"\x1b]133;A\x07prompt> \x1b]133;B\x1b\\false\x1b]133;C\x07\r\noutput\x1b]133;D;1\x07",
 	);
-	assert_eq!(t.shell.phase, osc::Phase::Finished);
+	assert_eq!(t.shell.phase, shell_integration::Phase::Finished);
 	assert_eq!(t.shell.last_exit_code, Some(1));
 	assert_eq!(t.shell.markers.len(), 4);
 	assert_eq!(t.shell.markers[1].col, 8);
@@ -441,4 +446,12 @@ fn complete_sixel_color_chart_survives_the_following_prompt() {
 	assert_eq!(t.images[0].bitmap.width, 180);
 	assert_eq!(t.images[0].bitmap.height, 36);
 	assert_eq!(t.cy, 2);
+}
+
+#[test]
+fn osc_directory_and_bell_are_tracked() {
+	let mut term = Term::new(20, 2, Theme::from_kind(ThemeKind::Poop), "/tmp".into());
+	Parser::new().advance(&mut term, b"\x1b]7;file://localhost/tmp/my%20dir\x07\x07");
+	assert_eq!(term.cwd, std::path::PathBuf::from("/tmp/my dir"));
+	assert!(term.bell);
 }

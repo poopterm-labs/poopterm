@@ -78,3 +78,16 @@ pub(crate) fn decode_uri_path(path: &str) -> Option<PathBuf> {
 	let path = PathBuf::from(String::from_utf8(decoded).ok()?);
 	path.is_absolute().then_some(path)
 }
+
+/// Returns the optional prompt hooks for `shell`, as printed by
+/// `poopterm --print-shell-integration SHELL`.
+pub(crate) fn script(shell: &str) -> Result<&'static str, String> {
+	match shell {
+		"zsh" => Ok(include_str!("../shell-integration/zsh.zsh")),
+		"bash" => Ok(include_str!("../shell-integration/bash.sh")),
+		"fish" => Ok(include_str!("../shell-integration/fish.fish")),
+		_ => Err(format!(
+			"unsupported shell: {shell}; choose zsh, bash, or fish"
+		)),
+	}
+}

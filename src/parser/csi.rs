@@ -1,0 +1,253 @@
+//! Control Sequence Introducer (`CSI`) dispatch: cursor, erase, scroll and modes.
+use crate::term::Term;
+use vte::Params;
+
+impl Term {
+	pub(super) fn apply_csi_dispatch(
+		&mut self,
+		params: &Params,
+		intermediates: &[u8],
+		ignore: bool,
+		action: char,
+	) {
+		if ignore {
+			return;
+		}
+		let private = intermediates == b"?";
+		if !intermediates.is_empty() && !private {
+			if action == 'u' && intermediates == b">" {
+				self.kitty_keyboard = params.iter().any(|p| p.first() == Some(&1));
+				return;
+			}
+			if action == 'u' && intermediates == b"<" {
+				self.kitty_keyboard = false;
+				return;
+			}
+			return;
+		}
+		if !matches!(action, 'm' | 'n' | 'c' | 'h' | 'l' | 's' | 'u') {
+			self.wrap_pending = false;
+		}
+
+		// Optimized parameter extraction helper avoiding heavy iterator re-allocations
+		let p = |i: usize, d: u16| {
+			params
+				.iter()
+				.nth(i)
+				.and_then(|s| s.first().copied())
+				.filter(|&v| v != 0)
+				.unwrap_or(d) as usize
+		};
+		let raw0 = params
+			.iter()
+			.next()
+			.and_then(|s| s.first().copied())
+			.unwrap_or(0);
+
+		if private && matches!(action, 'h' | 'l') {
+			let enabled = action == 'h';
+			for p in params.iter().filter_map(|s| s.first().copied()) {
+				match p {
+					1 => self.application_cursor = enabled,
+					6 => {
+						self.origin_mode = enabled;
+						self.cx = 0;
+						self.cy = if enabled { self.scroll_top } else { 0 };
+						self.wrap_pending = false;
+					}
+					7 => self.auto_wrap = enabled,
+					25 => self.cursor_visible = enabled,
+					80 => self.sixel_scrolling = enabled,
+					1048 => {
+						if enabled {
+							self.save_cursor();
+						} else {
+							self.restore_cursor();
+						}
+					}
+					1049 | 47 | 1047 => self.alternate_screen(enabled),
+					1000 | 1002 | 1003 => self.mouse_tracking = if enabled { p } else { 0 },
+					1006 => self.mouse_sgr = enabled,
+					2004 => self.bracketed_paste = enabled,
+					_ => {}
+				}
+			}
+			return;
+		}
+		if private && action == 'u' {
+			self
+				.responses
+				.push(format!("\x1b[?{}u", if self.kitty_keyboard { 1 } else { 0 }).into_bytes());
+			return;
+		}
+
+		if private {
+			return;
+		}
+		if matches!(action, 'h' | 'l') {
+			let enabled = action == 'h';
+			for mode in params.iter().filter_map(|param| param.first().copied()) {
+				if mode == 4 {
+					self.insert_mode = enabled;
+				}
+			}
+			return;
+		}
+		match action {
+			'g' => match raw0 {
+				0 => self.tab_stops[self.cx] = false,
+				3 => self.tab_stops.fill(false),
+				_ => {}
+			},
+			'I' | 'Z' => {
+				for _ in 0..p(0, 1).min(self.cols) {
+					self.cx = if action == 'I' {
+						(self.cx + 1..self.cols)
+							.find(|&col| self.tab_stops[col])
+							.unwrap_or(self.cols - 1)
+					} else {
+						(0..self.cx)
+							.rev()
+							.find(|&col| self.tab_stops[col])
+							.unwrap_or(0)
+					};
+				}
+			}
+			'd' => {
+				self.cy = (p(0, 1) - 1 + if self.origin_mode { self.scroll_top } else { 0 }).min(
+					if self.origin_mode {
+						self.scroll_bottom
+					} else {
+						self.rows - 1
+					},
+				);
+			}
+			'E' | 'F' => {
+				let top = if self.origin_mode { self.scroll_top } else { 0 };
+				let bottom = if self.origin_mode {
+					self.scroll_bottom
+				} else {
+					self.rows - 1
+				};
+				self.cy = if action == 'E' {
+					(self.cy + p(0, 1)).min(bottom)
+				} else {
+					self.cy.saturating_sub(p(0, 1)).max(top)
+				};
+				self.cx = 0;
+			}
+			'A' => {
+				let top = if self.origin_mode { self.scroll_top } else { 0 };
+				self.cy = self.cy.saturating_sub(p(0, 1)).max(top);
+			}
+			'B' => {
+				self.cy = (self.cy + p(0, 1)).min(if self.origin_mode {
+					self.scroll_bottom
+				} else {
+					self.rows - 1
+				})
+			}
+			'C' => self.cx = (self.cx + p(0, 1)).min(self.cols - 1),
+			'D' => self.cx = self.cx.saturating_sub(p(0, 1)),
+			'G' | '`' => self.cx = (p(0, 1) - 1).min(self.cols - 1),
+			'H' | 'f' => {
+				let row = p(0, 1) - 1 + if self.origin_mode { self.scroll_top } else { 0 };
+				self.cy = row.min(if self.origin_mode {
+					self.scroll_bottom
+				} else {
+					self.rows - 1
+				});
+				self.cx = (p(1, 1) - 1).min(self.cols - 1);
+			}
+			'r' => {
+				let top = (p(0, 1) - 1).min(self.rows - 1);
+				let bottom = (p(1, self.rows as u16) - 1).min(self.rows - 1);
+				if top < bottom {
+					self.scroll_top = top;
+					self.scroll_bottom = bottom;
+					self.cx = 0;
+					self.cy = if self.origin_mode { top } else { 0 };
+				}
+			}
+			'S' => self.scroll_region_up(p(0, 1)),
+			'T' => self.scroll_region_down(p(0, 1)),
+			's' => self.save_cursor(),
+			'u' => self.restore_cursor(),
+			'J' => match raw0 {
+				0 => {
+					let from = self.idx(self.cx, self.cy);
+					self.clear_range(from, self.cells.len());
+				}
+				1 => self.clear_range(0, self.idx(self.cx + 1, self.cy)),
+				2 => self.clear_range(0, self.cells.len()),
+				3 => {
+					self.history_base = self.history_base.saturating_add(self.scrollback.len());
+					self.scrollback.clear();
+					self.scroll_offset = 0;
+				}
+				_ => {}
+			},
+			'K' => {
+				let row_start = self.idx(0, self.cy);
+				let row_end = row_start + self.cols;
+				match raw0 {
+					0 => self.clear_range(self.idx(self.cx, self.cy), row_end),
+					1 => self.clear_range(row_start, self.idx(self.cx + 1, self.cy)),
+					2 => self.clear_range(row_start, row_end),
+					_ => {}
+				}
+			}
+			'@' => {
+				self.erase_images(self.cy * self.cols, (self.cy + 1) * self.cols);
+				let count = p(0, 1).min(self.cols - self.cx);
+				let start = self.idx(self.cx, self.cy);
+				let end = self.idx(self.cols - count, self.cy);
+				self.cells.copy_within(start..end, start + count);
+				self.clear_range(start, start + count);
+			}
+			'P' => {
+				self.erase_images(self.cy * self.cols, (self.cy + 1) * self.cols);
+				let count = p(0, 1).min(self.cols - self.cx);
+				let start = self.idx(self.cx, self.cy);
+				let end = self.idx(self.cols, self.cy);
+				self.cells.copy_within(start + count..end, start);
+				self.clear_range(end - count, end);
+			}
+			'X' => {
+				let start = self.idx(self.cx, self.cy);
+				self.clear_range(start, start + p(0, 1).min(self.cols - self.cx));
+			}
+			'L' | 'M' if self.cy >= self.scroll_top && self.cy <= self.scroll_bottom => {
+				self.erase_images(self.cy * self.cols, (self.scroll_bottom + 1) * self.cols);
+				let bottom = self.scroll_bottom.max(self.cy).min(self.rows - 1);
+				let count = p(0, 1).min(bottom + 1 - self.cy);
+				let start = self.cy * self.cols;
+				let end = (bottom + 1) * self.cols;
+				if action == 'L' {
+					self
+						.cells
+						.copy_within(start..end - count * self.cols, start + count * self.cols);
+					self.clear_range(start, start + count * self.cols);
+				} else {
+					self
+						.cells
+						.copy_within(start + count * self.cols..end, start);
+					self.clear_range(end - count * self.cols, end);
+				}
+			}
+			'm' => self.sgr(params),
+			'n' => match raw0 {
+				5 => self.responses.push(b"\x1b[0n".to_vec()),
+				6 => self
+					.responses
+					.push(format!("\x1b[{};{}R", self.cy + 1, self.cx.min(self.cols - 1) + 1).into_bytes()),
+				_ => {}
+			},
+			'c' => self.responses.push(b"\x1b[?62;4;6c".to_vec()),
+			_ => {}
+		}
+		if matches!(action, '@' | 'P' | 'X' | 'J' | 'K') {
+			self.repair_wide_cells();
+		}
+	}
+}
