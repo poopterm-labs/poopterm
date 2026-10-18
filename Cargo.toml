@@ -1,8 +1,12 @@
 [package]
 name = "poopterm"
-version = "0.43.0"
+version = "26.10.0"
 edition = "2024"
 license = "MIT"
+
+[package.metadata.poopterm]
+# Each release gets a random codename; patch releases keep it.
+codename = "Giga Fly"
 
 [dependencies]
 winit = "^0.30"

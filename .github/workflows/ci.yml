@@ -66,7 +66,9 @@ jobs:
         run: |
           set -euo pipefail
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          codename=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"].get("metadata", {}).get("poopterm", {}).get("codename", ""))')
           tag="v${version}"
+          title="Poopterm ${version}${codename:+ \"${codename}\"}"
           
           if gh api "repos/${GH_REPO}/git/ref/tags/${tag}" > /tmp/tag.json 2> /tmp/tag-error; then
             echo "${tag} already exists; published versions are immutable."
@@ -78,7 +80,7 @@ jobs:
             exit 1
           fi
           
-          release_args=("$tag" --target "$GITHUB_SHA" --title "Poopterm ${version}" --notes-file CHANGELOG.md)
+          release_args=("$tag" --target "$GITHUB_SHA" --title "$title" --notes-file CHANGELOG.md)
           if [[ "$version" == *-* ]]; then
             release_args+=(--prerelease)
           fi
