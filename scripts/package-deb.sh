@@ -24,10 +24,25 @@ trap 'rm -rf "$work"' EXIT
 root="$work/root"
 
 DESTDIR="$root" PREFIX=/usr POOPTERM_BIN="$binary" scripts/install.sh --no-build
-mkdir -p "$root/DEBIAN" dist
+mkdir -p "$root/DEBIAN" "$work/debian" dist
 rm -f dist/poopterm_*.deb
 
-depends=$(dpkg-shlibdeps -O -e "$root/usr/bin/poopterm" | sed -n 's/^shlibs:Depends=//p')
+cat >"$work/debian/control" <<EOF
+Source: poopterm
+Section: x11
+Priority: optional
+Maintainer: Poopterm Labs <poopterm-labs@users.noreply.github.com>
+Homepage: https://github.com/poopterm-labs/poopterm
+
+Package: poopterm
+Architecture: $architecture
+Depends: \${shlibs:Depends}
+Description: fast software-rendered terminal emulator
+ Poopterm is a tabbed terminal emulator with a software-rendered interface,
+ configurable themes, image protocol support, and shell integration.
+EOF
+
+depends=$(cd "$work" && dpkg-shlibdeps -O -e "$root/usr/bin/poopterm" | sed -n 's/^shlibs:Depends=//p')
 if [[ -z "$depends" ]]; then
 	echo 'package-deb.sh: could not determine shared-library dependencies' >&2
 	exit 1
