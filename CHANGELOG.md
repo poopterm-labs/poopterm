@@ -1,5 +1,15 @@
 # Changelog
 
+## 26.10.15 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Add Debian APT package release (packaging).
+
+### Fixed
+
+- Provide control metadata for dependency scan (packaging).
+
 ## 26.10.14 "Giga Fly" — 2026-10-19
 
 ### Added

@@ -1,6 +1,6 @@
 [package]
 name = "poopterm"
-version = "26.10.14"
+version = "26.10.15"
 edition = "2024"
 license = "MIT"
 
