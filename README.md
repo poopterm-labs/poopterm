@@ -335,12 +335,17 @@ Poopterm is MIT licensed; see [LICENSE](LICENSE).
   commits it. Grid changes stay hidden until the commit. A 250 ms timeout prevents
   a broken application from leaving the display frozen. `CSI ? 2026 $ p` queries
   the mode. See the [protocol specification](https://github.com/contour-terminal/vt-extensions/blob/master/synchronized-output.md).
-- **Shell integration:** OSC 133 `A`, `B`, `C`, and `D;exit_code` mark the prompt,
-  command input, output, and completion. Poopterm retains the latest 256 markers
-  and shows running/exit status in the status bar. Optional hooks are available
-  for zsh, Bash, and fish; install them explicitly with the instructions below.
-  The hooks also emit OSC 7 so BSD shells can report their working directory.
-  See [OSC 133 semantics](https://iterm2.com/documentation-escape-codes.html).
+- **Shell integration:** OSC 133 marks prompts, command input, output and
+  completion, following the [semantic prompts proposal](https://gitlab.freedesktop.org/Per_Bothner/specifications/blob/master/proposals/semantic-prompts.md):
+  `L` and `A`/`N` start a fresh line, `P` and `k=` mark continuation and right
+  prompts, `I` works like `B`, `aid=` tracks nested programs so `N` finishes
+  the right command, and `D` takes an exit code and `err=`. With `cl=`, a plain
+  click in the line being edited moves the cursor with arrow keys. kitty's
+  `cmdline=` and `cmdline_url=` on `C` name the running command. Poopterm
+  retains the latest 256 markers and shows the running command or exit status
+  in the status bar. Optional hooks are available for zsh, Bash, and fish;
+  install them explicitly with the instructions below. The hooks also emit
+  OSC 7 so BSD shells can report their working directory.
 - **OSC 52:** Clipboard writes to the `c` selection are supported up to 1 MiB.
   Clipboard read requests are ignored so shell programs cannot read clipboard
   contents without consent.

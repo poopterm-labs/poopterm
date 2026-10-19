@@ -202,6 +202,31 @@ impl App {
 		}
 	}
 
+	/// A plain click in the line being edited moves the shell's cursor there
+	/// when its prompt asked for that (OSC 133 `cl=`).
+	fn move_cursor_to_click(&mut self, x: f64, y: f64) {
+		let dragged = self
+			.selection
+			.is_none_or(|selection| selection.start != selection.end);
+		if dragged || self.mods.ctrl || self.mods.shift || self.mods.alt || self.mods.super_key {
+			return;
+		}
+		let Some(point) = self.point_at(x, y) else {
+			return;
+		};
+		let moves = {
+			let term = self.active_term();
+			point
+				.row
+				.checked_sub(term.scrollback.len())
+				.and_then(|row| term.prompt_click(row, point.col))
+		};
+		if let Some(moves) = moves {
+			self.selection = None;
+			self.active_session().write(&moves);
+		}
+	}
+
 	pub(super) fn extend_selection(&mut self, x: f64, y: f64) {
 		if !self.selecting {
 			return;
@@ -368,6 +393,9 @@ impl App {
 				}
 			}
 			if state == ElementState::Released {
+				if button == MouseButton::Left && !handled && self.selecting {
+					self.move_cursor_to_click(x, y);
+				}
 				self.selecting = false;
 			}
 		}

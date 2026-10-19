@@ -6,13 +6,14 @@ end
 
 function __poopterm_prompt --on-event fish_prompt
 	set -l status_code $status
-	printf '\033]133;D;%s\007\033]133;A\007' $status_code
+	# Clicks in the input line may move the cursor with arrow keys.
+	printf '\033]133;D;%s\007\033]133;A;cl=line\007' $status_code
 	set -l encoded (string escape --style=url -- $PWD | string replace -a '%2F' '/')
 	printf '\033]7;file://%s\007' $encoded
 end
 
 function __poopterm_preexec --on-event fish_preexec
-	printf '\033]133;C\007'
+	printf '\033]133;C;cmdline_url=%s\007' (string escape --style=url -- $argv[1])
 end
 # Remote hosts rarely have poopterm's terminfo entry; connect with a common
 # TERM instead. Set POOPTERM_SSH_KEEP_TERM=1 to keep xterm-poopterm.

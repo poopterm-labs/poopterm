@@ -266,10 +266,17 @@ impl App {
 				.collect(),
 			None => cwd.chars().take(p.width / ui.cw.max(1) / 3).collect(),
 		};
-		let command = match term.shell.phase {
-			Phase::Output => "   ·   running".to_owned(),
-			_ => term
-				.shell
+		let shell = &term.shell;
+		let command = match (shell.phase, &shell.command_line, &shell.last_error) {
+			(Phase::Output, Some(line), _) => {
+				let line: String = line.chars().filter(|c| !c.is_control()).collect();
+				let short: String = line.chars().take(32).collect();
+				let more = if short.len() < line.len() { "…" } else { "" };
+				format!("   ·   running {short}{more}")
+			}
+			(Phase::Output, None, _) => "   ·   running".to_owned(),
+			(_, _, Some(error)) => format!("   ·   error {error}"),
+			_ => shell
 				.last_exit_code
 				.map(|code| format!("   ·   exit {code}"))
 				.unwrap_or_default(),

@@ -1,13 +1,22 @@
-//! OSC 133 semantic prompt markers.
+//! OSC 133 semantic prompt markers, with the options of the
+//! semantic-prompts proposal (`aid`, `cl`, `k`, `err`) and kitty's
+//! (`cmdline`, `cmdline_url`).
 use std::{
 	collections::VecDeque,
 	time::{Duration, Instant},
 };
 
+use super::command_line::{percent_decode, unquote};
+
 /// Commands running at least this long notify when they finish unseen.
 pub(crate) const LONG_COMMAND: Duration = Duration::from_secs(10);
 /// Markers kept per terminal; older ones are dropped.
 const MAX_MARKERS: usize = 256;
+/// Most nested open commands tracked.
+const MAX_OPEN: usize = 16;
+/// Longest application identifier and error text kept.
+const MAX_AID: usize = 64;
+const MAX_ERROR: usize = 32;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Phase {
@@ -32,37 +41,149 @@ pub(crate) struct Marker {
 pub(crate) struct ShellIntegration {
 	pub phase: Phase,
 	pub last_exit_code: Option<i32>,
+	/// The last command's `err=` value: any text means it failed.
+	pub last_error: Option<String>,
+	/// The running or last command line, as the shell reported it.
+	pub command_line: Option<String>,
+	/// The prompt asked (`cl=`) for clicks in its input line to move the cursor.
+	pub click_move: bool,
 	pub markers: VecDeque<Marker>,
+	/// Open commands, outermost first: their application and whether their
+	/// output started.
+	open: Vec<(String, bool)>,
 	command_started: Option<Instant>,
 	long_command_finished: bool,
 }
+
+/// The value of option `name` among `options`.
+fn option<'a>(options: &[&'a [u8]], name: &str) -> Option<&'a str> {
+	options.iter().rev().find_map(|option| {
+		let (key, value) = std::str::from_utf8(option).ok()?.split_once('=')?;
+		(key == name).then_some(value)
+	})
+}
+
+/// The command line of a C marker. Quoting may leave `;` in a `cmdline`,
+/// so it runs to the end of the sequence.
+fn command_line(options: &[&[u8]]) -> Option<String> {
+	if let Some(index) = options
+		.iter()
+		.position(|option| option.starts_with(b"cmdline="))
+	{
+		let joined = options[index..].join(&b';');
+		return unquote(std::str::from_utf8(&joined[b"cmdline=".len()..]).ok()?);
+	}
+	option(options, "cmdline_url").and_then(percent_decode)
+}
+
 impl ShellIntegration {
+	/// Applies OSC 133 `params` (`133`, the marker letter, options), with
+	/// the cursor at absolute `row` and `col`.
 	pub fn record(&mut self, params: &[&[u8]], row: usize, col: usize, now: Instant) {
-		let phase = match params.get(1).copied() {
-			Some(b"A") => Phase::Prompt,
-			Some(b"B") => Phase::Command,
-			Some(b"C") => Phase::Output,
-			Some(b"D") => Phase::Finished,
-			_ => return,
+		let Some(&letter) = params.get(1) else {
+			return;
 		};
-		let exit_code = if phase == Phase::Finished {
-			params
-				.get(2)
-				.and_then(|p| std::str::from_utf8(p).ok())
-				.and_then(|s| s.parse().ok())
-		} else {
-			None
-		};
-		if phase == Phase::Finished {
-			self.last_exit_code = exit_code;
-			if let Some(started) = self.command_started.take() {
-				self.long_command_finished |= now.duration_since(started) >= LONG_COMMAND;
+		let options = &params[2.min(params.len())..];
+		match letter {
+			b"A" | b"N" => {
+				if matches!(option(options, "k"), Some("s" | "c" | "r")) {
+					self.phase = Phase::Prompt;
+					return;
+				}
+				let aid = option(options, "aid")
+					.filter(|aid| aid.len() <= MAX_AID)
+					.unwrap_or("");
+				let matching = (letter == b"N")
+					.then(|| self.open.iter().rposition(|(open, _)| open == aid))
+					.flatten();
+				if let Some(index) = matching {
+					// A new command from the same application ends the open
+					// one and everything nested in it.
+					let started = self.open.drain(index..).any(|(_, started)| started);
+					if started {
+						self.finish(None, None, row, col, now);
+					}
+				} else if self.open.last().is_some_and(|(_, started)| !started) {
+					// A prompt drawn again replaces one that never ran.
+					self.open.pop();
+				}
+				if self.open.len() >= MAX_OPEN {
+					self.open.remove(0);
+				}
+				self.open.push((aid.to_owned(), false));
+				self.click_move = option(options, "cl").is_some();
+				self.command_line = None;
+				self.mark(Phase::Prompt, row, col, None);
 			}
+			// Further prompts (continuation lines, right prompts) belong to
+			// the command already started.
+			b"P" => self.phase = Phase::Prompt,
+			b"B" | b"I" => self.mark(Phase::Command, row, col, None),
+			b"C" => {
+				match self.open.last_mut() {
+					Some((_, started)) => *started = true,
+					None => self.open.push((String::new(), true)),
+				}
+				self.command_line = command_line(options);
+				self.last_exit_code = None;
+				self.last_error = None;
+				self.command_started = Some(now);
+				self.mark(Phase::Output, row, col, None);
+			}
+			b"D" => {
+				let (code, options) = match options.first() {
+					Some(code) if !code.contains(&b'=') => (*code, &options[1..]),
+					_ => (&b""[..], options),
+				};
+				let mut code = std::str::from_utf8(code)
+					.ok()
+					.and_then(|code| code.parse().ok());
+				// `err=` overrides the exit code: empty is success.
+				let error = option(options, "err").map(|error| {
+					code = error.parse().ok().or(code);
+					error
+						.chars()
+						.filter(|c| !c.is_control())
+						.take(MAX_ERROR)
+						.collect::<String>()
+				});
+				let error = match error {
+					Some(error) if error.is_empty() => {
+						code = Some(0);
+						None
+					}
+					error => error,
+				};
+				let aid = option(options, "aid");
+				match aid.and_then(|aid| self.open.iter().rposition(|(open, _)| open == aid)) {
+					Some(index) => self.open.truncate(index),
+					None => {
+						self.open.pop();
+					}
+				}
+				self.finish(code, error, row, col, now);
+			}
+			_ => {}
 		}
-		if phase == Phase::Output {
-			self.last_exit_code = None;
-			self.command_started = Some(now);
+	}
+
+	fn finish(
+		&mut self,
+		code: Option<i32>,
+		error: Option<String>,
+		row: usize,
+		col: usize,
+		now: Instant,
+	) {
+		self.last_exit_code = code;
+		self.last_error = error;
+		if let Some(started) = self.command_started.take() {
+			self.long_command_finished |= now.duration_since(started) >= LONG_COMMAND;
 		}
+		self.mark(Phase::Finished, row, col, code);
+	}
+
+	fn mark(&mut self, phase: Phase, row: usize, col: usize, exit_code: Option<i32>) {
 		self.phase = phase;
 		self.markers.push_back(Marker {
 			phase,
@@ -73,6 +194,18 @@ impl ShellIntegration {
 		if self.markers.len() > MAX_MARKERS {
 			self.markers.pop_front();
 		}
+	}
+
+	/// Where the input on absolute `row` starts: after the prompt that
+	/// ended there, else at the margin.
+	pub fn input_start(&self, row: usize) -> usize {
+		self
+			.markers
+			.iter()
+			.rev()
+			.find(|marker| marker.phase == Phase::Command)
+			.filter(|marker| marker.row == row)
+			.map_or(0, |marker| marker.col)
 	}
 
 	fn prompts(&self) -> impl DoubleEndedIterator<Item = &Marker> {

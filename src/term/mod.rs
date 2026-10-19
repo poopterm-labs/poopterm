@@ -21,6 +21,8 @@ pub(crate) mod notifications;
 pub(crate) mod pointer;
 #[cfg(test)]
 mod pointer_tests;
+#[cfg(test)]
+mod prompt_tests;
 mod screen;
 mod shared;
 mod shell;

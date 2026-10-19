@@ -6,25 +6,33 @@ fi
 
 autoload -Uz add-zsh-hook add-zle-hook-widget
 
-_poopterm_precmd() {
-	# `status` is read-only and `path` is tied to $PATH in zsh; use other names.
-	local exit_code=$?
-	print -rn -- $'\e]133;D;'"$exit_code"$'\a'
-	print -rn -- $'\e]133;A\a'
-	# Percent-encode every byte outside the URI-unreserved set, so control
-	# characters in directory names cannot end the OSC 7 sequence early.
-	local LC_ALL=C cwd= char hex
-	for char in ${(s::)PWD}; do
+# Percent-encodes every byte of $1 outside the URI-unreserved set into
+# REPLY, so control characters cannot end an OSC sequence early.
+_poopterm_url_encode() {
+	local LC_ALL=C char hex
+	REPLY=
+	for char in ${(s::)1}; do
 		case $char in
-			([a-zA-Z0-9/._~-]) cwd+=$char ;;
-			(*) printf -v hex '%%%02X' "'$char"; cwd+=$hex ;;
+			([a-zA-Z0-9/._~-]) REPLY+=$char ;;
+			(*) printf -v hex '%%%02X' "'$char"; REPLY+=$hex ;;
 		esac
 	done
-	print -rn -- $'\e]7;file://'"$cwd"$'\a'
+}
+
+_poopterm_precmd() {
+	# `status` is read-only and `path` is tied to $PATH in zsh; use other names.
+	local exit_code=$? REPLY
+	print -rn -- $'\e]133;D;'"$exit_code"$'\a'
+	# Clicks in the input line may move the cursor with arrow keys.
+	print -rn -- $'\e]133;A;cl=line\a'
+	_poopterm_url_encode "$PWD"
+	print -rn -- $'\e]7;file://'"$REPLY"$'\a'
 }
 
 _poopterm_preexec() {
-	print -rn -- $'\e]133;C\a'
+	local REPLY
+	_poopterm_url_encode "$1"
+	print -rn -- $'\e]133;C;cmdline_url='"$REPLY"$'\a'
 }
 
 _poopterm_line_init() {

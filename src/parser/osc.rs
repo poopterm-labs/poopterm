@@ -43,10 +43,14 @@ impl Term {
 				}
 			}
 			b"133" => {
-				if params
-					.get(1)
-					.is_some_and(|marker| marker.first() == Some(&b'A'))
-				{
+				let letter = params.get(1).copied().unwrap_or_default();
+				if matches!(letter, b"L" | b"A" | b"N") {
+					self.fresh_line();
+				}
+				let secondary = params[2.min(params.len())..]
+					.iter()
+					.any(|option| option.starts_with(b"k=") && *option != b"k=i");
+				if matches!(letter, b"A" | b"N") && !secondary {
 					self.status.prompt();
 				}
 				self.shell.record(

@@ -294,3 +294,61 @@ fn bash_injection_loads_profiles_and_hooks_once_and_respects_off() {
 	);
 	assert!(super::inject::prepare("/bin/bash", Some("off")).is_empty());
 }
+
+/// The command line a hook reported with OSC 133 C, decoded.
+fn reported_command(stdout: &str) -> Option<String> {
+	let value = stdout.split("\x1b]133;C;cmdline_url=").nth(1)?;
+	super::command_line::percent_decode(value.split('\x07').next()?)
+}
+
+const COMMAND: &str = "echo 'a;b' \u{e9}\x1b]2;x\x07";
+
+#[test]
+fn zsh_reports_command_lines_and_click_to_move() {
+	let script = "source shell-integration/zsh.zsh; _poopterm_precmd; _poopterm_preexec \"$COMMAND\"";
+	let Some(output) = shell_command("zsh")
+		.args(["-fc", script])
+		.env("COMMAND", COMMAND)
+		.output()
+		.ok()
+	else {
+		return;
+	};
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	assert!(stdout.contains("\x1b]133;A;cl=line\x07"), "{stdout:?}");
+	assert_eq!(
+		reported_command(&stdout).as_deref(),
+		Some(COMMAND),
+		"{stdout:?}"
+	);
+}
+
+#[test]
+fn fish_reports_command_lines_and_click_to_move() {
+	let script =
+		"source shell-integration/fish.fish; __poopterm_prompt; __poopterm_preexec \"$COMMAND\"";
+	let Some(output) = shell_command("fish")
+		.args(["--no-config", "-c", script])
+		.env("COMMAND", COMMAND)
+		.output()
+		.ok()
+	else {
+		return;
+	};
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	assert!(stdout.contains("\x1b]133;A;cl=line\x07"), "{stdout:?}");
+	assert_eq!(
+		reported_command(&stdout).as_deref(),
+		Some(COMMAND),
+		"{stdout:?}"
+	);
+}
+
+#[test]
+fn bash_asks_for_click_to_move() {
+	let script = "source shell-integration/bash.sh; __poopterm_prompt_command";
+	let Some((stdout, _)) = run("bash", &["--norc", "-c"], script) else {
+		return;
+	};
+	assert!(stdout.contains("\x1b]133;A;cl=line\x07"), "{stdout:?}");
+}

@@ -29,7 +29,8 @@ __poopterm_prompt_command() {
 	if [[ -n $__poopterm_original_prompt_command ]]; then
 		eval "$__poopterm_original_prompt_command"
 	fi
-	printf '\033]133;A\007\033]7;file://%s\007' "$( __poopterm_escape_path )"
+	# Clicks in the input line may move the cursor with arrow keys.
+	printf '\033]133;A;cl=line\007\033]7;file://%s\007' "$( __poopterm_escape_path )"
 }
 
 # Remote hosts rarely have poopterm's terminfo entry; connect with a common

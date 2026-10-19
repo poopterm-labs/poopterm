@@ -1,7 +1,53 @@
 //! Terminal actions built on shell-integration markers (OSC 133).
 use super::Term;
+use crate::{input::click::cursor_moves, shell_integration::Phase};
 
 impl Term {
+	/// Starts a new line unless the cursor is already at the left margin.
+	pub(crate) fn fresh_line(&mut self) {
+		if self.cx != 0 || self.wrap_pending {
+			self.cx = 0;
+			self.wrap_pending = false;
+			self.linefeed();
+		}
+	}
+
+	/// The cursor-key presses for a click at screen `row`, `col`, when the
+	/// prompt asked for clicks to move the cursor and the click is in the
+	/// line being edited. Clicks in the prompt go to the input's start,
+	/// clicks past its end just after it.
+	pub(crate) fn prompt_click(&self, row: usize, col: usize) -> Option<Vec<u8>> {
+		if !self.shell.click_move
+			|| self.shell.phase != Phase::Command
+			|| row != self.cy
+			|| self.scroll_offset != 0
+			|| self.primary_screen.is_some()
+		{
+			return None;
+		}
+		let cells = &self.grid[row];
+		let start = self
+			.shell
+			.input_start(self.history_base + self.scrollback.len() + row)
+			.min(self.cx);
+		let end = cells
+			.iter()
+			.rposition(|cell| cell.width != 0 && cell.ch != ' ')
+			.map_or(0, |last| last + 1)
+			.max(self.cx);
+		let mut target = col.clamp(start, end);
+		// The right half of a wide character is the character.
+		while target > start && cells.get(target).is_some_and(|cell| cell.width == 0) {
+			target -= 1;
+		}
+		Some(cursor_moves(
+			cells,
+			self.cx,
+			target,
+			self.application_cursor,
+		))
+	}
+
 	/// Text of the most recent finished command's output (from its OSC 133 C
 	/// marker to its D marker), one line per row with trailing spaces trimmed.
 	/// Lines already evicted from the scrollback are omitted.
