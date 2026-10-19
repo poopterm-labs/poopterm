@@ -4,6 +4,11 @@ use std::sync::Arc;
 use super::{Term, grid::Grid};
 
 impl Term {
+	/// Shows the live screen again after scrolling back; whether it moved.
+	pub(crate) fn scroll_to_bottom(&mut self) -> bool {
+		std::mem::take(&mut self.scroll_offset) != 0
+	}
+
 	pub(crate) fn resize(&mut self, cols: usize, rows: usize) {
 		self.finish_sync();
 		let cols = cols.max(1);

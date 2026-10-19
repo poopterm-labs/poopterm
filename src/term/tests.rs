@@ -859,3 +859,13 @@ fn erasing_either_half_of_a_wide_character_repairs_only_its_boundary() {
 		assert!(t.grid[0].iter().all(|cell| cell.width == 1));
 	}
 }
+
+#[test]
+fn typing_scrolls_back_to_the_bottom() {
+	let mut t = terminal(8, 2);
+	feed(&mut t, b"1\r\n2\r\n3\r\n4");
+	t.scroll_offset = 2;
+	assert!(t.scroll_to_bottom());
+	assert_eq!(t.scroll_offset, 0);
+	assert!(!t.scroll_to_bottom(), "nothing changes at the bottom");
+}

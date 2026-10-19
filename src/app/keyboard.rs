@@ -238,11 +238,13 @@ impl App {
 		}
 		if let Some(bytes) = encode_key(&event.logical_key, self.mods, self.key_modes()) {
 			self.active_session().write(&bytes);
-			// Typing means finished work reported in this session was seen.
+			// Typing means finished work reported in this session was seen,
+			// and shows the live screen the input goes to.
 			let mut term = self.active_term();
 			let generation = term.status.generation;
 			term.status.acknowledge();
-			let changed = term.status.generation != generation;
+			let scrolled = term.scroll_to_bottom();
+			let changed = scrolled || term.status.generation != generation;
 			drop(term);
 			if changed {
 				self.request_redraw();
