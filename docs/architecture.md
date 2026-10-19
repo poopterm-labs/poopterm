@@ -64,6 +64,7 @@ deadlock, so debug builds track held locks and panic instead.
 ## Parsing (`src/parser`)
 
 `vte` turns bytes into callbacks (`print`, `execute`, `csi_dispatch`, …).
+The plan to replace it with an in-house parser is in [`vte-design.md`](vte-design.md).
 Poopterm adds three layers around it, all in `parser/mod.rs`:
 
 1. **Split UTF-8 carry.** A trailing incomplete UTF-8 sequence is held back
