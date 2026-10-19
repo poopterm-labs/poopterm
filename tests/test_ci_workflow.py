@@ -91,5 +91,61 @@ class Release(unittest.TestCase):
             job('no-such-job')
 
 
+class FreeBSD(unittest.TestCase):
+    """The FreeBSD VM is the slowest job; it runs only what needs FreeBSD."""
+
+    def vm(self):
+        return step('Build and test on FreeBSD')
+
+    def test_the_vm_runs_the_tests_and_the_binary(self):
+        vm = self.vm()
+        self.assertIn('cargo test --locked', vm)
+        self.assertIn('cargo build --locked', vm)
+        self.assertIn('./target/debug/poopterm --version', vm)
+
+    def test_the_vm_skips_the_slow_release_build(self):
+        # Fat LTO took half the job, and no FreeBSD binary ships.
+        self.assertNotIn('--release', self.vm())
+
+    def test_lints_and_formatting_run_on_linux_instead(self):
+        vm = self.vm()
+        self.assertNotIn('cargo fmt', vm)
+        self.assertNotIn('cargo clippy', vm)
+        self.assertNotIn('--component clippy', vm)
+        bsd = step('Check BSD-specific code')
+        self.assertIn('cargo +nightly clippy --locked --target x86_64-unknown-freebsd --all-targets -- -D warnings', bsd)
+
+    def test_the_vm_installs_libraries_not_the_whole_x_server(self):
+        prepare = self.vm().split('prepare:', 1)[1].split('run:', 1)[0]
+        packages = prepare.split('pkg install -y', 1)[1].split('\n', 1)[0].split()
+        self.assertNotIn('xorg', packages)
+        for package in ['pkgconf', 'libX11', 'libxkbcommon', 'wayland', 'bash', 'zsh']:
+            self.assertIn(package, packages)
+
+
+class Speed(unittest.TestCase):
+    def test_the_linux_check_leaves_release_builds_to_the_package_job(self):
+        check = job('check')
+        build = step('Build release binary')
+        self.assertIn("if: runner.os == 'macOS'", build)
+        self.assertIn('cargo +nightly build --release --locked', job('debian-package'))
+        self.assertIn("if: runner.os == 'macOS'", step('Verify binary execution'))
+        self.assertIn('Build release binary', check)
+
+    def test_a_new_push_to_a_pull_request_cancels_its_older_run(self):
+        self.assertIn("concurrency:\n  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}\n", WORKFLOW)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", WORKFLOW)
+
+    def test_runs_on_main_are_never_cancelled(self):
+        # Cancelling one could stop a release halfway through publishing; a
+        # group per commit also keeps pushes to main from queueing (a group
+        # holds one running and one pending run, and drops older pending ones).
+        self.assertNotIn('cancel-in-progress: true', WORKFLOW)
+        self.assertIn('|| github.sha }}', WORKFLOW)
+        release = job('release')
+        self.assertIn('group: poopterm-release', release)
+        self.assertIn('cancel-in-progress: false', release)
+
+
 if __name__ == '__main__':
     unittest.main()

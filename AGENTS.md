@@ -24,8 +24,10 @@ cargo test --release -- --ignored --nocapture parser_throughput   # parser bench
 - Toolchain: **nightly** (pinned by `rust-toolchain.toml`) for `portable_simd`.
 - Formatting: hard tabs, width 100 (`rustfmt.toml`). Always run `cargo fmt`.
 - Linux build deps: `pkg-config libx11-dev libxkbcommon-dev libwayland-dev`.
-- CI (`.github/workflows/ci.yml`) runs fmt, test, clippy and a release build
-  on Linux, macOS, and a FreeBSD VM. All must pass.
+- CI (`.github/workflows/ci.yml`) runs fmt, test and clippy (including
+  clippy for FreeBSD) on Linux and macOS, a release build on macOS and in the
+  Debian package job, and the tests and a debug build in a FreeBSD VM. All
+  must pass.
 - **Platform-gated code** (`#[cfg(target_os = ...)]`) is not compiled on your
   host. Before committing such changes, check the other targets too:
   `rustup target add aarch64-apple-darwin x86_64-unknown-freebsd`, then
