@@ -1,6 +1,7 @@
 //! Draws the visible part of a terminal grid (cells, cursor, highlights, images).
 use super::{
 	blend::blend,
+	fit::{fit_left, fit_scale},
 	glyphs::FontSet,
 	images::draw_placement,
 	multicell::draw_multicell,
@@ -146,7 +147,16 @@ fn draw_row(p: &mut Painter, fonts: &mut FontSet, view: &GridView, row: usize, l
 		} else {
 			(cell.fg, cell.bg)
 		};
-		draw_cell(p, fonts, view, cell, (col, row), (fg, bg), layer);
+		draw_cell(
+			p,
+			fonts,
+			view,
+			cell,
+			(col, row),
+			(fg, bg),
+			layer,
+			cells.get(col + 1),
+		);
 		if is_cursor && !solid_block && layer != Layer::Backgrounds {
 			draw_cursor(p, view, cell, (col, row));
 		}
@@ -165,6 +175,7 @@ fn row_clip(p: &Painter, view: &GridView, row: usize) -> Rect {
 	}
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_cell(
 	p: &mut Painter,
 	fonts: &mut FontSet,
@@ -173,6 +184,7 @@ fn draw_cell(
 	(col, row): (usize, usize),
 	(fg, bg): (u32, u32),
 	layer: Layer,
+	next: Option<&Cell>,
 ) {
 	let (cw, ch) = view.cell;
 	let line = view.scale.max(1);
@@ -211,19 +223,16 @@ fn draw_cell(
 		return;
 	}
 	let span = cw * cell.width as usize;
-	let glyph = fonts.glyph(cell.ch, view.px);
-	let origin = (
-		x0 as i32 + glyph.metrics.xmin,
-		glyph_top(glyph, y0, view.ascent),
-	);
 	let (top, bottom) = (y0 as i32, (y0 + ch) as i32);
-	p.glyph(
-		glyph,
-		origin,
-		(x0 as i32, top, (x0 + span) as i32, bottom),
-		italic,
-		fg,
-	);
+	let glyph = fonts.glyph(cell.ch, view.px);
+	let m = &glyph.metrics;
+	if m.xmin >= 0 && m.xmin + m.width as i32 <= span as i32 && m.height <= ch + 1 {
+		let origin = (x0 as i32 + m.xmin, glyph_top(glyph, y0, view.ascent));
+		let clip = (x0 as i32, top, (x0 + span) as i32, bottom);
+		p.glyph(glyph, origin, clip, italic, fg);
+	} else {
+		draw_oversized(p, fonts, view, cell, (x0, y0), italic, fg, next);
+	}
 	if cell.extra == NO_EXTRA {
 		return;
 	}
@@ -251,6 +260,59 @@ fn draw_cell(
 			fg,
 		);
 	}
+}
+
+/// Draws a font glyph whose ink is wider or taller than its cell: it spills
+/// into a blank neighbor, or else shrinks.
+#[cold]
+#[allow(clippy::too_many_arguments)]
+fn draw_oversized(
+	p: &mut Painter,
+	fonts: &mut FontSet,
+	view: &GridView,
+	cell: &Cell,
+	(x0, y0): (usize, usize),
+	italic: bool,
+	fg: u32,
+	next: Option<&Cell>,
+) {
+	let (cw, ch) = view.cell;
+	let span = cw * cell.width as usize;
+	let (top, bottom) = (y0 as i32, (y0 + ch) as i32);
+	let next_blank =
+		next.is_some_and(|next| next.ch == ' ' && next.extra == NO_EXTRA && next.width == 1);
+	let glyph = fonts.glyph(cell.ch, view.px);
+	let metrics = glyph.metrics;
+	let overflows = metrics.xmin < 0 || metrics.xmin + metrics.width as i32 > span as i32;
+	let room = if overflows && next_blank && cell.width == 1 {
+		span + cw
+	} else {
+		span
+	};
+	// A pixel of slack keeps ordinary letters whose ink barely pokes out
+	// at full size; that pixel is clipped as before.
+	let scale = fit_scale((metrics.width, metrics.height), (room + 1, ch + 1));
+	let glyph = if scale < 1.0 {
+		fonts.glyph(cell.ch, view.px * scale)
+	} else {
+		glyph
+	};
+	let (left, y) = if overflows || scale < 1.0 {
+		let height = glyph.metrics.height as i32;
+		(
+			fit_left(glyph.metrics.xmin, glyph.metrics.width, room),
+			glyph_top(glyph, y0, view.ascent).clamp(top, (bottom - height).max(top)),
+		)
+	} else {
+		(glyph.metrics.xmin, glyph_top(glyph, y0, view.ascent))
+	};
+	p.glyph(
+		glyph,
+		(x0 as i32 + left, y),
+		(x0 as i32, top, (x0 + room) as i32, bottom),
+		italic,
+		fg,
+	);
 }
 
 /// Underline, bar, or (when unfocused) hollow block cursors, drawn over the cell.
