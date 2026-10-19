@@ -26,28 +26,39 @@ enum Segment {
 impl Path {
 	/// The bounds of the outline itself, which control points may stick
 	/// out of: curves add their extremes, where the derivative is zero.
+	/// Segments that stay on one point draw nothing and add nothing, so
+	/// one-point contours (anchors, bounding-box marks) are left out.
 	pub(crate) fn bounds(&self) -> Option<Bounds> {
 		let mut bounds = None;
 		let mut at = (0.0, 0.0);
 		for &segment in &self.0 {
-			let (to, extremes) = match segment {
-				Segment::Move(x, y) | Segment::Line(x, y) => ((x, y), [None; 4]),
+			let (to, moved, extremes) = match segment {
+				Segment::Move(x, y) => {
+					at = (x, y);
+					continue;
+				}
+				Segment::Line(x, y) => ((x, y), (x, y) != at, [None; 4]),
 				Segment::Quad(x1, y1, x, y) => {
 					let t = |a: f32, b: f32, c: f32| quad_extreme(a, b, c);
-					((x, y), [t(at.0, x1, x), t(at.1, y1, y), None, None])
+					let moved = (x1, y1) != at || (x, y) != at;
+					((x, y), moved, [t(at.0, x1, x), t(at.1, y1, y), None, None])
 				}
 				Segment::Curve(x1, y1, x2, y2, x, y) => {
 					let [tx0, tx1] = cubic_extremes(at.0, x1, x2, x);
 					let [ty0, ty1] = cubic_extremes(at.1, y1, y2, y);
-					((x, y), [tx0, tx1, ty0, ty1])
+					let moved = (x1, y1) != at || (x2, y2) != at || (x, y) != at;
+					((x, y), moved, [tx0, tx1, ty0, ty1])
 				}
 				Segment::Close => continue,
 			};
-			for t in extremes.into_iter().flatten() {
-				let (x, y) = point_at(at, segment, t);
-				Bounds::include(&mut bounds, x, y);
+			if moved {
+				Bounds::include(&mut bounds, at.0, at.1);
+				for t in extremes.into_iter().flatten() {
+					let (x, y) = point_at(at, segment, t);
+					Bounds::include(&mut bounds, x, y);
+				}
+				Bounds::include(&mut bounds, to.0, to.1);
 			}
-			Bounds::include(&mut bounds, to.0, to.1);
 			at = to;
 		}
 		bounds

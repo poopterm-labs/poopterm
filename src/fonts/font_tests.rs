@@ -135,6 +135,33 @@ fn metrics_without_rasterizing_match_the_bitmap() {
 }
 
 #[test]
+fn points_that_draw_nothing_leave_the_bounds_alone() {
+	use super::{
+		face::{Bounds, Sink},
+		raster::Path,
+	};
+	let mut path = Path::default();
+	// One-point contours, as fonts use for anchors and bounding-box marks.
+	path.move_to(-500.0, -500.0);
+	path.line_to(-500.0, -500.0);
+	path.close();
+	path.move_to(900.0, 900.0);
+	path.close();
+	path.move_to(0.0, 0.0);
+	path.line_to(100.0, 0.0);
+	path.quad_to(150.0, 50.0, 100.0, 100.0);
+	path.line_to(0.0, 100.0);
+	path.close();
+	let expected = Bounds {
+		x_min: 0.0,
+		y_min: 0.0,
+		x_max: 125.0,
+		y_max: 100.0,
+	};
+	assert_eq!(path.bounds(), Some(expected));
+}
+
+#[test]
 fn malformed_fonts_are_rejected_not_panicked_on() {
 	for len in [0, 4, 12, 100, 1000] {
 		assert!(
