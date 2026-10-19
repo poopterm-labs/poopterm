@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.22 "Giga Fly" — 2026-10-19
+
+### Maintenance
+
+- Run only what needs freebsd in the vm and drop duplicate release builds (#11).
+
 ## 26.10.21 "Giga Fly" — 2026-10-19
 
 ### Breaking changes
