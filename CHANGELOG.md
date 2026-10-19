@@ -1,5 +1,16 @@
 # Changelog
 
+## 26.10.18 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Draw box drawing, blocks, braille and powerline in code (render).
+
+### Fixed
+
+- Let wide glyphs spill into a blank cell or shrink to fit (render).
+- Collapse the headers that old releases stacked up on save (config).
+
 ## 26.10.17 "Giga Fly" — 2026-10-19
 
 ### Added
