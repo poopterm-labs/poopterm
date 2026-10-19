@@ -262,11 +262,25 @@ mod tests {
 	fn shared_memory_is_read_and_unlinked() {
 		let name = format!("/poopterm-kitty-{}", std::process::id());
 		let c_name = std::ffi::CString::new(name.clone()).unwrap();
-		// SAFETY: plain POSIX calls on a descriptor this test owns.
+		// macOS cannot `write` shared memory, so it is sized and mapped, as
+		// clients do.
+		// SAFETY: plain POSIX calls on a descriptor and a 6-byte mapping this
+		// test owns.
 		unsafe {
 			let fd = libc::shm_open(c_name.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o600);
 			assert!(fd >= 0);
-			assert_eq!(libc::write(fd, b"shared".as_ptr().cast(), 6), 6);
+			assert_eq!(libc::ftruncate(fd, 6), 0);
+			let map = libc::mmap(
+				std::ptr::null_mut(),
+				6,
+				libc::PROT_READ | libc::PROT_WRITE,
+				libc::MAP_SHARED,
+				fd,
+				0,
+			);
+			assert_ne!(map, libc::MAP_FAILED);
+			std::ptr::copy_nonoverlapping(b"shared".as_ptr(), map.cast(), 6);
+			libc::munmap(map, 6);
 			libc::close(fd);
 		}
 		assert_eq!(
