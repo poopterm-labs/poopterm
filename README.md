@@ -519,7 +519,8 @@ Releases are numbered `YY.M.PATCH`. After all checks pass on `main`, CI
 increments the patch, or starts a new month at `YY.M.0` with a new random
 codename. It updates `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and the
 Homebrew formula in one commit, pushes it with its tag in a single atomic
-push, then publishes the release. If `main` moved in the meantime, the run
+push, then attaches the Debian package to a draft release and publishes it,
+so published releases never change. If `main` moved in the meantime, the run
 skips and the newer commit's run releases instead.
 Published tags never move. These commits are pushed with a deploy key, the
 only bypass of the protection on `main`, and carry `[skip ci]`. Changes reach `main` only through pull requests, squashed

@@ -60,6 +60,7 @@ echo built > "dist/poopterm_${version}-1_amd64.deb"
         fakebin.mkdir()
         gh = fakebin / 'gh'
         gh.write_text('''#!/usr/bin/env python3
+import json
 import os
 from pathlib import Path
 import sys
@@ -69,17 +70,30 @@ with (root / 'api.log').open('a') as log:
 if (root / 'fail-api').exists():
     sys.stderr.write('HTTP 503 unavailable\\n')
     sys.exit(1)
-if sys.argv[1] == 'api' and not (root / 'released').exists():
-    sys.stderr.write('HTTP 404 Not Found\\n')
-    sys.exit(1)
+# `released` holds the release's tag; `draft` marks it unpublished, and
+# `immutable` makes published releases refuse new assets, as GitHub does.
+tag = (root / 'released').read_text().strip() if (root / 'released').exists() else None
+draft = (root / 'draft').exists()
 if sys.argv[1] == 'api':
     assets = (root / 'assets').read_text().split() if (root / 'assets').exists() else []
-    print('{"assets": [' + ', '.join(f'{{"name": "{name}"}}' for name in assets) + ']}')
+    releases = [{'tag_name': 'v0.1.0', 'draft': True, 'assets': [{'name': 'poopterm_0.1.0-1_amd64.deb'}]}]
+    if tag:
+        releases.insert(0, {'tag_name': tag, 'draft': draft, 'assets': [{'name': name} for name in assets]})
+    print(json.dumps(releases))
 if sys.argv[1:3] == ['release', 'create']:
-    (root / 'released').touch()
+    (root / 'released').write_text(sys.argv[3])
+    if '--draft' in sys.argv:
+        (root / 'draft').touch()
 if sys.argv[1:3] == ['release', 'upload']:
+    if (root / 'fail-upload').exists():
+        sys.exit(1)
+    if (root / 'immutable').exists() and not draft:
+        sys.stderr.write('HTTP 422: Cannot upload assets to an immutable release.\\n')
+        sys.exit(1)
     with (root / 'assets').open('a') as assets:
         assets.write(Path(sys.argv[4]).name + '\\n')
+if sys.argv[1:3] == ['release', 'edit'] and '--draft=false' in sys.argv:
+    (root / 'draft').unlink(missing_ok=True)
 ''')
         gh.chmod(0o755)
         cargo = fakebin / 'cargo'
@@ -113,8 +127,9 @@ echo "cargo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_G
         self.assertEqual(len((self.root / 'build.log').read_text().splitlines()), 2)
 
     def test_a_release_without_its_package_gets_it_on_a_rerun(self):
-        # Created, but the upload failed: the rerun builds and uploads only.
-        (self.root / 'released').touch()
+        # Published without its package, as before releases started as
+        # drafts: the rerun builds and uploads only.
+        (self.root / 'released').write_text(f'v{self.next_version()}')
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         log = (self.root / 'api.log').read_text()
@@ -160,6 +175,55 @@ echo "cargo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_G
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn('main moved', result.stdout)
         self.assertFalse((self.root / 'api.log').exists())
+
+    def next_version(self):
+        return self.version.rsplit('.', 1)[0] + '.1'
+
+    def calls(self):
+        log = (self.root / 'api.log').read_text().splitlines()
+        return [' '.join(line.split()[:2]) for line in log if line.startswith('release ')]
+
+    def test_a_release_is_published_only_after_its_package_is_attached(self):
+        # Immutable releases refuse assets once published.
+        (self.root / 'immutable').touch()
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ['release create', 'release upload', 'release edit'])
+        log = (self.root / 'api.log').read_text()
+        self.assertIn(f'release create v{self.next_version()} --draft', log)
+        self.assertIn(f'release edit v{self.next_version()} --draft=false', log)
+        self.assertFalse((self.root / 'draft').exists())
+
+    def test_a_draft_left_without_its_package_is_finished_on_a_rerun(self):
+        (self.root / 'immutable').touch()
+        (self.root / 'fail-upload').touch()
+        self.assertNotEqual(self.publish().returncode, 0)
+        self.assertTrue((self.root / 'draft').exists(), 'the failed upload leaves a draft')
+        self.assertNotIn('release edit', (self.root / 'api.log').read_text())
+        (self.root / 'fail-upload').unlink()
+        (self.root / 'api.log').unlink()
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ['release upload', 'release edit'])
+        self.assertEqual(self.uploads(), [f'dist/poopterm_{self.next_version()}-1_amd64.deb'])
+        self.assertFalse((self.root / 'draft').exists())
+
+    def test_a_draft_holding_its_package_is_only_published(self):
+        self.assertEqual(self.publish().returncode, 0)
+        (self.root / 'draft').touch()
+        (self.root / 'api.log').unlink()
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('already published', result.stdout)
+        self.assertEqual(self.calls(), ['release edit'])
+        self.assertFalse((self.root / 'draft').exists())
+
+    def test_drafts_of_other_versions_are_ignored(self):
+        # The fake API always lists a v0.1.0 draft holding its package.
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('v0.1.0', (self.root / 'api.log').read_text().split('\n', 1)[1])
+        self.assertEqual(self.calls(), ['release create', 'release upload', 'release edit'])
 
     def uploads(self):
         log = (self.root / 'api.log').read_text().splitlines()
