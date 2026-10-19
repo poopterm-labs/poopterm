@@ -195,9 +195,10 @@ a merge.
   and then updates `Formula/poopterm.rb`. The changelog entry is built from
   the Conventional Commits since the last tag (`feat` → Added, `fix` → Fixed,
   `perf` → Performance, breaking changes first, the rest under Maintenance),
-  so write pull request titles that read well there. GitHub Actions is the
-  only actor allowed to bypass the protection of `main`, for these release
-  commits; `GITHUB_TOKEN` pushes do not retrigger CI. Do not bump versions
+  so write pull request titles that read well there. The release job pushes
+  with a write deploy key (secret `RELEASE_DEPLOY_KEY`), the only actor that
+  may bypass the protection of `main`; its commits carry `[skip ci]` so they
+  do not release again. Do not bump versions
   manually for normal work. Release logic lives in `scripts/release.py` and
   `scripts/release.sh`; test it with `python3 -m unittest discover -s tests`.
 

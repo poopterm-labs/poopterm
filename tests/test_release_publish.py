@@ -87,6 +87,15 @@ if sys.argv[1:3] == ['release', 'create']:
         self.assertEqual((self.root / 'api.log').read_text().count('release create'), 1)
         self.assertEqual((self.root / 'api.log').read_text().count('release upload'), 1)
 
+    def test_release_commits_do_not_start_another_ci_run(self):
+        # The deploy key's pushes trigger workflows, unlike GITHUB_TOKEN's;
+        # without the marker each release commit would release again.
+        self.assertEqual(self.publish().returncode, 0)
+        for commit in ['origin/main', 'origin/main~1']:
+            message = self.git('log', '-1', '--format=%B', commit)
+            self.assertIn('[skip ci]', message, message)
+            self.assertTrue(message.startswith('chore('), message)
+
     def test_moved_main_skips_every_release_mutation(self):
         (self.repo / 'new').touch()
         self.git('add', 'new')

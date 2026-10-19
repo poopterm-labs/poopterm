@@ -113,6 +113,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # main is protected; this write deploy key is the ruleset's only
+          # bypass, so the release commits can land there.
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
       - name: Download Debian package
         uses: actions/download-artifact@v4
         with:
