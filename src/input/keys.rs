@@ -1,4 +1,5 @@
 //! Translating winit key events into the bytes a terminal application expects.
+use super::keyboard_modes::{KeyboardModes, Meta};
 use super::modify::{CURSOR_KEYS, FUNCTION_KEYS, KeyOptions, encode_other_key, with_modifiers};
 use winit::keyboard::{Key, NamedKey};
 
@@ -24,6 +25,8 @@ pub(crate) struct KeyModes {
 	pub newline: bool,
 	/// XTMODKEYS and XTFMTKEYS choices.
 	pub options: KeyOptions,
+	/// DECBKM and xterm's Meta, NumLock and Delete modes.
+	pub keyboard: KeyboardModes,
 }
 
 /// Encodes one key press, or returns `None` when the key produces no input.
@@ -41,6 +44,10 @@ pub(crate) fn encode_key(key: &Key, mods: Modifiers, modes: KeyModes) -> Option<
 	} else {
 		(modify[CURSOR_KEYS], modify[FUNCTION_KEYS])
 	};
+	let del = modes.keyboard.delete_is_del && !modes.kitty;
+	if del && param == 1 && *key == Key::Named(NamedKey::Delete) {
+		return Some(vec![0x7f]);
+	}
 	if let Key::Named(named) = key
 		&& let Some(sequence) = special_key(*named, param, modes.application_cursor, levels)
 	{
@@ -57,11 +64,20 @@ pub(crate) fn encode_key(key: &Key, mods: Modifiers, modes: KeyModes) -> Option<
 		return Some(sequence);
 	}
 	let mut bytes = legacy_key(key, mods)?;
-	if modes.newline && matches!(key, Key::Named(NamedKey::Enter)) {
-		bytes.push(b'\n');
+	match key {
+		Key::Named(NamedKey::Enter) if modes.newline => bytes.push(b'\n'),
+		Key::Named(NamedKey::Backspace) if modes.keyboard.backarrow_bs => bytes = vec![0x08],
+		_ => {}
 	}
 	if mods.alt && !modes.kitty {
-		bytes.insert(0, 0x1b);
+		match (modes.keyboard.meta(), bytes.as_slice()) {
+			(Meta::Escape, _) => bytes.insert(0, 0x1b),
+			// A lone byte is ASCII; characters beyond it have no free bit.
+			(Meta::EightBit, &[byte]) => {
+				bytes = char::from(byte | 0x80).to_string().into_bytes();
+			}
+			_ => {}
+		}
 	}
 	Some(bytes)
 }

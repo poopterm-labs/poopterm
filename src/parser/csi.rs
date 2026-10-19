@@ -128,7 +128,11 @@ impl Term {
 					1004 => self.focus_reporting = enabled,
 					1006 => self.mouse_sgr = enabled,
 					2004 => self.bracketed_paste = enabled,
-					_ => {}
+					_ => self
+						.keyboard
+						.mode(p)
+						.into_iter()
+						.for_each(|flag| *flag = enabled),
 				}
 			}
 			return;
@@ -352,7 +356,7 @@ impl Term {
 			1004 => self.focus_reporting,
 			1006 => self.mouse_sgr,
 			2004 => self.bracketed_paste,
-			_ => return None,
+			_ => return self.keyboard.clone().mode(mode).copied(),
 		})
 	}
 }

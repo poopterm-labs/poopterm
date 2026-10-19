@@ -15,6 +15,7 @@ impl App {
 			application_keypad: term.application_keypad,
 			newline: term.newline_mode,
 			options: term.key_options,
+			keyboard: term.keyboard,
 			kitty: term.kitty_keyboard,
 		}
 	}
@@ -242,8 +243,11 @@ impl App {
 			self.close_active_tab(event_loop);
 			return;
 		}
-		// KAM: a locked keyboard sends nothing.
-		if self.active_term().keyboard_locked {
+		// KAM: a locked keyboard sends nothing; DECARM reset drops repeats.
+		let term = self.active_term();
+		let blocked = term.keyboard_locked || (event.repeat && !term.keyboard.auto_repeat);
+		drop(term);
+		if blocked {
 			return;
 		}
 		let modes = self.key_modes();
