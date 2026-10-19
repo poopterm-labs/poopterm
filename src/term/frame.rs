@@ -22,6 +22,9 @@ pub(crate) struct Frame {
 	pub cursor: Option<(usize, usize)>,
 	pub cursor_shape: CursorShape,
 	pub scroll_offset: usize,
+	/// Cell size images were laid out with.
+	pub cell: (usize, usize),
+	/// Images at least partly on screen.
 	pub images: Vec<Placement>,
 	/// Frame-local extras: `cell.extra` indexes this; 0 means none.
 	extras: Vec<(bool, Box<[char]>)>,
@@ -77,7 +80,19 @@ impl Term {
 		frame.cursor_shape = self.cursor_shape;
 		frame.cursor = (self.cursor_visible && self.scroll_offset == 0 && self.cx < cols)
 			.then_some((self.cx, self.cy));
-		frame.images.clone_from(&self.images);
+		let cell = self.cell_size();
+		frame.cell = cell;
+		frame.images.clear();
+		frame.images.extend(
+			self
+				.images
+				.iter()
+				.filter(|image| {
+					let top = image.row + self.scroll_offset as isize;
+					top < rows as isize && top + image.cells(cell).1 as isize > 0
+				})
+				.cloned(),
+		);
 
 		frame.cells.clear();
 		let blank = self.blank();

@@ -113,6 +113,79 @@ fn highlight_damage_and_scrolling_match_a_full_redraw_pixel_for_pixel() {
 	}
 }
 
+/// A kitty command placing a `width`×`height` image whose pixels vary in
+/// color and alpha, at the cursor and without moving it.
+fn image(control: &str, width: usize, height: usize) -> String {
+	let pixels: Vec<u8> = (0..width * height)
+		.flat_map(|i| [(i * 7) as u8, (i * 3) as u8, 90, (i * 13 % 256) as u8])
+		.collect();
+	let payload = String::from_utf8(crate::bench::images::base64(&pixels)).unwrap();
+	format!("\x1b_Ga=T,f=32,s={width},v={height},C=1,q=2,{control};{payload}\x1b\\")
+}
+
+#[test]
+fn images_match_a_full_redraw_pixel_for_pixel() {
+	let mut term = Term::new(12, 6, Theme::from_kind(ThemeKind::Poop), "/".into());
+	let mut parser = Parser::new();
+	let mut fonts = fonts();
+	let mut canvas = Canvas::new();
+	let steps = [
+		"\x1b[44mblue bg\x1b[0m\r\nplain text\r\n\x1b[41mred\x1b[0m".to_owned(),
+		format!("\x1b[H{}", image("i=1,p=1,z=-1", 25, 50)),
+		format!("\x1b[2;3H{}", image("i=2,z=-1073741825,X=3,Y=4", 30, 30)),
+		format!("\x1b[3;6H{}", image("i=3,z=2,c=3,r=2", 8, 8)),
+		"\x1b[1;2Hxy\x1b[3;1H\x1b[42mgreen\x1b[0m".to_owned(),
+		"\x1b[5;5H\x1b_Ga=p,i=1,p=1,C=1,q=2\x1b\\".to_owned(),
+		"\x1b[6;1Hbottom".to_owned(),
+		"\x1b_Ga=d,d=i,i=3\x1b\\".to_owned(),
+		"\r\n\r\nscrolled".to_owned(),
+		"\x1b[2J".to_owned(),
+	];
+	for input in &steps {
+		parser.advance(&mut term, input.as_bytes());
+		let mut frame = Frame::default();
+		term.snapshot(&mut frame);
+		let mut expected = vec![0; frame.cols * 10 * frame.rows * 20];
+		draw(&mut expected, &mut fonts, &frame, KEY, None);
+		update(&mut canvas, &mut fonts, &mut frame, KEY);
+		assert!(canvas.pixels == expected, "input {input:?}");
+	}
+}
+
+#[test]
+fn negative_z_images_cover_backgrounds_unless_far_below_and_never_text() {
+	let mut fonts = fonts();
+	let mut pixel = |control: &str, text: &str| {
+		let mut term = Term::new(4, 2, Theme::from_kind(ThemeKind::Poop), "/".into());
+		let opaque = vec![255u8; 10 * 20 * 3];
+		let payload = String::from_utf8(crate::bench::images::base64(&opaque)).unwrap();
+		let input = format!(
+			"\x1b[?25l\x1b[44m{text}\x1b[0m\x1b[H\x1b_Ga=T,f=24,s=10,v=20,C=1,q=2,{control};{payload}\x1b\\"
+		);
+		Parser::new().advance(&mut term, input.as_bytes());
+		let mut frame = Frame::default();
+		term.snapshot(&mut frame);
+		let mut pixels = vec![0; 4 * 10 * 2 * 20];
+		draw(&mut pixels, &mut fonts, &frame, KEY, None);
+		pixels
+	};
+	let blue = Theme::from_kind(ThemeKind::Poop).palette[4];
+	// A blank cell with a blue background: the image is over it at z=-1 and
+	// under it below INT32_MIN/2.
+	assert_eq!(pixel("z=-1", " ")[0], 0xffffff);
+	assert_eq!(pixel("z=-1073741825", " ")[0], blue);
+	assert_eq!(pixel("z=0", " ")[0], 0xffffff);
+	// Text stays on top of negative z, and is covered at z >= 0.
+	let glyph = |pixels: Vec<u32>| {
+		(0..20)
+			.flat_map(|y| (0..10).map(move |x| y * 40 + x))
+			.filter(|&i| pixels[i] != 0xffffff)
+			.count()
+	};
+	assert!(glyph(pixel("z=-1", "█")) > 0);
+	assert_eq!(glyph(pixel("z=1", "█")), 0);
+}
+
 #[test]
 #[ignore = "rendering benchmark; run explicitly in release mode"]
 fn highlight_rendering_throughput() {

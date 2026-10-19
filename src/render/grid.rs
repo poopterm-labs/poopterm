@@ -5,7 +5,7 @@ use super::{
 	painter::{Painter, glyph_top},
 };
 use crate::{
-	graphics::Rect,
+	graphics::{Placement, Rect},
 	term::{Cell, CursorShape, Frame, NO_EXTRA, attr},
 	ui::selection::CellPoint,
 };
@@ -35,8 +35,21 @@ fn contains(range: Option<(CellPoint, CellPoint)>, point: CellPoint) -> bool {
 	range.is_some_and(|(start, end)| point >= start && point <= end)
 }
 
+/// Images with a lower z-index are drawn under non-default cell backgrounds
+/// too, not only under text (kitty graphics protocol).
+const UNDER_BACKGROUNDS: i32 = i32::MIN / 2;
+
+/// What part of a cell to draw: images can sit between backgrounds and text.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Layer {
+	All,
+	Backgrounds,
+	Text,
+}
+
 /// Draws the rows of `view` for which `rows` is true (all rows if `None`).
-/// Glyphs are clipped to their row, so each row can be redrawn alone.
+/// Glyphs and images are clipped to their row, so each row can be redrawn
+/// alone.
 pub(crate) fn draw_grid(
 	p: &mut Painter,
 	fonts: &mut FontSet,
@@ -44,36 +57,64 @@ pub(crate) fn draw_grid(
 	rows: Option<&[bool]>,
 ) {
 	let frame = view.frame;
-	// Negative z-index: under text, over the default background.
-	draw_images(p, view, |z| z < 0);
+	let mut images: Vec<&Placement> = frame.images.iter().collect();
+	// Equal z: the lower image id is lower; Sixel images count as id 0.
+	images.sort_by_key(|image| (image.z, image.kitty.map_or(0, |id| id.image)));
 	let wanted = |row: usize| rows.is_none_or(|rows| rows[row]);
 	for row in (0..frame.rows).filter(|&row| wanted(row)) {
-		let absolute_row = frame.first_row + row;
-		let cells = frame.row(row);
-		// Right to left, so a wide glyph is drawn after the cell it spills into.
-		for (col, cell) in cells.iter().enumerate().rev() {
-			let point = CellPoint {
-				row: absolute_row,
-				col,
-			};
-			let is_cursor = frame.cursor == Some((col, row));
-			let solid_block = is_cursor && view.focused && frame.cursor_shape == CursorShape::Block;
-			let (fg, bg) = if contains(view.selection, point) {
-				view.selection_colors
-			} else if contains(view.search_match, point) {
-				view.match_colors
-			} else if solid_block {
-				(cell.bg, cell.fg)
-			} else {
-				(cell.fg, cell.bg)
-			};
-			draw_cell(p, fonts, view, cell, (col, row), fg, bg);
-			if is_cursor && !solid_block {
-				draw_cursor(p, view, cell, (col, row));
-			}
+		if images.is_empty() {
+			draw_row(p, fonts, view, row, Layer::All);
+			continue;
+		}
+		let clip = row_clip(p, view, row);
+		draw_images(p, view, &images, clip, |z| z < UNDER_BACKGROUNDS);
+		draw_row(p, fonts, view, row, Layer::Backgrounds);
+		draw_images(p, view, &images, clip, |z| {
+			(UNDER_BACKGROUNDS..0).contains(&z)
+		});
+		draw_row(p, fonts, view, row, Layer::Text);
+		draw_images(p, view, &images, clip, |z| z >= 0);
+	}
+}
+
+fn draw_row(p: &mut Painter, fonts: &mut FontSet, view: &GridView, row: usize, layer: Layer) {
+	let frame = view.frame;
+	let absolute_row = frame.first_row + row;
+	let cells = frame.row(row);
+	// Right to left, so a wide glyph is drawn after the cell it spills into.
+	for (col, cell) in cells.iter().enumerate().rev() {
+		let point = CellPoint {
+			row: absolute_row,
+			col,
+		};
+		let is_cursor = frame.cursor == Some((col, row));
+		let solid_block = is_cursor && view.focused && frame.cursor_shape == CursorShape::Block;
+		let (fg, bg) = if contains(view.selection, point) {
+			view.selection_colors
+		} else if contains(view.search_match, point) {
+			view.match_colors
+		} else if solid_block {
+			(cell.bg, cell.fg)
+		} else {
+			(cell.fg, cell.bg)
+		};
+		draw_cell(p, fonts, view, cell, (col, row), (fg, bg), layer);
+		if is_cursor && !solid_block && layer != Layer::Backgrounds {
+			draw_cursor(p, view, cell, (col, row));
 		}
 	}
-	draw_images(p, view, |z| z >= 0);
+}
+
+/// The pixels of grid row `row` inside the surface.
+fn row_clip(p: &Painter, view: &GridView, row: usize) -> Rect {
+	let (cw, ch) = view.cell;
+	let (left, top) = (view.origin.0, view.origin.1 + row * ch);
+	Rect {
+		x: left,
+		y: top,
+		width: (view.frame.cols * cw).min(p.width.saturating_sub(left)),
+		height: ch.min(p.height.saturating_sub(top)),
+	}
 }
 
 fn draw_cell(
@@ -82,15 +123,18 @@ fn draw_cell(
 	view: &GridView,
 	cell: &Cell,
 	(col, row): (usize, usize),
-	fg: u32,
-	bg: u32,
+	(fg, bg): (u32, u32),
+	layer: Layer,
 ) {
 	let (cw, ch) = view.cell;
 	let line = view.scale.max(1);
 	let x0 = view.origin.0 + col * cw;
 	let y0 = view.origin.1 + row * ch;
-	if bg != view.default_bg {
+	if bg != view.default_bg && layer != Layer::Text {
 		p.rect(x0, y0, cw, ch, bg);
+	}
+	if layer == Layer::Backgrounds {
+		return;
 	}
 	if cell.attrs & attr::UNDERLINE != 0 {
 		p.rect(x0, y0 + ch.saturating_sub(2 * view.scale), cw, line, fg);
@@ -171,21 +215,18 @@ fn draw_cursor(p: &mut Painter, view: &GridView, cell: &Cell, (col, row): (usize
 	}
 }
 
-/// Draws the images whose z-index is in `layer`, in z order.
-fn draw_images(p: &mut Painter, view: &GridView, layer: impl Fn(i32) -> bool) {
+/// Draws the images whose z-index is in `layer`, in order, inside `clip`.
+fn draw_images(
+	p: &mut Painter,
+	view: &GridView,
+	images: &[&Placement],
+	clip: Rect,
+	layer: impl Fn(i32) -> bool,
+) {
 	let frame = view.frame;
 	let (cw, ch) = view.cell;
 	let (left, top) = view.origin;
-	let clip = Rect {
-		x: left,
-		y: top,
-		width: (frame.cols * cw).min(p.width.saturating_sub(left)),
-		height: (frame.rows * ch).min(p.height.saturating_sub(top)),
-	};
-	let mut images: Vec<_> = frame.images.iter().filter(|image| layer(image.z)).collect();
-	// Stable, so equal z keeps the order images arrived in.
-	images.sort_by_key(|image| image.z);
-	for image in images {
+	for image in images.iter().filter(|image| layer(image.z)) {
 		let at = (
 			(left + image.col * cw) as isize,
 			top as isize + (image.row + frame.scroll_offset as isize) * ch as isize,
