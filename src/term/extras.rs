@@ -1,6 +1,9 @@
 //! Rarely used per-cell data (combining marks, OSC 8 hyperlinks, parts of
 //! scaled text) kept out of [`Cell`](super::Cell) so cells stay 16 bytes.
-use std::collections::HashMap;
+use std::{
+	collections::{HashMap, hash_map::Entry},
+	hash::{Hash, Hasher},
+};
 
 use super::multicell::Multicell;
 
@@ -9,11 +12,31 @@ pub(crate) const NONE: u16 = 0;
 /// Combining marks kept per cell; further marks are dropped.
 pub(crate) const MAX_MARKS: usize = 8;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Extra {
 	hyperlink: u16,
 	marks: Box<[char]>,
 	multicell: Option<Box<Multicell>>,
+}
+
+// Entries are hashed for every combining mark printed. SipHash costs
+// mostly per write, so the common fields go in one write; SipHash itself
+// stays, since programs choose the content.
+impl Hash for Extra {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		let marks = &self.marks[..self.marks.len().min(MAX_MARKS)];
+		let mut bytes = [0u8; 4 + 4 * MAX_MARKS];
+		bytes[..2].copy_from_slice(&self.hyperlink.to_ne_bytes());
+		bytes[2] = marks.len() as u8;
+		bytes[3] = u8::from(self.multicell.is_some());
+		for (chunk, &mark) in bytes[4..].as_chunks_mut::<4>().0.iter_mut().zip(marks) {
+			*chunk = u32::from(mark).to_ne_bytes();
+		}
+		state.write(&bytes[..4 + 4 * marks.len()]);
+		if let Some(multicell) = &self.multicell {
+			multicell.hash(state);
+		}
+	}
 }
 
 /// Interned [`Extra`] entries. Ids are stable for the table's lifetime and
@@ -59,8 +82,9 @@ impl Extras {
 		let mut marks = current.marks.to_vec();
 		marks.push(mark);
 		self.intern(Extra {
+			hyperlink: current.hyperlink,
 			marks: marks.into(),
-			..current.clone()
+			multicell: current.multicell.clone(),
 		})
 	}
 
@@ -91,13 +115,14 @@ impl Extras {
 	}
 
 	fn intern(&mut self, extra: Extra) -> Option<u16> {
-		if let Some(&id) = self.ids.get(&extra) {
-			return Some(id);
+		match self.ids.entry(extra) {
+			Entry::Occupied(entry) => Some(*entry.get()),
+			Entry::Vacant(entry) => {
+				let id = u16::try_from(self.entries.len()).ok()?;
+				self.entries.push(entry.key().clone());
+				Some(*entry.insert(id))
+			}
 		}
-		let id = u16::try_from(self.entries.len()).ok()?;
-		self.entries.push(extra.clone());
-		self.ids.insert(extra, id);
-		Some(id)
 	}
 }
 
