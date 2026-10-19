@@ -1,5 +1,5 @@
-//! The tab strip: tabs with status markers and progress, scroll arrows,
-//! new-tab and settings buttons.
+//! The tab strip: tabs with status markers, progress and the colors and
+//! status programs set, scroll arrows, new-tab and settings buttons.
 use super::{draw::UiFont, *};
 use crate::{
 	render::painter::Painter,
@@ -54,7 +54,25 @@ impl App {
 				self.cursor_pos,
 				(x, tab_y, layout.width, self.top.saturating_sub(tab_y)),
 			);
-			if active || hovered {
+			let session = &self.sessions[index];
+			let style = session.term().tab_style.clone();
+			if let Some(color) = style.color {
+				let shade = if active {
+					150
+				} else if hovered {
+					110
+				} else {
+					80
+				};
+				p.round_rect(
+					x,
+					tab_y + 4 * scale,
+					layout.width,
+					self.tab_height.saturating_sub(6 * scale),
+					5 * scale,
+					blend(bg, color, shade),
+				);
+			} else if active || hovered {
 				let shade = if active { 70 } else { 38 };
 				p.round_rect(
 					x,
@@ -75,23 +93,23 @@ impl App {
 					accent,
 				);
 			}
-			let session = &self.sessions[index];
-			let max_chars = (layout.width.saturating_sub(42 * scale) / ui.cw.max(1)).max(1);
-			let label = ellipsize(&session.title(), max_chars);
 			let (marker, progress) = {
 				let term = session.term();
 				let marker = tab_marker(term.bell, term.status.summary(), session.activity);
 				(marker, term.status.shown_progress())
 			};
-			if let Some(marker) = marker {
-				let (glyph, color) = match marker {
+			// The terminal's own markers say more than a program's indicator.
+			let dot = marker
+				.map(|marker| match marker {
 					Marker::Bell => ("!", accent),
 					Marker::Blocked => ("•", self.theme.palette[3]),
 					Marker::Error => ("•", self.theme.palette[1]),
 					Marker::Done => ("•", self.theme.palette[2]),
 					Marker::Working => ("•", accent),
 					Marker::Activity => ("•", blend(bg, fg, 150)),
-				};
+				})
+				.or(style.indicator.map(|color| ("•", color)));
+			if let Some((glyph, color)) = dot {
 				p.text(
 					&mut self.fonts,
 					x + 10 * scale,
@@ -105,7 +123,14 @@ impl App {
 			if let Some(progress) = progress {
 				self.draw_tab_progress(p, (x, tab_y, layout.width), scale, progress);
 			}
-			let label_x = x + if marker.is_some() { 22 } else { 12 } * scale;
+			// Labels are drawn smaller than the UI font, up to the close button.
+			let small_cw = ui.cw as f32 * 0.82;
+			let left = if dot.is_some() { 22 } else { 12 } * scale;
+			let right = if self.sessions.len() > 1 { 32 } else { 12 } * scale;
+			let room = layout.width.saturating_sub(left + right);
+			let max_chars = ((room as f32 / small_cw.max(1.0)) as usize).max(1);
+			let (label, status) = tab_label(&session.title(), style.status.as_deref(), max_chars);
+			let label_x = x + left;
 			p.text(
 				&mut self.fonts,
 				label_x,
@@ -115,6 +140,18 @@ impl App {
 				small_ascent,
 				fg,
 			);
+			if !status.is_empty() {
+				let status_x = label_x + ((label.chars().count() + 2) as f32 * small_cw) as usize;
+				p.text(
+					&mut self.fonts,
+					status_x,
+					text_y,
+					&status,
+					ui.px * 0.82,
+					small_ascent,
+					style.status_color.unwrap_or(blend(bg, fg, 150)),
+				);
+			}
 			if self.sessions.len() > 1 {
 				p.text(
 					&mut self.fonts,
@@ -217,9 +254,45 @@ pub(super) fn ellipsize(title: &str, max_chars: usize) -> String {
 	label
 }
 
+/// Fits a tab's title and status into `max_chars`: after a two-character
+/// gap, the status gets at least half, or all the title leaves, and the
+/// title the rest.
+pub(super) fn tab_label(title: &str, status: Option<&str>, max_chars: usize) -> (String, String) {
+	let room = (max_chars / 2).max(max_chars.saturating_sub(title.chars().count() + 2));
+	let status_chars = status.map_or(0, |status| status.chars().count().min(room));
+	if status_chars == 0 {
+		return (ellipsize(title, max_chars), String::new());
+	}
+	(
+		ellipsize(title, max_chars.saturating_sub(status_chars + 2)),
+		ellipsize(status.unwrap_or_default(), status_chars),
+	)
+}
+
 #[cfg(test)]
 mod tests {
-	use super::ellipsize;
+	use super::{ellipsize, tab_label};
+
+	#[test]
+	fn statuses_share_the_tab_with_the_title() {
+		let label = |status| tab_label("cargo build", status, 20);
+		assert_eq!(label(None), ("cargo build".into(), String::new()));
+		assert_eq!(label(Some("ok")), ("cargo build".into(), "ok".into()));
+		assert_eq!(
+			label(Some("compiling poopterm")),
+			("cargo b…".into(), "compiling…".into())
+		);
+		assert_eq!(
+			tab_label("a very long title indeed", Some("ok"), 20),
+			("a very long tit…".into(), "ok".into())
+		);
+		assert_eq!(tab_label("vim", Some("x"), 1), ("v".into(), String::new()));
+		// A short title leaves the status more room.
+		assert_eq!(
+			tab_label("vim", Some("compiling poopterm"), 20),
+			("vim".into(), "compiling poop…".into())
+		);
+	}
 
 	#[test]
 	fn long_titles_are_ellipsized_to_fit() {

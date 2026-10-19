@@ -38,6 +38,9 @@ pub(crate) mod status;
 #[cfg(test)]
 mod status_tests;
 mod sync;
+pub(crate) mod tab_style;
+#[cfg(test)]
+mod tab_style_tests;
 #[cfg(test)]
 mod tests;
 
@@ -212,6 +215,8 @@ pub(crate) struct Term {
 	pub(crate) icon_name: String,
 	/// ConEmu's tab name (OSC 9;3), shown instead of the title.
 	pub(crate) tab_title: Option<String>,
+	/// iTerm2's tab color and session status.
+	pub(crate) tab_style: tab_style::TabStyle,
 	pub(crate) cwd: PathBuf,
 	pub(crate) cwd_generation: u64,
 	pub(crate) bell: bool,
@@ -374,6 +379,7 @@ impl Term {
 			title_generation: 0,
 			icon_name: String::new(),
 			tab_title: None,
+			tab_style: tab_style::TabStyle::default(),
 			cwd,
 			cwd_generation: 0,
 			bell: false,

@@ -16,6 +16,7 @@ mod osc_notify;
 mod osc_pointer;
 mod osc_shell;
 mod osc_status;
+mod osc_tab;
 mod params;
 mod print;
 mod sgr;

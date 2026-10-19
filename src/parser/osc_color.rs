@@ -19,6 +19,7 @@ impl Term {
 		match number {
 			4 => self.osc_indexed(params, bell, false),
 			5 => self.osc_indexed(params, bell, true),
+			6 if params.get(1) == Some(&&b"bg"[..]) => self.osc_tab_color(params),
 			6 | 106 => self.osc_special_modes(params),
 			10..=19 => {
 				for (offset, value) in params.iter().enumerate() {
