@@ -15,6 +15,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -51,6 +52,8 @@ jobs:
 
   freebsd:
     runs-on: ubuntu-latest
+    # Booting the VM and a cold build take ~15 minutes; a hang should not take 6 hours.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - name: Build and test on FreeBSD
@@ -73,6 +76,7 @@ jobs:
     needs: [check, freebsd]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     concurrency:

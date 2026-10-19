@@ -1,9 +1,29 @@
 //! Runs the shipped hooks in real shells (skipped when a shell is missing).
-use std::process::Command;
+use std::process::{Command, Stdio};
+
+/// A shell command in its own session, without a controlling terminal: an
+/// interactive shell (`-i`) opens `/dev/tty` and, from a background process
+/// group, stops on SIGTTIN and hangs the test, as on CI's FreeBSD VM.
+fn shell_command(shell: &str) -> Command {
+	use std::os::unix::process::CommandExt;
+	unsafe extern "C" {
+		safe fn setsid() -> i32;
+	}
+	let mut command = Command::new(shell);
+	command.stdin(Stdio::null());
+	// SAFETY: setsid is async-signal-safe and touches no parent state.
+	unsafe {
+		command.pre_exec(|| {
+			setsid();
+			Ok(())
+		});
+	}
+	command
+}
 
 /// Runs `script` in `shell`, or returns `None` when the shell is not installed.
 fn run(shell: &str, args: &[&str], script: &str) -> Option<(String, String)> {
-	let output = Command::new(shell).args(args).arg(script).output().ok()?;
+	let output = shell_command(shell).args(args).arg(script).output().ok()?;
 	Some((
 		String::from_utf8_lossy(&output.stdout).into_owned(),
 		String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -69,7 +89,7 @@ const ENCODED_TAIL: &str = "/a%20b%07%1B%5D52%3Bc%3BeA%3D%3D%07%C3%A9%25";
 fn zsh_percent_encodes_unsafe_directory_bytes() {
 	let dir = HostileDirectory::new("zsh");
 	let script = "source shell-integration/zsh.zsh; cd -- \"$TARGET\"; _poopterm_precmd";
-	let Some(output) = Command::new("zsh")
+	let Some(output) = shell_command("zsh")
 		.args(["-fc", script])
 		.env("TARGET", &dir.path)
 		.output()
@@ -87,7 +107,7 @@ fn zsh_percent_encodes_unsafe_directory_bytes() {
 fn bash_percent_encodes_unsafe_directory_bytes() {
 	let dir = HostileDirectory::new("bash");
 	let script = "source shell-integration/bash.sh; cd -- \"$TARGET\"; __poopterm_prompt_command";
-	let Some(output) = Command::new("bash")
+	let Some(output) = shell_command("bash")
 		.args(["--norc", "-c", script])
 		.env("TARGET", &dir.path)
 		.output()
@@ -153,7 +173,7 @@ fn ssh_uses_a_common_term_while_term_is_poopterm() {
 		),
 	] {
 		let run = |term: &str, extra: &str| {
-			Command::new(shell)
+			shell_command(shell)
 				.args(args)
 				.arg(format!("{extra}{script}"))
 				.env("TERM", term)
@@ -200,7 +220,7 @@ fn zsh_injection_loads_hooks_and_restores_the_users_startup_files() {
 	}
 	let probe = "print -r -- \"$+functions[_poopterm_precmd] ${ZDOTDIR-unset} $RC_FROM $ENV_FROM\"";
 	for original in [None, Some(&custom)] {
-		let mut command = Command::new("zsh");
+		let mut command = shell_command("zsh");
 		command
 			.args(["-i", "-c", probe])
 			.env("HOME", &home)
@@ -251,7 +271,7 @@ fn bash_injection_loads_profiles_and_hooks_once_and_respects_off() {
 	.unwrap();
 	install_scripts(&scripts).unwrap();
 	let env = injection_env(Shell::Bash, &scripts, |_| None);
-	let output = Command::new("bash")
+	let output = shell_command("bash")
 		.args(shell_args(Shell::Bash, &env))
 		.args(["-c", "printf 'probe=%s:%s:%s:%s' \"$PROFILE\" \"$RC_COUNT\" \"$__POOPTERM_INTEGRATION_LOADED\" \"${POOPTERM_BASH_RCFILE-unset}\""])
 		.env("HOME", &home)
