@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.30 "Giga Fly" — 2026-10-19
+
+### Maintenance
+
+- Plan build and memory layout optimizations (#43).
+
 ## 26.10.29 "Giga Fly" — 2026-10-19
 
 ### Added
