@@ -1,5 +1,5 @@
-//! Requests sent as device control strings: DECRQSS (`DCS $ q`) and, in
-//! `xtgettcap_tests`, XTGETTCAP (`DCS + q`).
+//! Requests sent as device control strings: DECRQSS (`DCS $ q`) and
+//! XTGETTCAP (`DCS + q`).
 use crate::{
 	parser::Parser,
 	term::Term,
@@ -79,4 +79,46 @@ fn other_device_control_strings_are_ignored() {
 	let mut t = terminal();
 	send(&mut t, "\x1bP$tm\x1b\\\x1bP!|0\x1b\\\x1bP1$qm\x1b\\");
 	assert!(t.responses.is_empty());
+}
+
+/// Every reply to XTGETTCAP for the hex-encoded `names`.
+fn capabilities(term: &mut Term, names: &str) -> Vec<String> {
+	send(term, &format!("\x1bP+q{names}\x1b\\"));
+	std::mem::take(&mut term.responses)
+		.into_iter()
+		.map(|reply| String::from_utf8(reply).unwrap())
+		.collect()
+}
+
+#[test]
+fn capabilities_are_reported_in_hex() {
+	let mut t = terminal();
+	// TN: xterm-poopterm.
+	assert_eq!(
+		capabilities(&mut t, "544e"),
+		["\x1bP1+r544E=787465726D2D706F6F707465726D\x1b\\"]
+	);
+	// kcuu1 and Co together; flags have no value.
+	assert_eq!(
+		capabilities(&mut t, "6B63757531;436f"),
+		["\x1bP1+r6B63757531=1B4F41;436F=323536\x1b\\"]
+	);
+	assert_eq!(capabilities(&mut t, "616d"), ["\x1bP1+r616D\x1b\\"]);
+}
+
+#[test]
+fn an_unknown_capability_ends_the_list() {
+	let mut t = terminal();
+	assert_eq!(capabilities(&mut t, "6e6f7065"), ["\x1bP0+r\x1b\\"]);
+	assert_eq!(
+		capabilities(&mut t, "436f;6e6f7065;544e"),
+		["\x1bP1+r436F=323536\x1b\\", "\x1bP0+r\x1b\\"]
+	);
+	for bad in ["", "zz", "436", "436f;", ";436f", &"41".repeat(3000)] {
+		assert_eq!(
+			capabilities(&mut t, bad).last().unwrap(),
+			"\x1bP0+r\x1b\\",
+			"{bad}"
+		);
+	}
 }

@@ -1,9 +1,13 @@
 //! Answers to device control string requests: DECRQSS reports a setting
-//! as the control sequence that would set it.
-use crate::term::{
-	CursorShape, Term,
-	attr::*,
-	dcs::{Kind, Request},
+//! as the control sequence that would set it, XTGETTCAP a capability from
+//! poopterm's terminfo entry.
+use crate::{
+	term::{
+		CursorShape, Term,
+		attr::*,
+		dcs::{Kind, Request},
+	},
+	terminfo_caps::{Capability, capability},
 };
 
 impl Term {
@@ -14,14 +18,16 @@ impl Term {
 		} else {
 			Some(&request.data[..])
 		};
-		let reply = match request.kind {
-			Kind::Status => match data.and_then(|setting| self.setting(setting)) {
+		let replies = match request.kind {
+			Kind::Status => vec![match data.and_then(|setting| self.setting(setting)) {
 				Some(setting) => format!("\x1bP1$r{setting}\x1b\\"),
 				None => "\x1bP0$r\x1b\\".to_owned(),
-			},
-			Kind::Capabilities => return,
+			}],
+			Kind::Capabilities => capability_replies(data.unwrap_or(b"")),
 		};
-		self.responses.push(reply.into_bytes());
+		self
+			.responses
+			.extend(replies.into_iter().map(String::into_bytes));
 	}
 
 	/// The control sequence (without `CSI`) that sets `setting`.
@@ -97,6 +103,61 @@ impl Term {
 		}
 		parts.join(";")
 	}
+}
+
+/// XTGETTCAP: the hex-encoded names and values found, in one reply, then
+/// an invalid reply if a name was not; it ends the list.
+fn capability_replies(names: &[u8]) -> Vec<String> {
+	let mut found = Vec::new();
+	let mut unknown = false;
+	for hex_name in names.split(|&byte| byte == b';') {
+		let name = from_hex(hex_name).and_then(|name| String::from_utf8(name).ok());
+		let Some((name, capability)) =
+			name.and_then(|name| capability(&name).map(|capability| (name, capability)))
+		else {
+			unknown = true;
+			break;
+		};
+		let mut pair = to_hex(name.as_bytes());
+		match capability {
+			Capability::Flag => {}
+			Capability::Number(number) => {
+				pair.push('=');
+				pair.push_str(&to_hex(number.to_string().as_bytes()));
+			}
+			Capability::Text(text) => {
+				pair.push('=');
+				pair.push_str(&to_hex(&text));
+			}
+		}
+		found.push(pair);
+	}
+	let mut replies = Vec::new();
+	if !found.is_empty() {
+		replies.push(format!("\x1bP1+r{}\x1b\\", found.join(";")));
+	}
+	if unknown {
+		replies.push("\x1bP0+r\x1b\\".to_owned());
+	}
+	replies
+}
+
+fn from_hex(hex: &[u8]) -> Option<Vec<u8>> {
+	let (pairs, rest) = hex.as_chunks::<2>();
+	if !rest.is_empty() {
+		return None;
+	}
+	pairs
+		.iter()
+		.map(|&[high, low]| {
+			let digit = |byte: u8| char::from(byte).to_digit(16);
+			Some((digit(high)? * 16 + digit(low)?) as u8)
+		})
+		.collect()
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+	bytes.iter().map(|byte| format!("{byte:02X}")).collect()
 }
 
 /// `r:g:b` in decimal.

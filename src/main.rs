@@ -26,6 +26,7 @@ mod shell_integration;
 mod sixel;
 mod term;
 mod terminfo;
+mod terminfo_caps;
 mod theme;
 mod ui;
 mod vt;
