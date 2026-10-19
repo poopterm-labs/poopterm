@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels its older run. Each push to main gets
+# its own group, so main's runs neither queue nor get cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     strategy:
@@ -44,16 +50,19 @@ jobs:
           rustup +nightly target add x86_64-unknown-freebsd
           cargo +nightly clippy --locked --target x86_64-unknown-freebsd --all-targets -- -D warnings
 
+      # On Linux the debian-package job builds and runs the release binary.
       - name: Build release binary
+        if: runner.os == 'macOS'
         run: cargo +nightly build --release --locked
 
       - name: Verify binary execution
+        if: runner.os == 'macOS'
         run: ./target/release/poopterm --version
 
   freebsd:
     runs-on: ubuntu-latest
-    # Booting the VM and a cold build take ~15 minutes; a hang should not take 6 hours.
-    timeout-minutes: 45
+    # Booting the VM and a cold build take a few minutes; a hang should not take 6 hours.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: Build and test on FreeBSD
@@ -61,17 +70,19 @@ jobs:
         uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
         with:
           usesh: true
+          # Only what needs FreeBSD itself: the tests (PTYs, shells, paths)
+          # and a binary that runs. Formatting and lints, BSD code included,
+          # run on Linux; no FreeBSD release binary ships, so no slow LTO
+          # build. Libraries only, not the whole X server.
           prepare: |
-            pkg install -y curl pkgconf xorg libxkbcommon wayland bash zsh python311
+            pkg install -y curl pkgconf libX11 libxkbcommon wayland bash zsh python311
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
-            sh /tmp/rustup.sh -y --default-toolchain nightly --profile minimal --component clippy --component rustfmt
+            sh /tmp/rustup.sh -y --default-toolchain nightly --profile minimal
           run: |
             . "$HOME/.cargo/env"
-            cargo fmt --check
             cargo test --locked
-            cargo clippy --locked --all-targets -- -D warnings
-            cargo build --release --locked
-            ./target/release/poopterm --version
+            cargo build --locked
+            ./target/debug/poopterm --version
 
   debian-package:
     runs-on: ubuntu-22.04
