@@ -91,6 +91,35 @@ class Release(unittest.TestCase):
             job('no-such-job')
 
 
+class Provenance(unittest.TestCase):
+    def test_released_packages_get_a_signed_build_provenance(self):
+        # `gh attestation verify` then proves which workflow run and commit
+        # built a downloaded package.
+        attest = step('Attest the released package')
+        self.assertIn('uses: actions/attest-build-provenance@v4', attest)
+        self.assertRegex(attest, r'subject-path: dist/poopterm_\*\.deb\n')
+
+    def test_provenance_is_attested_after_the_release_built_the_package(self):
+        release = job('release')
+        self.assertLess(release.index('- name: Publish the checked main revision'),
+                        release.index('- name: Attest the released package'))
+
+    def test_runs_that_skip_the_release_attest_nothing(self):
+        # A run that lost the race to a newer commit, or found the release
+        # finished, builds no package.
+        attest = step('Attest the released package')
+        self.assertIn("if: hashFiles('dist/poopterm_*.deb') != ''", attest)
+
+    def test_only_the_release_job_may_sign(self):
+        release = job('release')
+        for permission in ['contents: write', 'id-token: write', 'attestations: write']:
+            self.assertIn(permission, release)
+        top = WORKFLOW.split('\njobs:', 1)[0]
+        self.assertIn('contents: read', top)
+        self.assertNotIn('id-token', top)
+        self.assertEqual(WORKFLOW.count('id-token: write'), 1)
+
+
 class FreeBSD(unittest.TestCase):
     """The FreeBSD VM is the slowest job; it runs only what needs FreeBSD."""
 
