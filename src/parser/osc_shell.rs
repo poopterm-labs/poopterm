@@ -1,5 +1,6 @@
-//! Shell integration beyond OSC 133: the working directory (OSC 7) and VS
-//! Code's OSC 633 markers, command lines and properties.
+//! Shell integration beyond OSC 133: the working directory (OSC 7), ConEmu's
+//! OSC 9 commands, and VS Code's OSC 633 markers, command lines and
+//! properties.
 use crate::{shell_integration::decode_uri_path, term::Term};
 
 impl Term {
@@ -21,19 +22,7 @@ impl Term {
 	/// the command line, and P sets properties, of which only `Cwd` is used.
 	pub(super) fn osc_vscode(&mut self, params: &[&[u8]]) {
 		match params.first().copied().unwrap_or_default() {
-			b"A" | b"B" | b"C" | b"D" => {
-				if params[0] == b"A" {
-					self.status.prompt();
-				}
-				let mut marker: Vec<&[u8]> = vec![b"133"];
-				marker.extend_from_slice(params);
-				self.shell.record(
-					&marker,
-					self.history_base + self.scrollback.len() + self.cy,
-					self.cx,
-					std::time::Instant::now(),
-				);
-			}
+			b"A" | b"B" | b"C" | b"D" => self.shell_marker(params),
 			// The nonce proves the line came from VS Code's own scripts; we
 			// inject none, so it is not checked.
 			b"E" => {
@@ -51,17 +40,71 @@ impl Term {
 				};
 				if value.starts_with(b"file://") {
 					self.osc_cwd_uri(value);
-				} else if let Ok(path) = std::str::from_utf8(value)
-					&& path.starts_with('/')
-					&& !path.chars().any(char::is_control)
-					&& self.cwd != std::path::Path::new(path)
-				{
-					self.cwd = path.into();
-					self.cwd_generation = self.cwd_generation.wrapping_add(1);
+				} else {
+					self.set_cwd_path(value);
 				}
 			}
 			_ => {}
 		}
+	}
+}
+
+impl Term {
+	/// ConEmu's OSC 9 commands: 3 names the tab, 9 sets the working
+	/// directory and 12 marks a prompt. The rest sleep, show dialogs, run
+	/// programs or reveal the environment, so they are ignored.
+	pub(super) fn osc_conemu(&mut self, params: &[&[u8]]) {
+		let text = || unquote(&params[1..].join(&b';'));
+		match params[0] {
+			b"3" => {
+				let name = super::osc::clean_title(&text());
+				let name = (!name.is_empty()).then_some(name);
+				if self.tab_title != name {
+					self.tab_title = name;
+					self.title_generation = self.title_generation.wrapping_add(1);
+				}
+			}
+			b"9" => self.set_cwd_path(&text()),
+			b"12" => self.shell_marker(&[b"A"]),
+			_ => {}
+		}
+	}
+
+	/// An OSC 133 marker from another protocol: A also starts a prompt for
+	/// the status bar, but there is no fresh line.
+	fn shell_marker(&mut self, params: &[&[u8]]) {
+		if params[0] == b"A" {
+			self.status.prompt();
+		}
+		let mut marker: Vec<&[u8]> = vec![b"133"];
+		marker.extend_from_slice(params);
+		self.shell.record(
+			&marker,
+			self.history_base + self.scrollback.len() + self.cy,
+			self.cx,
+			std::time::Instant::now(),
+		);
+	}
+
+	/// Sets the working directory to an absolute path without control
+	/// characters; anything else is ignored.
+	pub(super) fn set_cwd_path(&mut self, path: &[u8]) {
+		if let Ok(path) = std::str::from_utf8(path)
+			&& path.starts_with('/')
+			&& !path.chars().any(char::is_control)
+			&& self.cwd != std::path::Path::new(path)
+		{
+			self.cwd = path.into();
+			self.cwd_generation = self.cwd_generation.wrapping_add(1);
+		}
+	}
+}
+
+/// `"text"` without its quotes; unquoted text is kept as it is.
+fn unquote(text: &[u8]) -> Vec<u8> {
+	match text {
+		[b'"', inner @ .., b'"'] => inner.to_vec(),
+		_ => text.to_vec(),
 	}
 }
 

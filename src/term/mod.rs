@@ -6,6 +6,8 @@ mod clipboard_tests;
 mod color_tests;
 mod colors;
 #[cfg(test)]
+mod conemu_tests;
+#[cfg(test)]
 mod context_tests;
 pub(crate) mod contexts;
 mod extras;
@@ -206,6 +208,10 @@ pub(crate) struct Term {
 	pub(crate) pointer_shapes: pointer::PointerShapes,
 	pub(crate) title: String,
 	pub(crate) title_generation: u64,
+	/// xterm's icon name (OSC 0 and 1).
+	pub(crate) icon_name: String,
+	/// ConEmu's tab name (OSC 9;3), shown instead of the title.
+	pub(crate) tab_title: Option<String>,
 	pub(crate) cwd: PathBuf,
 	pub(crate) cwd_generation: u64,
 	pub(crate) bell: bool,
@@ -366,6 +372,8 @@ impl Term {
 			pointer_shapes: pointer::PointerShapes::default(),
 			title: "Shell".into(),
 			title_generation: 0,
+			icon_name: String::new(),
+			tab_title: None,
 			cwd,
 			cwd_generation: 0,
 			bell: false,

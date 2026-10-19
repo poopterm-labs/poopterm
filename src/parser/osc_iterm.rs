@@ -51,15 +51,7 @@ impl Term {
 					.push(WindowRequest::Attention(attention));
 			}
 			"ClearScrollback" => self.clear_scrollback(),
-			"CurrentDir" => {
-				if value.starts_with('/')
-					&& !value.chars().any(char::is_control)
-					&& self.cwd != std::path::Path::new(value)
-				{
-					self.cwd = value.into();
-					self.cwd_generation = self.cwd_generation.wrapping_add(1);
-				}
-			}
+			"CurrentDir" => self.set_cwd_path(value.as_bytes()),
 			"RemoteHost" => {
 				if value.len() <= 255
 					&& value

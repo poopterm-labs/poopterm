@@ -26,7 +26,7 @@ impl Term {
 			return self.osc_progress(&params[1..]);
 		}
 		if !first.is_empty() && first.iter().all(u8::is_ascii_digit) {
-			return;
+			return self.osc_conemu(params);
 		}
 		self.notify_text(b"", &params.join(&b';'));
 	}

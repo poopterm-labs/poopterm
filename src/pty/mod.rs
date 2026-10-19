@@ -103,11 +103,15 @@ impl Session {
 		self.flags.flooding.load(Ordering::Acquire)
 	}
 
-	/// The tab title: a user-chosen name, else the title set by the shell (OSC 0/2).
+	/// The tab title: a user-chosen name, else one a program gave the tab
+	/// (ConEmu's OSC 9;3), else the title set by the shell (OSC 0/2).
 	pub(crate) fn title(&self) -> String {
 		match &self.custom_title {
 			Some(title) => title.clone(),
-			None => self.term().title.clone(),
+			None => {
+				let term = self.term();
+				term.tab_title.clone().unwrap_or_else(|| term.title.clone())
+			}
 		}
 	}
 }

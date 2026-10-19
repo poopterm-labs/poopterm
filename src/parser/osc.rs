@@ -58,9 +58,11 @@ impl Term {
 				);
 			}
 			b"0" | b"1" | b"2" if params.len() >= 2 => {
-				let title = String::from_utf8_lossy(params[1]);
-				let title: String = title.chars().filter(|c| !c.is_control()).take(64).collect();
-				if self.title != title {
+				let title = clean_title(params[1]);
+				if params[0] != b"2" {
+					self.icon_name.clone_from(&title);
+				}
+				if params[0] != b"1" && self.title != title {
 					self.title = title;
 					self.title_generation = self.title_generation.wrapping_add(1);
 				}
@@ -72,4 +74,13 @@ impl Term {
 			_ => {}
 		}
 	}
+}
+
+/// A title or icon name without control characters, at most 64 characters.
+pub(super) fn clean_title(text: &[u8]) -> String {
+	String::from_utf8_lossy(text)
+		.chars()
+		.filter(|c| !c.is_control())
+		.take(64)
+		.collect()
 }
