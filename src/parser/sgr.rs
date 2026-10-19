@@ -17,22 +17,14 @@ impl Term {
 			group_count += 1;
 		}
 		if group_count == 0 {
-			self.fg = self.default_fg;
-			self.bg = self.default_bg;
-			self.attrs = 0;
-			self.bold = false;
-			self.reverse = false;
+			self.reset_style();
 			return;
 		}
 		let mut i = 0;
 		while i < group_count {
 			let group = groups[i].unwrap_or_default();
 			let Some(&code) = group.first() else {
-				self.fg = self.default_fg;
-				self.bg = self.default_bg;
-				self.attrs = 0;
-				self.bold = false;
-				self.reverse = false;
+				self.reset_style();
 				i += 1;
 				continue;
 			};
@@ -41,9 +33,7 @@ impl Term {
 			if matches!(code, 38 | 48 | 58) {
 				let (mode, color, consumed) = if group.len() > 1 {
 					match group.get(1).copied() {
-						Some(5) if group.len() >= 3 => {
-							(5, Some(self.indexed_color(group[2].min(255) as u8)), 0)
-						}
+						Some(5) if group.len() >= 3 => (5, Some(u32::from(group[2].min(255))), 0),
 						Some(2) if group.len() >= 5 => {
 							let start = if group.len() >= 6 && group[2] == 0 {
 								3
@@ -65,7 +55,7 @@ impl Term {
 								.get(i + 2)
 								.and_then(|group| *group)
 								.and_then(|g| g.first())
-								.map(|v| self.indexed_color((*v).min(255) as u8)),
+								.map(|v| u32::from((*v).min(255))),
 							2,
 						),
 						2 => {
@@ -93,9 +83,14 @@ impl Term {
 				} else {
 					(0, None, 0)
 				};
-				match (code, color) {
-					(38, Some(color)) => self.fg = color,
-					(48, Some(color)) => self.bg = color,
+				// `color` is an RGB value, or a palette index for mode 5.
+				let resolved = color.map(|color| match mode {
+					5 => self.indexed_color(color as u8),
+					_ => color,
+				});
+				match (code, resolved) {
+					(38, Some(resolved)) => (self.fg, self.fg_id) = (resolved, color.unwrap_or(0)),
+					(48, Some(resolved)) => self.bg = resolved,
 					_ => {}
 				}
 				if mode != 0 {
@@ -114,13 +109,7 @@ impl Term {
 				continue;
 			}
 			match code {
-				0 => {
-					self.fg = self.default_fg;
-					self.bg = self.default_bg;
-					self.attrs = 0;
-					self.bold = false;
-					self.reverse = false;
-				}
+				0 => self.reset_style(),
 				1 => self.bold = true,
 				2 => self.attrs |= DIM,
 				3 => self.attrs |= ITALIC,
@@ -142,11 +131,15 @@ impl Term {
 				29 => self.attrs &= !STRIKE,
 				53 => self.attrs |= OVERLINE,
 				55 => self.attrs &= !OVERLINE,
-				30..=37 => self.fg = self.indexed_color((code - 30) as u8),
-				39 => self.fg = self.default_fg,
+				30..=37 => {
+					(self.fg, self.fg_id) = (self.indexed_color((code - 30) as u8), code as u32 - 30)
+				}
+				39 => (self.fg, self.fg_id) = (self.default_fg, 0),
 				40..=47 => self.bg = self.indexed_color((code - 40) as u8),
 				49 => self.bg = self.default_bg,
-				90..=97 => self.fg = self.indexed_color((code - 90 + 8) as u8),
+				90..=97 => {
+					(self.fg, self.fg_id) = (self.indexed_color((code - 90 + 8) as u8), code as u32 - 82)
+				}
 				100..=107 => self.bg = self.indexed_color((code - 100 + 8) as u8),
 				_ => {}
 			}
@@ -156,6 +149,15 @@ impl Term {
 }
 
 impl Term {
+	fn reset_style(&mut self) {
+		self.fg = self.default_fg;
+		self.fg_id = 0;
+		self.bg = self.default_bg;
+		self.attrs = 0;
+		self.bold = false;
+		self.reverse = false;
+	}
+
 	pub(crate) fn indexed_color(&self, index: u8) -> u32 {
 		self.color_overrides[index as usize].unwrap_or_else(|| xterm_color(index, self.palette))
 	}

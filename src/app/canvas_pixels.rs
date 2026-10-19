@@ -140,6 +140,13 @@ fn images_match_a_full_redraw_pixel_for_pixel() {
 		"\x1b_Ga=d,d=i,i=3\x1b\\".to_owned(),
 		"\r\n\r\nscrolled".to_owned(),
 		"\x1b[2J".to_owned(),
+		// Unicode placeholders: text showing a virtual placement, then the
+		// image changing under unchanged text, then the placement going.
+		format!("\x1b[H{}", image("i=4,U=1,c=3,r=2", 20, 30)),
+		"\x1b[38;5;4m\u{10EEEE}\u{305}\u{10EEEE}\u{10EEEE}\r\n\u{10EEEE}\u{30d}\u{10EEEE}\x1b[m"
+			.to_owned(),
+		image("i=4,U=1,c=3,r=2", 10, 10),
+		"\x1b_Ga=d,d=i,i=4\x1b\\".to_owned(),
 	];
 	for input in &steps {
 		parser.advance(&mut term, input.as_bytes());
@@ -184,6 +191,39 @@ fn negative_z_images_cover_backgrounds_unless_far_below_and_never_text() {
 	};
 	assert!(glyph(pixel("z=-1", "█")) > 0);
 	assert_eq!(glyph(pixel("z=1", "█")), 0);
+}
+
+#[test]
+fn placeholders_show_the_image_fitted_and_centered_in_their_cells() {
+	let mut term = Term::new(4, 2, Theme::from_kind(ThemeKind::Poop), "/".into());
+	// A 40×20 image, red on the left and blue on the right, fitted into 2×2
+	// cells (20×40 pixels): 20×10, centered vertically at y = 15.
+	let pixels: Vec<u8> = (0..40 * 20)
+		.flat_map(|i| {
+			if i % 40 < 20 {
+				[255, 0, 0]
+			} else {
+				[0, 0, 255]
+			}
+		})
+		.collect();
+	let payload = String::from_utf8(crate::bench::images::base64(&pixels)).unwrap();
+	let input = format!(
+		"\x1b[?25l\x1b_Ga=T,U=1,i=1,f=24,s=40,v=20,c=2,r=2,q=2;{payload}\x1b\\\
+		 \x1b[31m\u{10EEEE}\u{10EEEE}\r\n\u{10EEEE}\u{30d}\u{10EEEE}x"
+	);
+	Parser::new().advance(&mut term, input.as_bytes());
+	let mut frame = Frame::default();
+	term.snapshot(&mut frame);
+	let bg = Theme::from_kind(ThemeKind::Poop).bg;
+	let mut pixels = vec![0; 4 * 10 * 2 * 20];
+	draw(&mut pixels, &mut fonts(), &frame, KEY, None);
+	let at = |x: usize, y: usize| pixels[y * 40 + x];
+	assert_eq!([at(5, 5), at(15, 5), at(5, 14), at(5, 30)], [bg; 4]);
+	assert_eq!([at(5, 15), at(9, 24)], [0xff0000; 2]);
+	assert_eq!([at(10, 15), at(19, 24)], [0x0000ff; 2]);
+	// No glyph is drawn for the placeholder character itself.
+	assert!((0..20).all(|y| (0..20).all(|x| [bg, 0xff0000, 0x0000ff].contains(&at(x, y)))));
 }
 
 #[test]

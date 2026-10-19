@@ -5,7 +5,7 @@ use super::{
 	painter::{Painter, glyph_top},
 };
 use crate::{
-	graphics::{Placement, Rect},
+	graphics::{Placement, Rect, kitty::PLACEHOLDER},
 	term::{Cell, CursorShape, Frame, NO_EXTRA, attr},
 	ui::selection::CellPoint,
 };
@@ -64,6 +64,7 @@ pub(crate) fn draw_grid(
 	for row in (0..frame.rows).filter(|&row| wanted(row)) {
 		if images.is_empty() {
 			draw_row(p, fonts, view, row, Layer::All);
+			draw_placeholders(p, view, row);
 			continue;
 		}
 		let clip = row_clip(p, view, row);
@@ -73,7 +74,37 @@ pub(crate) fn draw_grid(
 			(UNDER_BACKGROUNDS..0).contains(&z)
 		});
 		draw_row(p, fonts, view, row, Layer::Text);
+		draw_placeholders(p, view, row);
 		draw_images(p, view, &images, clip, |z| z >= 0);
+	}
+}
+
+/// Draws the image slices of the Unicode placeholder cells in `row`, where
+/// their text would be.
+fn draw_placeholders(p: &mut Painter, view: &GridView, row: usize) {
+	let (cw, ch) = view.cell;
+	let row_clip = row_clip(p, view, row);
+	for cell in view.frame.placeholders_in(row) {
+		let (x, y) = (view.origin.0 + cell.col * cw, view.origin.1 + row * ch);
+		let clip = Rect {
+			x,
+			y,
+			width: cw.min((row_clip.x + row_clip.width).saturating_sub(x)),
+			height: row_clip.height,
+		};
+		// The image's top-left cell sits up and left of this one.
+		let at = (
+			x as isize - (cell.slot.1 * cw) as isize,
+			y as isize - (cell.slot.0 * ch) as isize,
+		);
+		draw_placement(
+			p.pixels,
+			p.width,
+			clip,
+			&cell.placement(view.cell),
+			at,
+			view.cell,
+		);
 	}
 }
 
@@ -148,7 +179,7 @@ fn draw_cell(
 	if cell.attrs & attr::STRIKE != 0 {
 		p.rect(x0, y0 + ch / 2, cw, line, fg);
 	}
-	if (cell.ch == ' ' && cell.extra == NO_EXTRA) || cell.width == 0 {
+	if (cell.ch == ' ' && cell.extra == NO_EXTRA) || cell.width == 0 || cell.ch == PLACEHOLDER {
 		return;
 	}
 	let span = cw * cell.width as usize;

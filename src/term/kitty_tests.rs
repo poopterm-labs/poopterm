@@ -379,3 +379,99 @@ fn eviction_removes_the_placements_of_evicted_images() {
 	assert_eq!(t.images.len(), 1);
 	assert_eq!(t.images[0].kitty.unwrap().image, 2);
 }
+
+/// Row/column diacritics for 0, 1 and 2.
+const D: [char; 3] = ['\u{305}', '\u{30d}', '\u{30e}'];
+const PLACEHOLDER: char = '\u{10EEEE}';
+
+/// `(screen row, screen col, image row, image col, bitmap width)` of the
+/// placeholder cells in a frame.
+fn placeholder_cells(term: &Term) -> Vec<(usize, usize, usize, usize, usize)> {
+	let mut frame = crate::term::Frame::default();
+	term.snapshot(&mut frame);
+	frame
+		.placeholders
+		.iter()
+		.map(|cell| {
+			(
+				cell.row,
+				cell.col,
+				cell.slot.0,
+				cell.slot.1,
+				cell.bitmap.width,
+			)
+		})
+		.collect()
+}
+
+#[test]
+fn virtual_placements_are_stored_without_showing_or_moving_anything() {
+	let mut t = terminal(20, 10);
+	send(&mut t, "a=T,U=1,i=5,c=2,r=1", 10, 20);
+	assert!(t.images.is_empty());
+	assert_eq!((t.cx, t.cy), (0, 0));
+	assert_eq!(replies(&mut t), ["\x1b_Gi=5;OK\x1b\\"]);
+	feed(&mut t, b"\x1b_Ga=p,U=1,i=5,P=5,Q=1\x1b\\");
+	assert!(replies(&mut t)[0].starts_with("\x1b_Gi=5;EINVAL:"));
+}
+
+#[test]
+fn placeholder_text_shows_slices_of_the_virtual_placement() {
+	let mut t = terminal(20, 10);
+	send(&mut t, "a=T,U=1,i=5,c=2,r=2,q=2", 10, 20);
+	// 256-color id with bold (which brightens the color, not the id), then
+	// a second row inferring its column.
+	let text = format!(
+		"\x1b[1;38;5;5m{PLACEHOLDER}{}{}{PLACEHOLDER}\r\n{PLACEHOLDER}{}{PLACEHOLDER}x",
+		D[0], D[0], D[1]
+	);
+	feed(&mut t, text.as_bytes());
+	assert_eq!(
+		placeholder_cells(&t),
+		[
+			(0, 0, 0, 0, 10),
+			(0, 1, 0, 1, 10),
+			(1, 0, 1, 0, 10),
+			(1, 1, 1, 1, 10)
+		]
+	);
+	// Truecolor ids; cells outside the placement show nothing.
+	send(&mut t, "a=T,U=1,i=258,c=1,r=1,q=2", 3, 3);
+	feed(
+		&mut t,
+		format!("\x1b[0;38;2;0;1;2m\x1b[3;1H{PLACEHOLDER}{PLACEHOLDER}").as_bytes(),
+	);
+	assert_eq!(placeholder_cells(&t)[4..], [(2, 0, 0, 0, 3)]);
+	// Deleting the image's placements removes the virtual one too.
+	feed(&mut t, b"\x1b_Ga=d,d=i,i=5\x1b\\");
+	assert_eq!(placeholder_cells(&t), [(2, 0, 0, 0, 3)]);
+}
+
+#[test]
+fn virtual_placements_without_a_size_cover_the_image_in_cells() {
+	let mut t = terminal(20, 10);
+	send(&mut t, "a=T,U=1,i=7,q=2", 25, 30);
+	feed(
+		&mut t,
+		format!("\x1b[38;5;7m{PLACEHOLDER}{}{}", D[1], D[2]).as_bytes(),
+	);
+	let mut frame = crate::term::Frame::default();
+	t.snapshot(&mut frame);
+	assert_eq!(frame.placeholders[0].cells, (3, 2));
+}
+
+#[test]
+fn basic_and_bright_colors_name_images_0_to_15() {
+	let mut t = terminal(20, 10);
+	send(&mut t, "a=T,U=1,i=3,q=2", 10, 20);
+	send(&mut t, "a=T,U=1,i=13,q=2", 10, 20);
+	let text = format!("\x1b[33m{PLACEHOLDER}\x1b[95m{PLACEHOLDER}\x1b[39m{PLACEHOLDER}");
+	feed(&mut t, text.as_bytes());
+	assert_eq!(placeholder_cells(&t), [(0, 0, 0, 0, 10), (0, 1, 0, 0, 10)]);
+	// The id survives saving and restoring the cursor.
+	feed(
+		&mut t,
+		format!("\x1b[33m\x1b7\x1b[m\x1b8\r{PLACEHOLDER}").as_bytes(),
+	);
+	assert_eq!(placeholder_cells(&t)[0], (0, 0, 0, 0, 10));
+}

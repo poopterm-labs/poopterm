@@ -2,7 +2,7 @@
 //! by evicting the least recently used images.
 use std::sync::Arc;
 
-use crate::graphics::Bitmap;
+use crate::graphics::{Bitmap, KittyId};
 
 /// Decoded bytes kept per terminal before old images are evicted.
 pub(crate) const QUOTA: usize = 320 << 20;
@@ -23,6 +23,9 @@ pub(crate) struct Store {
 	quota: usize,
 	bytes: usize,
 	clock: u64,
+	/// Virtual placements (`U=1`), shown through Unicode placeholders: id
+	/// and size in cells.
+	virtuals: Vec<(KittyId, (usize, usize))>,
 	/// Next id handed to images sent with only a number; counts down from
 	/// the top so it rarely meets ids that clients choose.
 	next_id: u32,
@@ -41,6 +44,7 @@ impl Store {
 			quota,
 			bytes: 0,
 			clock: 0,
+			virtuals: Vec::new(),
 			next_id: u32::MAX,
 		}
 	}
@@ -81,7 +85,41 @@ impl Store {
 		}
 	}
 
+	/// Adds a virtual placement; one with the same nonzero placement id is
+	/// replaced.
+	pub(crate) fn place_virtual(&mut self, key: KittyId, cells: (usize, usize)) {
+		if key.placement != 0 {
+			self.virtuals.retain(|&(other, _)| other != key);
+		}
+		self.virtuals.push((key, cells));
+	}
+
+	pub(crate) fn remove_virtuals(&mut self, remove: impl Fn(KittyId) -> bool) {
+		self.virtuals.retain(|&(key, _)| !remove(key));
+	}
+
+	pub(crate) fn has_virtuals(&self) -> bool {
+		!self.virtuals.is_empty()
+	}
+
+	pub(crate) fn virtual_ids(&self) -> impl Iterator<Item = u32> {
+		self.virtuals.iter().map(|(key, _)| key.image)
+	}
+
+	/// The bitmap and size in cells of the newest virtual placement of
+	/// image `id`.
+	pub(crate) fn virtual_placement(&self, id: u32) -> Option<(&Arc<Bitmap>, (usize, usize))> {
+		let &(_, cells) = self
+			.virtuals
+			.iter()
+			.rev()
+			.find(|(key, _)| key.image == id)?;
+		Some((&self.get(id)?.bitmap, cells))
+	}
+
+	/// Removes an image and its virtual placements.
 	pub(crate) fn remove(&mut self, id: u32) {
+		self.virtuals.retain(|(key, _)| key.image != id);
 		if let Some(index) = self.images.iter().position(|image| image.id == id) {
 			let image = self.images.remove(index);
 			self.bytes -= size(&image.bitmap);

@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 
 use super::{Cell, CursorShape, NO_EXTRA, Term};
-use crate::graphics::Placement;
+use crate::graphics::{
+	PlaceholderCell, Placement,
+	kitty::{PLACEHOLDER, PlaceholderInput, resolve_row},
+};
 
 /// The visible rows of a [`Term`] plus what the renderer needs to draw them.
 /// Buffers are reused between frames.
@@ -26,6 +29,8 @@ pub(crate) struct Frame {
 	pub cell: (usize, usize),
 	/// Images at least partly on screen.
 	pub images: Vec<Placement>,
+	/// Cells showing kitty images through Unicode placeholders, in row order.
+	pub placeholders: Vec<PlaceholderCell>,
 	/// Frame-local extras: `cell.extra` indexes this; 0 means none.
 	extras: Vec<(bool, Box<[char]>)>,
 }
@@ -56,6 +61,13 @@ impl Frame {
 				&& (a.extra == NO_EXTRA
 					|| (self.marks(a) == other.marks(b) && self.is_link(a) == other.is_link(b)))
 		})
+	}
+
+	/// The placeholder cells of visible row `row`.
+	pub(crate) fn placeholders_in(&self, row: usize) -> &[PlaceholderCell] {
+		let start = self.placeholders.partition_point(|cell| cell.row < row);
+		let end = self.placeholders.partition_point(|cell| cell.row <= row);
+		&self.placeholders[start..end]
 	}
 
 	/// Whether `cell` is part of an OSC 8 hyperlink.
@@ -119,6 +131,47 @@ impl Term {
 				(frame.extras.len() - 1) as u16
 			});
 		}
+
+		frame.placeholders.clear();
+		if self.kitty_images.has_virtuals() {
+			self.resolve_placeholders(frame);
+		}
+	}
+
+	/// Finds the virtual placement and image cell each placeholder cell
+	/// shows; cells naming no virtual placement, or outside it, show nothing.
+	fn resolve_placeholders(&self, frame: &mut Frame) {
+		let mut placeholders = std::mem::take(&mut frame.placeholders);
+		for row in 0..frame.rows {
+			let cells = frame.row(row);
+			if !cells.iter().any(|cell| cell.ch == PLACEHOLDER) {
+				continue;
+			}
+			let inputs = cells.iter().map(|cell| PlaceholderInput {
+				ch: cell.ch,
+				color: cell.fg,
+				marks: frame.marks(cell),
+			});
+			for (col, slot) in resolve_row(inputs).into_iter().enumerate() {
+				let Some(slot) = slot else {
+					continue;
+				};
+				let Some((bitmap, cells)) = self.kitty_images.virtual_placement(slot.image) else {
+					continue;
+				};
+				let slot = (slot.row as usize, slot.col as usize);
+				if slot.0 < cells.1 && slot.1 < cells.0 {
+					placeholders.push(PlaceholderCell {
+						row,
+						col,
+						slot,
+						bitmap: bitmap.clone(),
+						cells,
+					});
+				}
+			}
+		}
+		frame.placeholders = placeholders;
 	}
 }
 

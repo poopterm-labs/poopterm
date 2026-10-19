@@ -73,6 +73,7 @@ pub(crate) struct SavedCursor {
 	x: usize,
 	y: usize,
 	fg: u32,
+	fg_id: u32,
 	bg: u32,
 	attrs: u8,
 	bold: bool,
@@ -116,6 +117,10 @@ pub(crate) struct Term {
 	pub(crate) cx: usize,
 	pub(crate) cy: usize,
 	pub(crate) fg: u32,
+	/// The foreground as the client set it: an RGB value, a 256-color index,
+	/// or 0 for the default. Kitty Unicode placeholders take their image id
+	/// from it.
+	pub(crate) fg_id: u32,
 	pub(crate) bg: u32,
 	pub(crate) scroll_top: usize,
 	pub(crate) scroll_bottom: usize,
@@ -162,6 +167,7 @@ impl Term {
 			x: self.cx,
 			y: self.cy,
 			fg: self.fg,
+			fg_id: self.fg_id,
 			bg: self.bg,
 			attrs: self.attrs,
 			bold: self.bold,
@@ -178,6 +184,7 @@ impl Term {
 			self.cx = saved.x.min(self.cols - 1);
 			self.cy = saved.y.min(self.rows - 1);
 			self.fg = saved.fg;
+			self.fg_id = saved.fg_id;
 			self.bg = saved.bg;
 			self.attrs = saved.attrs;
 			self.bold = saved.bold;
@@ -297,6 +304,7 @@ impl Term {
 			palette: theme.palette,
 			color_overrides: [None; 256],
 			fg: theme.fg,
+			fg_id: 0,
 			bg: theme.bg,
 			scroll_top: 0,
 			scroll_bottom: rows.saturating_sub(1),

@@ -49,6 +49,8 @@ pub(crate) enum Extent {
 	Cols(usize),
 	/// This many rows high; the width keeps the aspect ratio.
 	Rows(usize),
+	/// Exactly this many pixels.
+	Pixels { width: usize, height: usize },
 }
 
 /// Identifies a kitty placement: image id and placement id.
@@ -77,6 +79,44 @@ pub(crate) struct Placement {
 	pub kitty: Option<KittyId>,
 	/// The placement this one is relative to; it is deleted with it.
 	pub parent: Option<KittyId>,
+}
+
+/// A cell showing part of a kitty image through a Unicode placeholder.
+#[derive(Clone, Debug)]
+pub(crate) struct PlaceholderCell {
+	/// Screen cell.
+	pub row: usize,
+	pub col: usize,
+	/// Row and column of the image's cell area shown here.
+	pub slot: (usize, usize),
+	pub bitmap: Arc<Bitmap>,
+	/// Columns and rows the image is fitted into, keeping its aspect ratio.
+	pub cells: (usize, usize),
+}
+
+impl PlaceholderCell {
+	/// Whether both draw the same pixels (bitmaps compared by identity).
+	pub(crate) fn same(&self, other: &Self) -> bool {
+		Arc::ptr_eq(&self.bitmap, &other.bitmap)
+			&& (self.row, self.col, self.slot, self.cells)
+				== (other.row, other.col, other.slot, other.cells)
+	}
+
+	/// The whole image fitted into its cell area and centered, as a
+	/// placement whose first cell is this cell's image cell `(0, 0)`.
+	pub(crate) fn placement(&self, (cell_width, cell_height): (usize, usize)) -> Placement {
+		let (area_width, area_height) = (self.cells.0 * cell_width, self.cells.1 * cell_height);
+		let (width, height) = (self.bitmap.width.max(1), self.bitmap.height.max(1));
+		let (width, height) = if area_width * height <= area_height * width {
+			(area_width, area_width * height / width)
+		} else {
+			(area_height * width / height, area_height)
+		};
+		let mut placement = Placement::natural(self.bitmap.clone(), 0, 0);
+		placement.extent = Extent::Pixels { width, height };
+		placement.offset = ((area_width - width) / 2, (area_height - height) / 2);
+		placement
+	}
 }
 
 impl Placement {
@@ -115,6 +155,7 @@ impl Placement {
 				let height = rows * cell_height;
 				(height * source.width / source.height.max(1), height)
 			}
+			Extent::Pixels { width, height } => (width, height),
 		}
 	}
 

@@ -1,4 +1,6 @@
 //! Applies kitty graphics commands: transmit, place, query and delete.
+//! Virtual placements (`U=1`) live in the image store and are shown by
+//! Unicode placeholder text instead of at a position.
 use std::sync::Arc;
 
 use super::Term;
@@ -48,7 +50,7 @@ impl Term {
 		let (id, number) = (command.uint(b'i'), command.uint(b'I'));
 		// A new image under an existing id replaces it and its placements.
 		self.remove_kitty_placements(|placement| placement.image == id);
-		let shown: Vec<u32> = self.kitty_placements().map(|id| id.image).collect();
+		let shown = self.kitty_images_in_use();
 		let (id, evicted) = self
 			.kitty_images
 			.insert(id, number, bitmap.clone(), |id| shown.contains(&id));
@@ -93,6 +95,13 @@ impl Term {
 			image: command.uint(b'P'),
 			placement: command.uint(b'Q'),
 		});
+		let virtual_placement = command.uint(b'U') == 1;
+		if virtual_placement && parent.is_some() {
+			return Err(Error::new(
+				"EINVAL",
+				"virtual placements cannot be relative",
+			));
+		}
 		let (col, row) = match parent {
 			Some(parent) => self.relative_position(key, parent, command)?,
 			None => (self.cx, self.cy as isize),
@@ -113,6 +122,10 @@ impl Term {
 			(command.uint(b'X') as usize).min(cell.0 - 1),
 			(command.uint(b'Y') as usize).min(cell.1 - 1),
 		);
+		if virtual_placement {
+			self.kitty_images.place_virtual(key, placement.cells(cell));
+			return Ok(());
+		}
 		if key.placement != 0 {
 			self.images.retain(|other| other.kitty != Some(key));
 		}
@@ -239,8 +252,26 @@ impl Term {
 		self.images.retain(|p| p.kitty.is_none() || !selected(p));
 		drop(selected);
 		self.remove_orphans();
+		// Only deletion by id, number or id range reaches virtual placements.
+		let placement = command.uint(b'p');
+		match which.to_ascii_lowercase() {
+			b'i' | b'n' => {
+				if let Some(&id) = targeted.first() {
+					self.kitty_images.remove_virtuals(|key| {
+						key.image == id && (placement == 0 || key.placement == placement)
+					});
+				}
+			}
+			b'r' => {
+				let range = command.uint(b'x')..=command.uint(b'y');
+				self
+					.kitty_images
+					.remove_virtuals(|key| range.contains(&key.image));
+			}
+			_ => {}
+		}
 		if free {
-			let shown: Vec<u32> = self.kitty_placements().map(|id| id.image).collect();
+			let shown = self.kitty_images_in_use();
 			for id in targeted.into_iter().filter(|id| !shown.contains(id)) {
 				self.kitty_images.remove(id);
 			}
@@ -254,6 +285,12 @@ impl Term {
 			.iter()
 			.chain(&self.primary_images)
 			.filter_map(|placement| placement.kitty)
+	}
+
+	/// Images with a placement on either screen or a virtual placement.
+	fn kitty_images_in_use(&self) -> Vec<u32> {
+		let placed = self.kitty_placements().map(|id| id.image);
+		placed.chain(self.kitty_images.virtual_ids()).collect()
 	}
 
 	/// Removes kitty placements on both screens, and their children.

@@ -1,7 +1,10 @@
 //! Printable characters and C0/C1 control execution.
 use std::sync::Arc;
 
-use crate::term::{Cell, NO_EXTRA, Term, attr};
+use crate::{
+	graphics::kitty::PLACEHOLDER,
+	term::{Cell, NO_EXTRA, Term, attr},
+};
 use unicode_width::UnicodeWidthChar;
 
 impl Term {
@@ -13,7 +16,11 @@ impl Term {
 			c
 		};
 		let width = c.width().unwrap_or(0).min(self.cols);
-		let template = self.styled_cell();
+		let mut template = self.styled_cell();
+		if c == PLACEHOLDER {
+			// Kitty Unicode placeholders keep the image id as the client set it.
+			template.fg = self.fg_id;
+		}
 		self.print_styled(c, width, template);
 	}
 
@@ -79,7 +86,7 @@ impl Term {
 		while let Some(c) = chars.next() {
 			debug_assert!(c >= ' ' && !('\u{80}'..='\u{9f}').contains(&c));
 			let width = super::utf8::width(c).min(self.cols);
-			if general {
+			if general || c == PLACEHOLDER {
 				self.apply_print(c);
 				continue;
 			}
@@ -120,7 +127,7 @@ impl Term {
 					break;
 				};
 				let next_width = super::utf8::width(next).min(cols);
-				if next_width == 0 || x + next_width > cols {
+				if next_width == 0 || x + next_width > cols || next == PLACEHOLDER {
 					chars = before;
 					break;
 				}

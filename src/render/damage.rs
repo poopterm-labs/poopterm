@@ -34,7 +34,8 @@ pub(crate) fn grid_damage(prev: &Frame, next: &Frame, allow_scroll: bool) -> Opt
 		.filter(|&lines| allow_scroll && lines < rows)
 		.unwrap_or(0);
 	let images = !prev.images.is_empty() || !next.images.is_empty();
-	if scroll > 0 && images {
+	let placeholders = !prev.placeholders.is_empty() || !next.placeholders.is_empty();
+	if scroll > 0 && (images || placeholders) {
 		return None;
 	}
 	let mut damaged: Vec<bool> = (0..rows)
@@ -57,10 +58,24 @@ pub(crate) fn grid_damage(prev: &Frame, next: &Frame, allow_scroll: bool) -> Opt
 		damage_images(prev, next, &mut damaged);
 		damage_images(next, prev, &mut damaged);
 	}
+	if placeholders {
+		damage_placeholders(prev, next, &mut damaged);
+	}
 	Some(GridDamage {
 		scroll,
 		rows: damaged,
 	})
+}
+
+/// Marks rows whose placeholder cells show different image slices, which
+/// can happen while their text stays the same.
+fn damage_placeholders(prev: &Frame, next: &Frame, damaged: &mut [bool]) {
+	for (row, damaged) in damaged.iter_mut().enumerate() {
+		let (old, new) = (prev.placeholders_in(row), next.placeholders_in(row));
+		if old.len() != new.len() || old.iter().zip(new).any(|(old, new)| !old.same(new)) {
+			*damaged = true;
+		}
+	}
 }
 
 /// Marks the rows covered by images of `frame` that `other` does not show
