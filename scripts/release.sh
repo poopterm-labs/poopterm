@@ -12,7 +12,9 @@ if [[ "$remote" == "$GITHUB_SHA" ]]; then
   version=${release%%$'\n'*}
   codename=${release#*$'\n'}
   git add Cargo.toml Cargo.lock CHANGELOG.md
-  git commit -m "chore(release): ${version} after green CI" -m "Poopterm-Release-For: ${GITHUB_SHA}"
+  # Pushed with the deploy key, which triggers workflows: [skip ci] stops
+  # this commit from releasing again.
+  git commit -m "chore(release): ${version} after green CI" -m "[skip ci]" -m "Poopterm-Release-For: ${GITHUB_SHA}"
   git tag "v${version}"
   # Atomic publication plus a lease closes the race between the fetch and push.
   # This is a fast-forward; the lease also rejects a newer main in the meantime.
@@ -49,6 +51,6 @@ release_commit=$(git rev-parse HEAD)
 python3 scripts/release.py --formula "$version"
 git add Formula/poopterm.rb
 if ! git diff --cached --quiet; then
-  git commit -m "chore(homebrew): point formula at published v${version}"
+  git commit -m "chore(homebrew): point formula at published v${version}" -m "[skip ci]"
   git push --force-with-lease="refs/heads/main:${release_commit}" origin HEAD:main
 fi

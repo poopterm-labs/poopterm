@@ -1,12 +1,20 @@
 # Dependency and action update checks. New crates are never added (see
 # AGENTS.md); these keep the existing ones and the CI actions current.
+# The prefixes give pull request titles in Conventional Commits form, which
+# the pull request rules require.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope

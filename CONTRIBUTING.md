@@ -35,7 +35,11 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 python3 -m unittest discover -s tests   # release and benchmark scripts
+python3 scripts/pr_check.py --base origin/main --title "fix(render): close the arc gap"
 ```
+
+The last line runs the pull request rules: a Conventional Commits title and
+the 3:1 ratio of test lines to code lines described below.
 
 If you touch `#[cfg(target_os = ...)]` code, also run clippy for the other
 targets (`aarch64-apple-darwin`, `x86_64-unknown-freebsd`); see
@@ -43,10 +47,14 @@ targets (`aarch64-apple-darwin`, `x86_64-unknown-freebsd`); see
 
 ## How we work
 
-- **Test first.** Every behavior change and bug fix starts with a test that
-  fails for the right reason, then the smallest change that makes it pass,
-  then cleanup. [`docs/testing.md`](docs/testing.md) explains where tests live
-  and how to write emulation tests.
+- **Test first, 3:1.** Every behavior change and bug fix starts with a test
+  that fails for the right reason, then the smallest change that makes it
+  pass, then cleanup. Each pull request adds at least three lines of tests
+  for every line of production code (blank lines and comments do not count;
+  changes without code are exempt), and CI fails it otherwise. Meet the
+  ratio with tests of real behavior, never padding.
+  [`docs/testing.md`](docs/testing.md) explains where tests live and how to
+  write emulation tests.
 - **Measure performance work.** Benchmark before and after with the tools in
   [`docs/performance.md`](docs/performance.md); changes without a reproducible
   gain are dropped.
@@ -68,9 +76,9 @@ targets (`aarch64-apple-darwin`, `x86_64-unknown-freebsd`); see
 
 [`docs/architecture.md`](docs/architecture.md) is the map of the code.
 
-## Commits
+## Commits and pull request titles
 
-Commits follow [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/):
+Pull request titles, and the commits on your branch, follow [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/):
 
 ```
 type(scope): summary in lower case, imperative, no final period
@@ -81,21 +89,27 @@ The body explains why the change is needed.
 Types are `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `bench`, `build`,
 `ci`, `style`, `chore` and `revert`; the scope names the area, usually a
 module (`parser`, `vt`, `kitty`, `render`, `pty`, `input`). Keep each commit
-small and about one thing: the changelog is generated from these summaries,
-so they should read well there.
+small and about one thing. Pull requests are squashed, so the title becomes
+the commit on `main` and the changelog is generated from it: it should read
+well there.
 
 Do not bump versions or edit `CHANGELOG.md` by hand; CI does that after a
 green build on `main`.
 
 ## Sending changes
 
-Maintainers commit directly to `main` in small, focused commits. If you are
-not a maintainer:
+`main` is protected, for maintainers too: every change goes through a
+branch and a pull request.
 
 1. Open an issue first for anything larger than a small fix, so we can agree
    on the approach before you spend time on it.
-2. Send a pull request with your commits. A maintainer reviews it and lands
-   the commits on `main` (rebased, not merged), keeping your authorship.
+2. Branch from an up-to-date `main` (`fix/short-topic`, after the commit
+   type), commit in small steps, and rebase on `main` rather than merging it.
+3. Open a pull request with a Conventional Commits title and a body that
+   explains why, with benchmark numbers or screenshots where they apply.
+4. CI (Linux, macOS, FreeBSD, Debian package, CodeQL) and the pull request
+   rules must pass. The pull request is then squashed onto `main`, keeping
+   your authorship.
 
 ## Reporting bugs
 

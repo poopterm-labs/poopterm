@@ -505,5 +505,6 @@ increments the patch, or starts a new month at `YY.M.0` with a new random
 codename. It updates `Cargo.toml`, `Cargo.lock`, and `CHANGELOG.md` together,
 publishes the tag and release, then updates the Homebrew formula. It skips
 stale CI runs and atomically rejects a push if `main` moved in the meantime.
-Published tags never move. These commits use `GITHUB_TOKEN` and do not trigger
-another workflow. Run `git pull --rebase` before pushing work to `main`.
+Published tags never move. These commits are pushed with a deploy key, the
+only bypass of the protection on `main`, and carry `[skip ci]`. Changes reach `main` only through pull requests, squashed
+after CI passes; see [AGENTS.md](AGENTS.md#branches-pull-requests-and-commits).
