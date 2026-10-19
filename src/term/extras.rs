@@ -39,12 +39,28 @@ impl Hash for Extra {
 	}
 }
 
+/// Slots in the [`Extras::with_mark`] cache.
+const MEMO: usize = 256;
+
+/// A cached `with_mark` answer: `id` with `mark` appended is `result`.
+#[derive(Clone, Copy)]
+struct Memo {
+	id: u16,
+	result: u16,
+	/// `u32::MAX`, never a `char`, in an empty slot.
+	mark: u32,
+}
+
 /// Interned [`Extra`] entries. Ids are stable for the table's lifetime and
 /// identical entries share an id, so the table is bounded by distinct content.
 #[derive(Clone)]
 pub(crate) struct Extras {
 	entries: Vec<Extra>,
 	ids: HashMap<Extra, u16>,
+	/// Recent `with_mark` answers, so text repeating the same marks skips
+	/// building and hashing entries. Ids never change meaning, so answers
+	/// stay right; colliding pairs only evict each other.
+	memo: [Memo; MEMO],
 }
 
 impl Default for Extras {
@@ -53,6 +69,11 @@ impl Default for Extras {
 		Self {
 			ids: HashMap::from([(none.clone(), NONE)]),
 			entries: vec![none],
+			memo: [Memo {
+				id: NONE,
+				result: NONE,
+				mark: u32::MAX,
+			}; MEMO],
 		}
 	}
 }
@@ -75,17 +96,31 @@ impl Extras {
 
 	/// The id for `id`'s content with `mark` appended, or `None` if the table is full.
 	pub(crate) fn with_mark(&mut self, id: u16, mark: char) -> Option<u16> {
-		let current = self.entries.get(id as usize)?;
-		if current.marks.len() >= MAX_MARKS {
-			return Some(id);
+		let hash = u32::from(id).wrapping_mul(0x9e37_79b9) ^ u32::from(mark).wrapping_mul(0x85eb_ca6b);
+		let slot = (hash >> 24) as usize % MEMO;
+		let memo = self.memo[slot];
+		if (memo.id, memo.mark) == (id, u32::from(mark)) {
+			return Some(memo.result);
 		}
-		let mut marks = current.marks.to_vec();
-		marks.push(mark);
-		self.intern(Extra {
-			hyperlink: current.hyperlink,
-			marks: marks.into(),
-			multicell: current.multicell.clone(),
-		})
+		let current = self.entries.get(id as usize)?;
+		let result = if current.marks.len() >= MAX_MARKS {
+			id
+		} else {
+			let mut marks = Vec::with_capacity(current.marks.len() + 1);
+			marks.extend_from_slice(&current.marks);
+			marks.push(mark);
+			self.intern(Extra {
+				hyperlink: current.hyperlink,
+				marks: marks.into(),
+				multicell: current.multicell.clone(),
+			})?
+		};
+		self.memo[slot] = Memo {
+			id,
+			result,
+			mark: mark.into(),
+		};
+		Some(result)
 	}
 
 	/// The id for `id`'s marks with hyperlink `link`, or `None` if the table is full.
@@ -156,6 +191,29 @@ mod tests {
 		assert_eq!(extras.marks(marked), ['\u{301}']);
 		assert_eq!(extras.hyperlink(linked), 7);
 		assert!(extras.marks(linked).is_empty());
+	}
+
+	#[test]
+	fn repeated_marks_resolve_to_the_entries_they_name() {
+		let mut extras = Extras::default();
+		let mut seen = HashMap::new();
+		// More marks per id than the cache has slots, so pairs collide; each
+		// is asked for twice.
+		for round in 0..2 {
+			for base in 0..8u16 {
+				let id = extras.with_hyperlink(NONE, base + 1).unwrap();
+				for mark in '\u{300}'..char::from_u32(0x300 + 2 * MEMO as u32).unwrap() {
+					let marked = extras.with_mark(id, mark).unwrap();
+					assert_eq!(extras.marks(marked), [mark]);
+					assert_eq!(extras.hyperlink(marked), base + 1);
+					assert_eq!(
+						*seen.entry((id, mark)).or_insert(marked),
+						marked,
+						"round {round}"
+					);
+				}
+			}
+		}
 	}
 
 	#[test]
