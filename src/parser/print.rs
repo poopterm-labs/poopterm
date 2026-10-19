@@ -294,7 +294,13 @@ impl Term {
 					self.cy = self.cy.saturating_sub(1);
 				}
 			}
-			b'\n' | 0x0b | 0x0c => self.linefeed(),
+			b'\n' | 0x0b | 0x0c => {
+				// LNM: line feeds also return the carriage.
+				if self.newline_mode {
+					self.cx = 0;
+				}
+				self.linefeed();
+			}
 			b'\r' => self.cx = 0,
 			0x08 => self.cx = self.cx.saturating_sub(1),
 			b'\t' => {

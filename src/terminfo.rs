@@ -223,7 +223,7 @@ mod tests {
 		let app = KeyModes {
 			application_cursor: true,
 			application_keypad: true,
-			kitty: false,
+			..KeyModes::default()
 		};
 		let shift = Modifiers {
 			shift: true,

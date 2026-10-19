@@ -60,6 +60,7 @@ mod tests {
 		application_cursor: false,
 		application_keypad: true,
 		kitty: false,
+		newline: false,
 	};
 
 	fn text(s: &str) -> Key {

@@ -19,6 +19,8 @@ pub(crate) struct KeyModes {
 	pub application_keypad: bool,
 	/// Kitty keyboard protocol disambiguation (`CSI > 1 u`).
 	pub kitty: bool,
+	/// LNM (`CSI 20 h`): Enter sends CR LF.
+	pub newline: bool,
 }
 
 /// Encodes one key press, or returns `None` when the key produces no input.
@@ -40,6 +42,9 @@ pub(crate) fn encode_key(key: &Key, mods: Modifiers, modes: KeyModes) -> Option<
 		return Some(sequence);
 	}
 	let mut bytes = legacy_key(key, mods)?;
+	if modes.newline && matches!(key, Key::Named(NamedKey::Enter)) {
+		bytes.push(b'\n');
+	}
 	if mods.alt && !modes.kitty {
 		bytes.insert(0, 0x1b);
 	}
@@ -212,6 +217,28 @@ mod tests {
 			encode_key(&named(NamedKey::ArrowUp), none, modes).unwrap(),
 			b"\x1bOA"
 		);
+	}
+
+	#[test]
+	fn newline_mode_makes_enter_send_cr_lf() {
+		let newline = KeyModes {
+			newline: true,
+			..KeyModes::default()
+		};
+		let none = Modifiers::default();
+		let enter = named(NamedKey::Enter);
+		assert_eq!(encode_key(&enter, none, newline).unwrap(), b"\r\n");
+		assert_eq!(
+			encode_key(&enter, ALT, newline).unwrap(),
+			b"\x1b\r\n",
+			"Alt still prefixes ESC"
+		);
+		assert_eq!(
+			encode_key(&Key::Character("m".into()), CTRL, newline).unwrap(),
+			b"\r",
+			"Ctrl+M is a carriage return, not Enter"
+		);
+		assert_eq!(legacy(enter, none), b"\r", "without LNM");
 	}
 
 	#[test]

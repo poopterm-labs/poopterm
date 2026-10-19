@@ -7,6 +7,7 @@ mod csi;
 mod dcs;
 mod erase;
 mod esc;
+mod modes;
 mod osc;
 mod osc_clipboard;
 mod osc_color;
@@ -167,14 +168,14 @@ impl Term {
 		// Most sequences have no intermediates; skip the checks below for them.
 		if !intermediates.is_empty() {
 			self.dispatch_mode_sequences(params, intermediates, action);
-			if intermediates == b"?$" && action == 'p' {
+			if matches!(intermediates, b"?$" | b"$") && action == 'p' {
 				return;
 			}
 		}
 		self.apply_csi_dispatch(params, intermediates, false, action);
 	}
 
-	/// DECRQM (`CSI ? Ps $ p`) and synchronized output (`CSI ? 2026 h/l`),
+	/// DECRQM (`CSI ? Ps $ p`, `CSI Ps $ p`) and synchronized output (`CSI ? 2026 h/l`),
 	/// which the terminal answers itself.
 	fn dispatch_mode_sequences(
 		&mut self,
@@ -199,6 +200,16 @@ impl Term {
 					.responses
 					.push(format!("\x1b[?{mode};{status}$y").into_bytes());
 			}
+			return;
+		}
+		if intermediates == b"$" && action == 'p' {
+			let mode = params.get(0).map_or(0, |p| p[0]);
+			let status = self
+				.ansi_mode(mode)
+				.map_or(0, |set| if set { 1 } else { 2 });
+			self
+				.responses
+				.push(format!("\x1b[{mode};{status}$y").into_bytes());
 			return;
 		}
 		if intermediates == b"?"
