@@ -44,7 +44,7 @@ fn active_tab_0_expands_and_neighbors_stay_compact() {
 	assert_eq!(layout.visible_count, 6);
 	assert_eq!(layout.tab_width(0), layout.width);
 	assert!(layout.width > layout.compact_width);
-	assert!(layout.tab_width((0 + 1) % 6) < layout.width);
+	assert!(layout.tab_width(1) < layout.width);
 	assert_strip_geometry(&layout, 6);
 }
 
@@ -55,7 +55,7 @@ fn active_tab_1_expands_and_neighbors_stay_compact() {
 	assert_eq!(layout.visible_count, 6);
 	assert_eq!(layout.tab_width(1), layout.width);
 	assert!(layout.width > layout.compact_width);
-	assert!(layout.tab_width((1 + 1) % 6) < layout.width);
+	assert!(layout.tab_width(2) < layout.width);
 	assert_strip_geometry(&layout, 6);
 }
 
@@ -66,7 +66,7 @@ fn active_tab_2_expands_and_neighbors_stay_compact() {
 	assert_eq!(layout.visible_count, 6);
 	assert_eq!(layout.tab_width(2), layout.width);
 	assert!(layout.width > layout.compact_width);
-	assert!(layout.tab_width((2 + 1) % 6) < layout.width);
+	assert!(layout.tab_width(3) < layout.width);
 	assert_strip_geometry(&layout, 6);
 }
 
@@ -77,7 +77,7 @@ fn active_tab_3_expands_and_neighbors_stay_compact() {
 	assert_eq!(layout.visible_count, 6);
 	assert_eq!(layout.tab_width(3), layout.width);
 	assert!(layout.width > layout.compact_width);
-	assert!(layout.tab_width((3 + 1) % 6) < layout.width);
+	assert!(layout.tab_width(4) < layout.width);
 	assert_strip_geometry(&layout, 6);
 }
 
@@ -88,7 +88,7 @@ fn active_tab_4_expands_and_neighbors_stay_compact() {
 	assert_eq!(layout.visible_count, 6);
 	assert_eq!(layout.tab_width(4), layout.width);
 	assert!(layout.width > layout.compact_width);
-	assert!(layout.tab_width((4 + 1) % 6) < layout.width);
+	assert!(layout.tab_width(5) < layout.width);
 	assert_strip_geometry(&layout, 6);
 }
 
@@ -99,7 +99,7 @@ fn active_tab_5_expands_and_neighbors_stay_compact() {
 	assert_eq!(layout.visible_count, 6);
 	assert_eq!(layout.tab_width(5), layout.width);
 	assert!(layout.width > layout.compact_width);
-	assert!(layout.tab_width((5 + 1) % 6) < layout.width);
+	assert!(layout.tab_width(0) < layout.width);
 	assert_strip_geometry(&layout, 6);
 }
 
@@ -108,8 +108,8 @@ fn scaled_compact_strip_1_keeps_all_tabs_ordered() {
 	let layout = compact_strip(1280, 6, 1, 0, 1);
 	assert_eq!(layout.first_visible, 0);
 	assert_eq!(layout.visible_count, 6);
-	assert_eq!(layout.width, 320 * 1);
-	assert!(layout.compact_width >= 80 * 1);
+	assert_eq!(layout.width, 320);
+	assert!(layout.compact_width >= 80);
 	assert!(layout.width > layout.compact_width);
 	assert_eq!(layout.tab_width(1), layout.width);
 	assert_strip_geometry(&layout, 6);
@@ -236,8 +236,8 @@ fn compact_strip_control_mask_0_reserves_only_visible_controls() {
 			compact_tabs: true,
 		},
 	);
-	assert_eq!(layout.plus_w > 0, false);
-	assert_eq!(layout.settings_w > 0, false);
+	assert_eq!(layout.plus_w, 0);
+	assert_eq!(layout.settings_w, 0);
 	assert_eq!(layout.visible_count, 6);
 	assert!(layout.width > layout.compact_width);
 	assert_strip_geometry(&layout, 6);
@@ -258,8 +258,8 @@ fn compact_strip_control_mask_1_reserves_only_visible_controls() {
 			compact_tabs: true,
 		},
 	);
-	assert_eq!(layout.plus_w > 0, true);
-	assert_eq!(layout.settings_w > 0, false);
+	assert!(layout.plus_w > 0);
+	assert_eq!(layout.settings_w, 0);
 	assert_eq!(layout.visible_count, 6);
 	assert!(layout.width > layout.compact_width);
 	assert_strip_geometry(&layout, 6);
@@ -280,8 +280,8 @@ fn compact_strip_control_mask_2_reserves_only_visible_controls() {
 			compact_tabs: true,
 		},
 	);
-	assert_eq!(layout.plus_w > 0, false);
-	assert_eq!(layout.settings_w > 0, true);
+	assert_eq!(layout.plus_w, 0);
+	assert!(layout.settings_w > 0);
 	assert_eq!(layout.visible_count, 6);
 	assert!(layout.width > layout.compact_width);
 	assert_strip_geometry(&layout, 6);
@@ -302,8 +302,8 @@ fn compact_strip_control_mask_3_reserves_only_visible_controls() {
 			compact_tabs: true,
 		},
 	);
-	assert_eq!(layout.plus_w > 0, true);
-	assert_eq!(layout.settings_w > 0, true);
+	assert!(layout.plus_w > 0);
+	assert!(layout.settings_w > 0);
 	assert_eq!(layout.visible_count, 6);
 	assert!(layout.width > layout.compact_width);
 	assert_strip_geometry(&layout, 6);
