@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.21 "Giga Fly" — 2026-10-19
+
+### Breaking changes
+
+- Relicense under the GNU AGPL, version 3 or later (#10).
+
 ## 26.10.20 "Giga Fly" — 2026-10-19
 
 ### Added
