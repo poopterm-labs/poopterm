@@ -36,8 +36,9 @@ impl Term {
 				i += 1;
 				continue;
 			};
-			if matches!(code, 38 | 48) {
-				let foreground = code == 38;
+			// 58 (underline color) takes the same arguments; cells do not
+			// store it, so it is parsed only to skip its arguments.
+			if matches!(code, 38 | 48 | 58) {
 				let (mode, color, consumed) = if group.len() > 1 {
 					match group.get(1).copied() {
 						Some(5) if group.len() >= 3 => {
@@ -92,12 +93,10 @@ impl Term {
 				} else {
 					(0, None, 0)
 				};
-				if let Some(color) = color {
-					if foreground {
-						self.fg = color
-					} else {
-						self.bg = color
-					}
+				match (code, color) {
+					(38, Some(color)) => self.fg = color,
+					(48, Some(color)) => self.bg = color,
+					_ => {}
 				}
 				if mode != 0 {
 					i += consumed;

@@ -345,6 +345,22 @@ fn sgr_extended_styles_clear_independently() {
 }
 
 #[test]
+fn underline_color_arguments_are_not_read_as_styles() {
+	let mut t = terminal(8, 2);
+	// 58;2;r;g;b and 58;5;n must consume their arguments, not apply
+	// 2 (dim), 1 (bold), 4 (underline) or 7 (reverse); 59 resets.
+	feed(
+		&mut t,
+		b"\x1b[58;2;1;4;7mA\x1b[58;5;7mB\x1b[58:2::1:4:7;59mC",
+	);
+	for i in 0..3 {
+		assert_eq!(cell(&t, i).attrs, 0, "cell {i}");
+		assert_eq!(cell(&t, i).fg, t.default_fg, "cell {i}");
+		assert_eq!(cell(&t, i).bg, t.default_bg, "cell {i}");
+	}
+}
+
+#[test]
 fn ansi_insert_mode_shifts_cells_at_the_cursor() {
 	let mut t = terminal(6, 2);
 	feed(&mut t, b"abcd\r\x1b[4hZ");
