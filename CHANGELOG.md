@@ -1,5 +1,23 @@
 # Changelog
 
+## 26.10.20 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Compact tabs and add amoled theme (#2) (tabs).
+
+### Fixed
+
+- Package the release commit so the deb carries the new version (#5) (release).
+- Install a python with tomllib for the release scripts (#8) (release).
+
+### Maintenance
+
+- Count only the pull request's own lines in the 3:1 check (#6).
+- Bump actions/upload-artifact from 4 to 7 (#4) (deps).
+- Upload the pull request's debian package as the deb itself (#7).
+- Add issue forms for bugs, rendering, compatibility, performance and features (#9).
+
 ## 26.10.19 "Giga Fly" — 2026-10-19
 
 ### Maintenance
