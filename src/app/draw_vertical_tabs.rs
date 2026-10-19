@@ -6,20 +6,123 @@ use super::{
 };
 use crate::{
 	render::{blend::blend, painter::Painter},
-	term::status::{Progress, ProgressState},
-	ui::tabs::{Marker, tab_marker},
+	term::{
+		status::{Progress, ProgressState},
+		tab_style::TabStyle,
+	},
+	ui::tabs::{Marker, VerticalTabLayout, tab_marker},
 };
 
+/// What one sidebar row shows.
+#[derive(Clone, PartialEq)]
+struct SidebarTab {
+	title: String,
+	style: TabStyle,
+	marker: Option<Marker>,
+	progress: Option<Progress>,
+	active: bool,
+	hovered: bool,
+}
+
+/// Everything the sidebar shows. Partial redraws repaint the sidebar only
+/// when this differs from what is on screen; layout changes (resize, scale,
+/// theme, preferences) invalidate the canvas and force a full frame anyway.
+#[derive(Clone, PartialEq)]
+pub(super) struct SidebarView {
+	tabs: Vec<SidebarTab>,
+	closable: bool,
+	hovered_buttons: (bool, bool),
+}
+
 impl App {
+	fn sidebar_view(&self, layout: &VerticalTabLayout) -> SidebarView {
+		let scale = layout.scale;
+		let visible_end = self
+			.sessions
+			.len()
+			.min(layout.first_visible + layout.visible_count);
+		let tabs = (layout.first_visible..visible_end)
+			.map(|index| {
+				let session = &self.sessions[index];
+				let y = layout.tab_start_y + (index - layout.first_visible) * layout.row_height;
+				let row_h = layout.row_height.saturating_sub(4 * scale);
+				// `title` locks the terminal itself, so it comes first.
+				let title = session.title();
+				let term = session.term();
+				SidebarTab {
+					title,
+					style: term.tab_style.clone(),
+					marker: tab_marker(term.bell, term.status.summary(), session.activity),
+					progress: term.status.shown_progress(),
+					active: index == self.active,
+					hovered: hit(self.cursor_pos, (6 * scale, y, layout.tab_width, row_h)),
+				}
+			})
+			.collect();
+		let button_hovered = |x, y: Option<usize>| {
+			y.is_some_and(|y| {
+				hit(
+					self.cursor_pos,
+					(x, y, layout.button_width, layout.button_height),
+				)
+			})
+		};
+		SidebarView {
+			tabs,
+			closable: self.sessions.len() > 1,
+			hovered_buttons: (
+				button_hovered(layout.plus_x, layout.plus_y),
+				button_hovered(layout.settings_x, layout.settings_y),
+			),
+		}
+	}
+
 	pub(super) fn draw_vertical_tab_bar(&mut self, p: &mut Painter, scale: usize, ui: UiFont) {
 		let layout = self.vertical_tab_layout();
-		let (bg, border, fg) = (self.theme.bg, self.theme.border, self.theme.fg);
-		let accent = self.theme.palette[4];
-		let sidebar_top = if cfg!(target_os = "macos") {
+		let view = self.sidebar_view(&layout);
+		self.paint_sidebar(p, scale, ui, &layout, &view);
+		self.sidebar_shown = Some(view);
+	}
+
+	/// Repaints the sidebar if what it shows changed since it was last drawn,
+	/// and returns the pixel rows it covers when it did.
+	pub(super) fn redraw_sidebar_if_changed(
+		&mut self,
+		p: &mut Painter,
+		scale: usize,
+		ui: UiFont,
+	) -> Option<(usize, usize)> {
+		let layout = self.vertical_tab_layout();
+		let view = self.sidebar_view(&layout);
+		if self.sidebar_shown.as_ref() == Some(&view) {
+			return None;
+		}
+		self.paint_sidebar(p, scale, ui, &layout, &view);
+		self.sidebar_shown = Some(view);
+		Some((self.sidebar_top(), p.height))
+	}
+
+	fn sidebar_top(&self) -> usize {
+		if cfg!(target_os = "macos") {
 			self.titlebar_height
 		} else {
 			self.border
-		};
+		}
+	}
+
+	/// Draws the whole sidebar. Its background is opaque, so nothing under
+	/// it needs restoring first.
+	fn paint_sidebar(
+		&mut self,
+		p: &mut Painter,
+		scale: usize,
+		ui: UiFont,
+		layout: &VerticalTabLayout,
+		view: &SidebarView,
+	) {
+		let (bg, border, fg) = (self.theme.bg, self.theme.border, self.theme.fg);
+		let accent = self.theme.palette[4];
+		let sidebar_top = self.sidebar_top();
 		let sidebar_bg = blend(bg, border, 24);
 		p.rect(
 			self.border,
@@ -39,21 +142,12 @@ impl App {
 				.saturating_sub(self.border),
 			blend(bg, border, 100),
 		);
-		let visible_end = self
-			.sessions
-			.len()
-			.min(layout.first_visible + layout.visible_count);
-		for index in layout.first_visible..visible_end {
-			let local_index = index - layout.first_visible;
+		for (local_index, tab) in view.tabs.iter().enumerate() {
 			let x = 6 * scale;
 			let y = layout.tab_start_y + local_index * layout.row_height;
 			let row_h = layout.row_height.saturating_sub(4 * scale);
-			let active = index == self.active;
-			let rect = (x, y, layout.tab_width, row_h);
-			let hovered = hit(self.cursor_pos, rect);
-			let show_close = self.sessions.len() > 1 && (active || hovered);
-			let session = &self.sessions[index];
-			let style = session.term().tab_style.clone();
+			let (active, hovered, style) = (tab.active, tab.hovered, &tab.style);
+			let show_close = view.closable && (active || hovered);
 			if let Some(color) = style.color {
 				let shade = if active {
 					150
@@ -91,13 +185,7 @@ impl App {
 					accent,
 				);
 			}
-			let (marker, progress) = {
-				let term = session.term();
-				(
-					tab_marker(term.bell, term.status.summary(), session.activity),
-					term.status.shown_progress(),
-				)
-			};
+			let (marker, progress) = (tab.marker, tab.progress);
 			let dot = marker
 				.map(|marker| match marker {
 					Marker::Bell => ("!", accent),
@@ -126,7 +214,7 @@ impl App {
 			let right = if show_close { 24 } else { 8 } * scale;
 			let room = layout.tab_width.saturating_sub(left + right);
 			let max_chars = ((room as f32 / small_cw.max(1.0)) as usize).max(1);
-			let (label, status) = tab_label(&session.title(), style.status.as_deref(), max_chars);
+			let (label, status) = tab_label(&tab.title, style.status.as_deref(), max_chars);
 			let label_x = x + left;
 			p.text_clipped(
 				&mut self.fonts,
@@ -174,25 +262,20 @@ impl App {
 
 		let style = self.button_style(scale);
 		let button_text_y = |y: usize| y + layout.button_height.saturating_sub(ui.ch) / 2;
-		for (x, y, label, shown) in [
-			(
-				layout.plus_x,
-				layout.plus_y.unwrap_or(0),
-				"+",
-				self.preferences.show_new_tab_button,
-			),
+		for (x, y, label, hovered) in [
+			(layout.plus_x, layout.plus_y, "+", view.hovered_buttons.0),
 			(
 				layout.settings_x,
-				layout.settings_y.unwrap_or(0),
+				layout.settings_y,
 				"⚙",
-				self.preferences.show_settings_button,
+				view.hovered_buttons.1,
 			),
 		] {
-			if !shown {
+			let Some(y) = y else {
 				continue;
-			}
+			};
 			let rect = (x, y, layout.button_width, layout.button_height);
-			p.button(rect, style, hit(self.cursor_pos, rect));
+			p.button(rect, style, hovered);
 			p.text(
 				&mut self.fonts,
 				x + layout.button_width.saturating_sub(ui.cw) / 2,

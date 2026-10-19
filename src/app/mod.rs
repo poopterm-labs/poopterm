@@ -43,7 +43,10 @@ use crate::{
 	ui::{
 		search::find_matches,
 		selection::{CellPoint, Selection},
-		tabs::{TabLayout, VerticalTabLayout, VerticalTabOptions, tab_layout, vertical_tab_layout},
+		tabs::{
+			TabLayout, VerticalTabLayout, VerticalTabOptions, sidebar_width, tab_layout,
+			vertical_tab_layout,
+		},
 	},
 	wallpaper::Wallpaper,
 };
@@ -53,6 +56,8 @@ pub(crate) use settings::SettingsEditor;
 pub(crate) struct App {
 	theme: Theme,
 	preferences: Preferences,
+	/// What the vertical tab sidebar last drew, for partial redraws.
+	sidebar_shown: Option<draw_vertical_tabs::SidebarView>,
 	wallpaper: Option<Wallpaper>,
 	wallpaper_strength: usize,
 	fonts: FontSet,
@@ -191,13 +196,17 @@ impl App {
 		self.top = top_chrome + self.margin;
 	}
 
+	/// Width of the vertical tab sidebar, or 0 when it is not shown.
+	pub(super) fn sidebar_width(&self) -> usize {
+		if self.preferences.show_tabs && self.preferences.vertical_tabs {
+			sidebar_width(self.scale())
+		} else {
+			0
+		}
+	}
+
 	pub(super) fn grid_left(&self) -> usize {
-		self.margin
-			+ if self.preferences.show_tabs && self.preferences.vertical_tabs {
-				184 * self.scale()
-			} else {
-				0
-			}
+		self.margin + self.sidebar_width()
 	}
 
 	pub(super) fn resize(&mut self, w: u32, h: u32) {
@@ -286,6 +295,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 	let mut app = App {
 		theme,
 		preferences,
+		sidebar_shown: None,
 		wallpaper,
 		wallpaper_strength,
 		fonts: FontSet::new(font, fallback_fonts),

@@ -1,6 +1,9 @@
 //! Partial redraws: restoring the background under changed rows, drawing
 //! only damaged rows, and presenting changed pixel rows to the window.
-use super::{canvas::merge_bands, *};
+use super::{
+	canvas::{merge_bands, scroll_pixels},
+	*,
+};
 use crate::render::{damage::GridDamage, painter::Painter};
 
 impl App {
@@ -12,20 +15,22 @@ impl App {
 		p: &mut Painter,
 		damage: &GridDamage,
 	) -> Vec<(usize, usize)> {
-		if self.preferences.show_tabs && self.preferences.vertical_tabs {
-			self.compose(p);
-			return vec![(0, p.height)];
-		}
 		let scale = self.scale();
 		let ui = self.ui_font(18.0 * scale as f32);
 		let (top, ch, width) = (self.top, self.ch, p.width);
+		// With vertical tabs, grid rows are redrawn right of the sidebar only.
+		let sidebar = self.sidebar_width();
 		let grid_bottom = (top + self.frame.rows * ch).min(p.height);
 		let status_y = p.height.saturating_sub(self.status_height + self.border);
-		let mut bands = vec![(0, top.min(p.height)), (status_y, p.height)];
+		let mut bands = vec![(status_y, p.height)];
 		if damage.scroll > 0 {
-			let shift = damage.scroll * ch;
-			p.pixels
-				.copy_within((top + shift) * width..grid_bottom * width, top * width);
+			scroll_pixels(
+				p.pixels,
+				width,
+				(top, grid_bottom),
+				damage.scroll * ch,
+				sidebar,
+			);
 			bands.push((top, grid_bottom));
 		}
 		for (row, _) in damage
@@ -35,11 +40,16 @@ impl App {
 			.filter(|(_, damaged)| **damaged)
 		{
 			let y = top + row * ch;
-			self.restore_background(p, y, ch);
+			self.restore_background_from(p, y, ch, sidebar);
 			bands.push((y, (y + ch).min(p.height)));
 		}
-		self.restore_background(p, 0, top);
-		self.draw_tab_bar(p, scale, ui);
+		if sidebar > 0 {
+			bands.extend(self.redraw_sidebar_if_changed(p, scale, ui));
+		} else {
+			self.restore_background(p, 0, top);
+			self.draw_tab_bar(p, scale, ui);
+			bands.push((0, top.min(p.height)));
+		}
 		self.draw_terminal(p, scale, Some(&damage.rows));
 		self.restore_background(p, status_y, self.status_height + self.border);
 		self.draw_status_bar(p, scale, ui);
@@ -50,6 +60,18 @@ impl App {
 	/// Repaints pixel rows `y..y + height` with the window background: the
 	/// border rim, then the wallpaper or the theme background inside it.
 	pub(super) fn restore_background(&mut self, p: &mut Painter, y: usize, height: usize) {
+		self.restore_background_from(p, y, height, 0);
+	}
+
+	/// [`restore_background`](Self::restore_background) for the columns from
+	/// `left` to the right edge.
+	pub(super) fn restore_background_from(
+		&mut self,
+		p: &mut Painter,
+		y: usize,
+		height: usize,
+		left: usize,
+	) {
 		let border = self.border;
 		let (width, total) = (p.width, p.height);
 		let inner_w = width.saturating_sub(2 * border);
@@ -62,15 +84,17 @@ impl App {
 		let image_w = inner_w.max(1);
 		for row in y..(y + height).min(total) {
 			let line = &mut p.pixels[row * width..(row + 1) * width];
+			let left = left.min(width);
 			if row < border || row >= border + inner_h {
-				line.fill(self.theme.border);
+				line[left..].fill(self.theme.border);
 				continue;
 			}
-			line[..border].fill(self.theme.border);
+			let start = left.clamp(border, border + inner_w);
+			line[left.min(border)..border].fill(self.theme.border);
 			line[border + inner_w..].fill(self.theme.border);
-			let inner = &mut line[border..border + inner_w];
+			let inner = &mut line[start..border + inner_w];
 			match image.and_then(|image| image.chunks_exact(image_w).nth(row - border)) {
-				Some(source) => inner.copy_from_slice(&source[..inner_w]),
+				Some(source) => inner.copy_from_slice(&source[start - border..inner_w]),
 				None => inner.fill(bg),
 			}
 		}

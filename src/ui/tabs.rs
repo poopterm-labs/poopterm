@@ -34,6 +34,11 @@ pub(crate) struct VerticalTabLayout {
 	pub(crate) scale: usize,
 }
 
+/// Width of the vertical tab sidebar, in pixels.
+pub(crate) fn sidebar_width(scale: usize) -> usize {
+	184 * scale.max(1)
+}
+
 pub(crate) struct VerticalTabOptions {
 	pub(crate) top_reserve: usize,
 	pub(crate) status_height: usize,
@@ -115,7 +120,7 @@ pub(crate) fn vertical_tab_layout(
 		show_plus,
 		show_settings,
 	} = options;
-	let sidebar_width = 184 * scale;
+	let sidebar_width = sidebar_width(scale);
 	let row_height = 32 * scale;
 	let tab_start_y = top_reserve + 8 * scale;
 	let button_height = 28 * scale;

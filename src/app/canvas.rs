@@ -123,6 +123,25 @@ fn coverage(
 }
 
 /// Merges sorted, possibly adjacent pixel-row ranges.
+/// Moves pixel rows `top + shift..bottom` up by `shift` rows. Columns left of
+/// `left` (the vertical tab sidebar) stay where they are.
+pub(super) fn scroll_pixels(
+	pixels: &mut [u32],
+	width: usize,
+	(top, bottom): (usize, usize),
+	shift: usize,
+	left: usize,
+) {
+	if left == 0 {
+		pixels.copy_within((top + shift) * width..bottom * width, top * width);
+		return;
+	}
+	for row in top..bottom.saturating_sub(shift) {
+		let source = (row + shift) * width;
+		pixels.copy_within(source + left..source + width, row * width + left);
+	}
+}
+
 pub(super) fn merge_bands(bands: &mut Vec<(usize, usize)>) {
 	bands.sort_unstable();
 	let mut merged: Vec<(usize, usize)> = Vec::with_capacity(bands.len());
@@ -143,6 +162,25 @@ mod tests {
 		term::Term,
 		theme::{Theme, ThemeKind},
 	};
+
+	#[test]
+	fn scrolling_moves_pixels_right_of_the_sidebar_only() {
+		// 4 columns, 5 rows; each pixel is 10 * row + column.
+		let mut pixels: Vec<u32> = (0..5)
+			.flat_map(|row| (0..4).map(move |col| 10 * row + col))
+			.collect();
+		// Rows 1..5 scroll up by one row; column 0 is a sidebar.
+		scroll_pixels(&mut pixels, 4, (1, 5), 1, 1);
+		assert_eq!(
+			pixels,
+			[
+				0, 1, 2, 3, 10, 21, 22, 23, 20, 31, 32, 33, 30, 41, 42, 43, 40, 41, 42, 43
+			]
+		);
+		let mut full: Vec<u32> = (0..6).collect();
+		scroll_pixels(&mut full, 2, (0, 3), 1, 0);
+		assert_eq!(full, [2, 3, 4, 5, 4, 5]);
+	}
 
 	const KEY: DrawKey = DrawKey {
 		session: 1,
