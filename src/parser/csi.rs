@@ -113,6 +113,16 @@ impl Term {
 			}
 			return;
 		}
+		// XTSAVE and XTRESTORE.
+		if private && matches!(action, 's' | 'r') {
+			let modes = params.iter().filter_map(|s| s.first().copied());
+			if action == 's' {
+				self.save_private_modes(modes);
+			} else {
+				self.restore_private_modes(modes);
+			}
+			return;
+		}
 		if private && action == 'u' {
 			self
 				.responses
@@ -126,9 +136,7 @@ impl Term {
 		if matches!(action, 'h' | 'l') {
 			let enabled = action == 'h';
 			for mode in params.iter().filter_map(|param| param.first().copied()) {
-				if mode == 4 {
-					self.insert_mode = enabled;
-				}
+				self.set_ansi_mode(mode, enabled);
 			}
 			return;
 		}
@@ -334,6 +342,7 @@ impl Term {
 	fn soft_reset(&mut self) {
 		self.cursor_visible = true;
 		self.insert_mode = false;
+		self.keyboard_locked = false;
 		self.origin_mode = false;
 		self.auto_wrap = true;
 		self.application_cursor = false;

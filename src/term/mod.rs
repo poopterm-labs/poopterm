@@ -195,6 +195,14 @@ pub(crate) struct Term {
 	pub(crate) origin_mode: bool,
 	pub(crate) auto_wrap: bool,
 	pub(crate) insert_mode: bool,
+	/// KAM (`CSI 2 h`): keyboard input is discarded.
+	pub(crate) keyboard_locked: bool,
+	/// SRM reset (`CSI 12 l`): typed input is also shown locally.
+	pub(crate) local_echo: bool,
+	/// LNM (`CSI 20 h`): line feeds return the carriage; Enter sends CR LF.
+	pub(crate) newline_mode: bool,
+	/// Private modes saved by XTSAVE, one value per mode.
+	pub(crate) saved_modes: Vec<(u16, bool)>,
 	pub(crate) kitty_keyboard: bool,
 	pub(crate) cursor_shape: CursorShape,
 	/// `?1004`: report window focus changes as `CSI I` / `CSI O`.
@@ -382,6 +390,10 @@ impl Term {
 			origin_mode: false,
 			auto_wrap: true,
 			insert_mode: false,
+			keyboard_locked: false,
+			local_echo: false,
+			newline_mode: false,
+			saved_modes: Vec::new(),
 			kitty_keyboard: false,
 			cursor_shape: CursorShape::Block,
 			focus_reporting: false,
@@ -418,6 +430,11 @@ impl Term {
 			cwd_generation: 0,
 			bell: false,
 		}
+	}
+
+	/// Shows typed input as if the program had echoed it (SRM reset).
+	pub(crate) fn echo_input(&mut self, bytes: &[u8]) {
+		crate::parser::Parser::new().advance(self, bytes);
 	}
 
 	#[inline(always)]
