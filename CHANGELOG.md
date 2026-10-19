@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.12 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Select the terminal font by family from a cached font database (fonts).
+
 ## 26.10.11 "Giga Fly" — 2026-10-19
 
 ### Fixed
