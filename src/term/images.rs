@@ -68,8 +68,9 @@ impl Term {
 				return true;
 			}
 			let (width, height) = image.cells(cell);
+			// Only the rows on screen; images in the scrollback have none.
 			let first_row = image.row.max(0) as usize;
-			let end_row = first_row + height;
+			let end_row = (image.row + height as isize).max(0) as usize;
 			let end_col = (image.col + width).min(cols);
 			!(first_row..end_row).any(|row| from < row * cols + end_col && to > row * cols + image.col)
 		});

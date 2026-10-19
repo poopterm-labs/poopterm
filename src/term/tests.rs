@@ -465,6 +465,17 @@ fn sixel_obeys_sync_and_alternate_screen_boundaries() {
 }
 
 #[test]
+fn text_on_screen_leaves_sixel_images_in_the_scrollback_alone() {
+	let mut t = terminal(20, 3);
+	t.cell_height = 6;
+	// A one-row image, scrolled three rows up into history.
+	feed(&mut t, b"\x1bP7;1q~\x1b\\\r\n\r\n\r\n\r\n");
+	assert_eq!(t.images[0].row, -3);
+	feed(&mut t, b"\x1b[Hx\x1b[2;1Hy");
+	assert_eq!(t.images.len(), 1);
+}
+
+#[test]
 fn saved_cursor_restores_styles_and_coordinates() {
 	let mut t = terminal(8, 3);
 	feed(&mut t, b"\x1b[31;4mAB\x1b7\x1b[0m\x1b[3;8H\x1b8C");
