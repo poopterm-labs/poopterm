@@ -18,6 +18,7 @@ mod config;
 mod dbus;
 mod fonts;
 mod graphics;
+mod hugepages;
 mod input;
 mod notifier;
 mod parser;
