@@ -119,11 +119,14 @@ fn simple(data: &[u8], contours: usize, out: &mut Bounded) -> Option<()> {
 		}
 	}
 	// Coordinates are deltas: a short (1-byte) value with a sign bit, or the
-	// same as before, or a 2-byte value.
-	let mut read_axis = |short: u8, same: u8| -> Option<Vec<f32>> {
+	// same as before, or a 2-byte value. Both axes decode into one buffer.
+	let mut all: Vec<(f32, f32, bool)> = flags
+		.iter()
+		.map(|&flag| (0.0, 0.0, flag & 1 != 0))
+		.collect();
+	let mut read_axis = |short: u8, same: u8, set: fn(&mut (f32, f32, bool), f32)| -> Option<()> {
 		let mut value = 0i32;
-		let mut coords = Vec::with_capacity(points);
-		for &flag in &flags {
+		for (&flag, point) in flags.iter().zip(&mut all) {
 			if flag & short != 0 {
 				let delta = i32::from(data.u8_at(at)?);
 				at += 1;
@@ -132,21 +135,18 @@ fn simple(data: &[u8], contours: usize, out: &mut Bounded) -> Option<()> {
 				value += i32::from(data.i16_at(at)?);
 				at += 2;
 			}
-			coords.push(value as f32);
+			set(point, value as f32);
 		}
-		Some(coords)
+		Some(())
 	};
-	let xs = read_axis(2, 16)?;
-	let ys = read_axis(4, 32)?;
+	read_axis(2, 16, |point, x| point.0 = x)?;
+	read_axis(4, 32, |point, y| point.1 = y)?;
 	let mut start = 0;
 	for &end in &ends {
 		if end < start || end >= points {
 			return None;
 		}
-		contour(
-			(start..=end).map(|i| (xs[i], ys[i], flags[i] & 1 != 0)),
-			out,
-		);
+		contour(&all[start..=end], out);
 		start = end + 1;
 	}
 	Some(())
@@ -154,8 +154,7 @@ fn simple(data: &[u8], contours: usize, out: &mut Bounded) -> Option<()> {
 
 /// Sends one closed quadratic contour. Two off-curve points in a row imply
 /// an on-curve point midway; a contour may start off the curve.
-fn contour(points: impl Iterator<Item = (f32, f32, bool)> + Clone, out: &mut Bounded) {
-	let all: Vec<(f32, f32, bool)> = points.collect();
+fn contour(all: &[(f32, f32, bool)], out: &mut Bounded) {
 	let Some(&(fx, fy, first_on)) = all.first() else {
 		return;
 	};
