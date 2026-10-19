@@ -53,6 +53,17 @@ perf record -e cycles:u -- ./target/release/poopterm --benchmark --only emoji
 perf report --sort sym
 ```
 
+Where `perf` is unavailable, callgrind works on the same build (slower, but
+exact instruction counts):
+
+```sh
+valgrind --tool=callgrind ./target/release/poopterm --benchmark --only kitty-png --mib 4 --no-render
+callgrind_annotate --inclusive=yes callgrind.out.<pid> | head -40
+```
+
+The profile includes generating the corpus; look at the costs under
+`bench::measure`.
+
 ### Profile-guided optimization
 
 `poopterm --benchmark` needs no window and covers every workload, the
@@ -163,3 +174,24 @@ paired run did not complete, so the optimization was removed instead of
 claiming an unproven gain. Selection and search row damage is checked by
 pixel-equivalence tests; an ignored 300-frame test measured 25.6 ms for full
 redraw and 3.39 ms for partial redraw at 100×30 cells and a 1000×600 surface.
+
+## Images (26.10)
+
+Headless `--benchmark` on the i3-N305, 16 MiB per workload, 120×40, parser
+and terminal (with a frame rendered every MiB in parentheses), in MB/s of
+encoded input:
+
+| Workload | Before the kitty protocol | Now |
+|----------|-------------------------:|----:|
+| kitty-rgba | ignored | ~1110 (~700) |
+| kitty-zlib | ignored | ~240 (~210) |
+| kitty-png | ignored | ~115 (~107) |
+
+Before, APC strings were dropped unread, so those workloads only measured
+the scan for their end. Decoding base64 with SIMD took kitty-rgba from about
+954 to 1113 MB/s. Reserving the exact size of raw payloads up front showed no
+reproducible gain and was dropped.
+
+PNG time is mostly the PNG crate: about 60% inflating (`fdeflate`) and 20%
+unfiltering. Our own inflate (see [`TODO.md`](../TODO.md)) is where the next
+gain is.

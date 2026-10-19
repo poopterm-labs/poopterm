@@ -19,21 +19,16 @@ see [`docs/performance.md`](docs/performance.md).
 from first byte to pixels on screen. There is no target to stop at; at least
 match text throughput, within the explicit size limits on untrusted input.
 
-- **Own escape-sequence parser.** Replace `vte` with a hand-rolled,
-  SIMD-classified, batch-oriented parser; vte's per-character dispatch and
-  UTF-8 validation are most of the parser time on Unicode output, and vte
-  ignores APC strings, which the kitty graphics protocol needs. Design and
-  phased plan: [`docs/vte-design.md`](docs/vte-design.md). Each phase is
-  verified differentially against vte before it lands.
-- **Image benchmark.** Add Sixel and kitty-graphics payloads (small icons,
-  full-screen frames, animation) to `bench-throughput.py`, reporting MB/s of
-  encoded input and frames per second, and to the parser benchmark.
+- **Image benchmark.** Sixel and kitty payloads (raw RGBA, PNG, zlib) are
+  in the corpus, so `--benchmark` and `bench-throughput.py` cover them. Still
+  missing: full-screen frames and animation, reported in frames per second.
 - **Sixel decoding.** Profile `src/sixel.rs` against that benchmark; candidates
   are SIMD band decoding, decoding straight into the placement bitmap, and
   streaming decode instead of buffering the whole DCS.
-- **Kitty graphics protocol.** Transmission (direct, chunked `m=1`; file
-  and shared memory later), placement, deletion, and SIMD base64 and
-  zlib decoding, with explicit size limits like Sixel's.
+- **Kitty image decoding.** Raw RGBA parses at ~1.1 GB/s; PNG at ~115 MB/s
+  spends ~60% inflating and ~20% unfiltering inside the PNG crate. Our own
+  inflate (below) plus a SIMD PNG unfilter are the next steps; the RGBA path
+  could decode base64 straight into pixels instead of through a byte buffer.
 - **Rendering during floods:** frames still write unchanged background pixels,
   competing with parsing for memory bandwidth. Evaluate skipping those pixels
   or lowering internal resolution, retaining a change only with repeatable
@@ -47,7 +42,7 @@ match text throughput, within the explicit size limits on untrusted input.
 
 ## Hardware-accelerated rendering
 
-Full GPU rendering, after kitty graphics lands. CPU drawing is the main
+Full GPU rendering, now that kitty graphics has landed. CPU drawing is the main
 latency cost: a full redraw takes 25.6 ms at 1000×600, and much longer at
 HiDPI sizes. It also takes memory bandwidth from the parser during floods,
 which is why floods are capped at 30 fps. Parse throughput stays CPU work.

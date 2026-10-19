@@ -25,6 +25,8 @@ tests`. The exceptions are larger suites:
 | Suite | What it covers |
 |-------|----------------|
 | `src/term/tests.rs` | Emulation: bytes in, grid/cursor/modes/replies out. Includes the randomized bounds test and the parser differential test. |
+| `src/term/kitty_tests.rs`, `src/term/kitty_animation_tests.rs` | Kitty graphics emulation: commands in, placements, stored images, frames, cursor and replies out. Their helpers (`terminal`, `send`, `replies`) give 10×20 pixel cells. |
+| `src/app/canvas_pixels.rs` | Pixel tests: partial redraws equal full redraws (highlights, scrolling, images, placeholders, animation frames), and image layering. |
 | `src/input/*` | Exact byte sequences for keys, mouse reports, paste and scrolling. |
 | `src/app/settings.rs`, `src/ui/*` | Hit-testing and layout as pure functions. |
 | `src/pty/*` | Output queue backpressure and the non-blocking writer (real pipes and threads). |
@@ -65,8 +67,10 @@ only gather inputs and apply results.
 
 ## Visual checks
 
-Rendering has no automated pixel tests. When changing drawing code, compare
-a fixed screen before and after:
+`src/app/canvas_pixels.rs` checks that partial redraws match full redraws
+pixel for pixel, and a few exact pixels (image layering, placeholder
+fitting). It cannot judge whether something looks right, so when changing
+drawing code, also compare a fixed screen before and after:
 
 1. Write a fake shell that prints a deterministic sample and sleeps (styled
    text, 256 colors, wide and combining characters, box drawing).
@@ -86,5 +90,9 @@ Notes:
   redraws, make the fake shell print in steps (scrolling, cursor moves), screenshot the same build with and without
   `POOPTERM_FULL_REDRAW=1`, and compare. That variable disables partial
   redraws.
+- Where screenshots are unavailable (Wayland without X access), render the
+  same bytes headlessly instead: a temporary ignored test that feeds them to
+  a `Term`, draws the `Frame` with the helpers in `canvas_pixels.rs` and
+  saves a PNG with `image::save_buffer`. Remove the test afterwards.
 - Debug builds panic if a thread locks a terminal it already holds, so run
   new UI code paths in a debug build at least once.

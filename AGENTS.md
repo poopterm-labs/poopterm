@@ -69,6 +69,7 @@ input events ──► App (UI thread) ──► input::{keys,mouse,paste} ─�
 | `src/parser/` | Applies `vt` events to `Term` (`impl Handler for Term`); `csi`, `esc`, `osc`, `sgr`, `print` apply each family. |
 | `src/pty/` | Shell process, reader and parser threads (`pump`), `OutputQueue`, non-blocking `PtyWriter`. |
 | `src/input/` | Pure encoders: keys, mouse reports, paste, scroll, shortcuts. |
+| `src/graphics/` | Image data shared by Sixel and the kitty graphics protocol: `Bitmap`, `Placement`, streaming base64. `graphics::kitty` parses commands, receives chunked transfers, decodes and stores images and animation frames; `term/kitty*.rs` applies commands to `Term`. |
 | `src/render/` | Pure drawing: `Painter`, `FontSet` glyph cache, grid renderer, row damage, SIMD blending. |
 | `src/ui/` | Pure UI models: selection, search, tab layout. |
 | `src/app/` | winit event loop and glue. `App` methods are split by concern (`keyboard`, `mouse`, `tabs`, `settings`, `draw`, …). |

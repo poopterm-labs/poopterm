@@ -21,7 +21,9 @@ Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it
 - Supports the initial Kitty keyboard protocol (`CSI u`) key encoding for applications that opt in.
 - Resizes the shell along with the window.
 - Batches synchronized terminal updates (`?2026`) to avoid partial frames.
-- Displays bounded Sixel graphics and tracks OSC 133 shell markers.
+- Displays Sixel images and the kitty graphics protocol (including animation
+  and Unicode placeholders) within explicit memory limits, and tracks OSC 133
+  shell markers.
 - Supports semicolon/colon TrueColor, DEC line drawing, and additional text styles.
 - Includes Dark Mode, Light Mode, all four Catppuccin flavors, signature Poop, and a configurable Custom theme.
 - Includes an **About poopterm** page in Settings.
@@ -352,9 +354,23 @@ Poopterm is MIT licensed; see [LICENSE](LICENSE).
   limits cap an image at 4,096 × 4,096 pixels, 16 megapixels, and 4 MiB encoded.
   Each screen retains at most 16 images and evicts older images to keep its
   retained bitmap budget near 4 megapixels; a single accepted image can exceed
-  that budget. Oversized or malformed transfers are discarded. Images are discarded on text
-  overwrite or scrolling out of view; image scrollback and partial bitmap
-  erasure are not implemented. See [DEC's Sixel reference](https://vt100.net/docs/vt3xx-gp/chapter14.html).
+  that budget. Oversized or malformed transfers are discarded. Images scroll
+  into the scrollback with the text and are dropped when they leave it; text
+  written over an image erases the whole image (partial bitmap erasure is not
+  implemented). See [DEC's Sixel reference](https://vt100.net/docs/vt3xx-gp/chapter14.html).
+- **Kitty graphics:** APC `G` commands transmit RGB, RGBA and PNG data,
+  optionally zlib-compressed, directly (chunked with `m=1`), from a file, a
+  temporary file or shared memory; place, query and delete images (every
+  `d=` selector, with uppercase freeing); and support z-index layering under
+  or over text and backgrounds, relative placements, Unicode placeholders
+  (`U=1`), animation frames, composition and terminal-driven playback.
+  Images scroll into the scrollback and are cleared by `ED 2`, RIS and the
+  alternate screen as the protocol specifies. Limits: 256 MiB per
+  transmission, 16,384 pixels per side and 64 megapixels per image, 320 MiB
+  of decoded images and 4,096 images per terminal (least recently used,
+  off-screen images are evicted first), 65,536 frames per image. File
+  transmissions accept only absolute paths outside `/proc`, `/sys` and
+  `/dev` (except `/dev/shm`). See the [protocol specification](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
 
 ## Terminfo
 

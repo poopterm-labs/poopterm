@@ -46,7 +46,8 @@ deadlock, so debug builds track held locks and panic instead.
 ## Terminal state (`src/term`)
 
 - `Term` holds the screen `Grid`, scrollback (`VecDeque<Arc<Row>>`), cursor,
-  modes, palette, tab stops, Sixel placements and shell-integration markers.
+  modes, palette, tab stops, image placements and stored kitty images, and
+  shell-integration markers.
 - `Grid` stores one `Vec<Cell>` per row. Scrolling rotates row headers and
   moves the row leaving the screen into the scrollback, so a line feed costs
   O(columns), not O(screen).
@@ -97,6 +98,43 @@ feeds random streams through `parser::Parser` and through vte driving
 `Term` one character at a time (`parser::PerCharacter`), and requires
 identical terminal state.
 
+## Images (`src/graphics`, `src/sixel.rs`, `src/term/kitty*.rs`)
+
+Both image protocols end in `graphics::Placement`s on `Term::images` (the
+alternate screen keeps the primary screen's in `primary_images`): an
+`Arc<Bitmap>` of straight-alpha `0xAARRGGBB` pixels, a grid position (the
+row goes negative once scrolled into history), a source rectangle, an
+extent, a z-index and, for kitty images, the image and placement ids.
+`Term::scroll_images` moves placements with the text. Sixel images are
+erased by text written over them; kitty images only by delete commands,
+`ED 2`/`ED 3`, RIS and leaving the alternate screen.
+
+The kitty graphics protocol runs on the parser thread:
+
+- `vt` hands APC strings over in slices; `kitty::Receiver` checks the `G`,
+  parses the control keys (`kitty::Command`), decodes base64 as it arrives
+  (`graphics::base64`, SIMD for whole blocks) and joins chunked transfers.
+  Limits are enforced while receiving, before anything is decoded.
+- `kitty::load` reads file, temporary-file and shared-memory media;
+  `kitty::decode` turns RGB, RGBA and PNG (optionally zlib) into a `Bitmap`.
+- `kitty::Store` keeps images by id and number with a quota and least
+  recently used eviction that prefers images not on screen. Each image is an
+  `Animation`: its frames, the shown frame and the playback timeline.
+  Virtual placements (`U=1`) live there too.
+- `term/kitty.rs` applies transmit, place and delete; `term/kitty_animation.rs`
+  applies frames, composition and playback. Replies go to `Term::responses`.
+- Running animations are advanced by the UI thread (`about_to_wait`), which
+  sleeps until the next frame of an animation that is on screen.
+- Unicode placeholder cells (U+10EEEE) store the image id as the client set
+  the foreground color (`Term::fg_id`). `Term::snapshot` resolves them into
+  `Frame::placeholders`, and only while virtual placements exist.
+
+The renderer draws each row in layers: images below `i32::MIN / 2`, cell
+backgrounds, other negative z-indices, text and placeholder slices, then
+z-index 0 and above. Images are clipped per row, so damage tracking can
+redraw single rows; `render::damage` compares placements by bitmap identity
+and position, and placeholder slices row by row.
+
 ## Rendering (`src/render`, `src/app/draw*.rs`)
 
 - `render::painter::Painter` wraps the frame buffer with clipped `rect`,
@@ -106,7 +144,7 @@ identical terminal state.
   resolved only on a cache miss.
 - `render::grid::draw_grid` draws a `GridView`: cells right to left (so wide
   glyphs paint over their spacer), cursor, selection, search match, underline
-  and strike styles, hyperlinks, combining marks and Sixel images.
+  and strike styles, hyperlinks, combining marks and images.
 - `render::blend` blends glyph coverage four pixels at a time with
   `portable_simd`.
 - `app/draw.rs` composes a full frame: background or wallpaper, tab bar
