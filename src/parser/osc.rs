@@ -1,5 +1,5 @@
-//! Operating System Commands: titles, hyperlinks and cwd; colors and the
-//! clipboard have their own modules.
+//! Operating System Commands: titles, hyperlinks and cwd; colors, the
+//! clipboard and notifications have their own modules.
 use std::sync::Arc;
 
 use crate::{
@@ -20,6 +20,9 @@ impl Term {
 			b"5522" if params.len() >= 2 => {
 				self.osc_kitty_clipboard(params[1], params.get(2).copied().unwrap_or_default());
 			}
+			b"9" => self.osc_notify(&params[1..]),
+			b"777" => self.osc_notify_777(&params[1..]),
+			b"99" if params.len() >= 3 => self.osc_kitty_notify(params[1], &params[2..], bell),
 			b"8" if params.len() >= 3 => {
 				let uri = params[2];
 				if uri.is_empty() {

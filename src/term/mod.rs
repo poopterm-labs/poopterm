@@ -15,6 +15,9 @@ mod kitty_animation;
 mod kitty_animation_tests;
 #[cfg(test)]
 mod kitty_tests;
+#[cfg(test)]
+mod notification_tests;
+pub(crate) mod notifications;
 mod screen;
 mod shared;
 mod shell;
@@ -173,6 +176,8 @@ pub(crate) struct Term {
 	/// Clipboard writes for the UI thread to perform.
 	pub(crate) clipboard_writes: Vec<clipboard::ClipboardWrite>,
 	pub(crate) clipboard_upload: Option<clipboard::Upload>,
+	/// Desktop notifications: requests for the UI thread and live state.
+	pub(crate) notifications: notifications::Notifications,
 	pub(crate) title: String,
 	pub(crate) title_generation: u64,
 	pub(crate) cwd: PathBuf,
@@ -326,6 +331,7 @@ impl Term {
 			responses: Vec::new(),
 			clipboard_writes: Vec::new(),
 			clipboard_upload: None,
+			notifications: notifications::Notifications::default(),
 			title: "Shell".into(),
 			title_generation: 0,
 			cwd,

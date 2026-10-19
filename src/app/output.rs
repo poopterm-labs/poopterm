@@ -4,7 +4,8 @@ use std::time::Instant;
 
 impl App {
 	/// Reacts to output the parser thread applied to session `id`: clipboard
-	/// writes, tab markers, and a paced redraw if anything visible changed.
+	/// writes, notifications, tab markers, and a paced redraw if anything
+	/// visible changed.
 	pub(super) fn process_output(&mut self, id: u64) {
 		let active_id = self.sessions.get(self.active).map(|session| session.id);
 		let Some(session) = self.sessions.iter_mut().find(|s| s.id == id) else {
@@ -12,9 +13,10 @@ impl App {
 		};
 		session.acknowledge_output();
 		let unseen = Some(id) != active_id || !self.focused;
-		let (clipboard, long_command_finished, now, synchronized) = {
+		let (clipboard, notifications, long_command_finished, now, synchronized) = {
 			let mut term = session.term();
 			let clipboard = std::mem::take(&mut term.clipboard_writes);
+			let notifications = std::mem::take(&mut term.notifications.requests);
 			// A long command finished where the user may not be looking: mark
 			// the tab and ask the window manager for attention.
 			let long_command_finished = term.shell.take_long_command_finished() && unseen;
@@ -23,6 +25,7 @@ impl App {
 			}
 			(
 				clipboard,
+				notifications,
 				long_command_finished,
 				Seen::of(&term),
 				term.synchronized.is_some(),
@@ -59,6 +62,9 @@ impl App {
 		}
 		if visible || tab_changed {
 			self.schedule_redraw();
+		}
+		if !notifications.is_empty() {
+			self.deliver_notifications(id, notifications);
 		}
 	}
 

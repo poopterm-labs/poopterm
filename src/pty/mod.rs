@@ -35,6 +35,8 @@ pub(crate) enum UserEvent {
 	Output(u64),
 	/// The shell exited and all of its output has been parsed.
 	Closed(u64),
+	/// The desktop reported on the notification shown with this key.
+	Notification(u64, crate::term::notifications::Event),
 }
 
 pub(crate) struct Session {

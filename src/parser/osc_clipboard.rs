@@ -57,14 +57,7 @@ impl Term {
 				b"mime" => mime = Some(value),
 				b"loc" => location = value,
 				// Echoed back, so only safe characters are kept.
-				b"id" => {
-					id = value
-						.iter()
-						.filter(|&&byte| byte.is_ascii_alphanumeric() || b"-_+.".contains(&byte))
-						.take(64)
-						.map(|&byte| byte as char)
-						.collect();
-				}
+				b"id" => id = super::osc_notify::identifier(value),
 				_ => {}
 			}
 		}

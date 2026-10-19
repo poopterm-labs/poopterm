@@ -11,9 +11,12 @@ mod app;
 mod bench;
 mod clipboard;
 mod config;
+#[cfg(not(target_os = "macos"))]
+mod dbus;
 mod fonts;
 mod graphics;
 mod input;
+mod notifier;
 mod parser;
 mod platform;
 mod pty;

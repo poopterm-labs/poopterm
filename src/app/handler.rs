@@ -122,6 +122,7 @@ impl ApplicationHandler<UserEvent> for App {
 				}
 				self.request_redraw();
 			}
+			WindowEvent::Occluded(occluded) => self.occluded = occluded,
 			WindowEvent::MouseWheel { delta, .. } => self.handle_mouse_wheel(delta),
 			WindowEvent::Ime(Ime::Commit(text)) => {
 				let bytes = text.into_bytes();
@@ -174,6 +175,7 @@ impl ApplicationHandler<UserEvent> for App {
 	fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
 		match event {
 			UserEvent::Output(id) => self.process_output(id),
+			UserEvent::Notification(key, event) => self.notification_event(key, event),
 			UserEvent::Closed(id) => {
 				if let Some(index) = self.sessions.iter().position(|s| s.id == id) {
 					self.close_tab(index, event_loop);

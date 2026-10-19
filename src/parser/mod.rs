@@ -11,6 +11,7 @@ mod esc;
 mod osc;
 mod osc_clipboard;
 mod osc_color;
+mod osc_notify;
 mod params;
 mod print;
 mod sgr;

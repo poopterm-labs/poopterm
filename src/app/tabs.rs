@@ -130,6 +130,7 @@ impl App {
 			return;
 		}
 		let mut session = self.sessions.remove(index);
+		self.notifications.forget(session.id);
 		let _ = session._child.kill();
 		thread::spawn(move || {
 			let _ = session._child.wait();

@@ -6,6 +6,7 @@ mod frame_pacer;
 mod handler;
 mod keyboard;
 mod mouse;
+mod notifications;
 mod output;
 mod repaint;
 mod search;
@@ -91,6 +92,9 @@ pub(crate) struct App {
 	scroll: ScrollAccumulator,
 	/// Whether the main window has keyboard focus.
 	focused: bool,
+	/// Whether the main window is hidden from view.
+	occluded: bool,
+	notifications: notifications::Notifications,
 	/// Hyperlink target under the pointer, shown in the status bar.
 	hovered_link: Option<String>,
 	pacer: frame_pacer::FramePacer,
@@ -278,6 +282,8 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		term_env,
 		scroll: ScrollAccumulator::default(),
 		focused: true,
+		occluded: false,
+		notifications: notifications::Notifications::default(),
 		hovered_link: None,
 		pacer: frame_pacer::FramePacer::new(std::time::Duration::from_micros(16_667)),
 		frame: Frame::default(),
