@@ -13,6 +13,9 @@ static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod app;
 mod bench;
 mod clipboard;
+#[cfg(test)]
+#[path = "../build/codename.rs"]
+mod codename;
 mod config;
 #[cfg(not(target_os = "macos"))]
 mod dbus;
