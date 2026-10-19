@@ -22,5 +22,7 @@ jobs:
         env:
           # Through the environment, so a title cannot inject shell code.
           TITLE: ${{ github.event.pull_request.title }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-        run: python3 scripts/pr_check.py --base "$BASE" --title "$TITLE"
+        # The checkout is GitHub's merge of the pull request into main, so its
+        # first parent is main as it is now. pull_request.base.sha can predate
+        # later merges to main, whose lines would count for this pull request.
+        run: python3 scripts/pr_check.py --base HEAD^1 --title "$TITLE"
