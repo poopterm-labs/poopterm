@@ -57,6 +57,14 @@ pub(crate) fn grid_damage(prev: &Frame, next: &Frame, allow_scroll: bool) -> Opt
 			damaged[row] = true;
 		}
 	}
+	if scroll > 0 || prev.guide != next.guide {
+		if let Some(row) = prev.guide.and_then(|row| row.checked_sub(scroll)) {
+			damaged[row] = true;
+		}
+		if let Some(row) = next.guide {
+			damaged[row] = true;
+		}
+	}
 	if images {
 		damage_images(prev, next, &mut damaged);
 		damage_images(next, prev, &mut damaged);
@@ -209,6 +217,20 @@ mod tests {
 		screen.feed("\x1b]133;A\x07");
 		let damage = grid_damage(&before, &screen.frame(), true).unwrap();
 		assert_eq!(damaged(&damage), [0usize; 0]);
+	}
+
+	#[test]
+	fn the_cursor_guide_damages_the_rows_it_leaves_and_enters() {
+		let mut screen = Screen::new(3, 3);
+		screen.feed("\x1b[?25l");
+		let before = screen.frame();
+		screen.feed("\x1b]1337;HighlightCursorLine=yes\x07");
+		let damage = grid_damage(&before, &screen.frame(), true).unwrap();
+		assert_eq!(damaged(&damage), [0]);
+		let before = screen.frame();
+		screen.feed("\x1b[3H");
+		let damage = grid_damage(&before, &screen.frame(), true).unwrap();
+		assert_eq!(damaged(&damage), [0, 2]);
 	}
 
 	/// A kitty command placing an opaque `width`×`height` image at the cursor

@@ -26,6 +26,8 @@ pub(crate) enum Phase {
 	Command,
 	Output,
 	Finished,
+	/// A place to jump back to (iTerm2's SetMark).
+	Mark,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Marker {
@@ -213,8 +215,19 @@ impl ShellIntegration {
 			.map_or(0, |marker| marker.col)
 	}
 
+	/// Records a mark at absolute `row`, leaving the phase alone.
+	pub fn set_mark(&mut self, row: usize, col: usize) {
+		let phase = self.phase;
+		self.mark(Phase::Mark, row, col, None);
+		self.phase = phase;
+	}
+
+	/// Prompts and marks: the places to jump between.
 	fn prompts(&self) -> impl DoubleEndedIterator<Item = &Marker> {
-		self.markers.iter().filter(|m| m.phase == Phase::Prompt)
+		self
+			.markers
+			.iter()
+			.filter(|m| matches!(m.phase, Phase::Prompt | Phase::Mark))
 	}
 
 	/// The closest prompt row above `row`.

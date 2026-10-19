@@ -110,6 +110,14 @@ impl Term {
 		}
 	}
 
+	/// Erases the scrollback and the images placed in it (`CSI 3 J`).
+	pub(crate) fn clear_scrollback(&mut self) {
+		self.clear_kitty_placements(true);
+		self.history_base = self.history_base.saturating_add(self.scrollback.len());
+		self.scrollback.clear();
+		self.scroll_offset = 0;
+	}
+
 	#[inline(always)]
 	pub(crate) fn linefeed(&mut self) {
 		if self.cy == self.scroll_bottom {

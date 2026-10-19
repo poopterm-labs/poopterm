@@ -1,5 +1,6 @@
 //! Parsing PTY output and deciding when the screen needs a new frame.
 use super::*;
+use crate::term::iterm::{Attention, WindowRequest};
 use std::time::Instant;
 
 impl App {
@@ -13,9 +14,10 @@ impl App {
 		};
 		session.acknowledge_output();
 		let unseen = Some(id) != active_id || !self.focused;
-		let (clipboard, notifications, long_command_finished, now, synchronized) = {
+		let (clipboard, notifications, window_requests, long_command_finished, now, synchronized) = {
 			let mut term = session.term();
 			let clipboard = std::mem::take(&mut term.clipboard_writes);
+			let window_requests = std::mem::take(&mut term.window_requests);
 			let notifications = std::mem::take(&mut term.notifications.requests);
 			// A long command finished where the user may not be looking: mark
 			// the tab and ask the window manager for attention.
@@ -26,6 +28,7 @@ impl App {
 			(
 				clipboard,
 				notifications,
+				window_requests,
 				long_command_finished,
 				Seen::of(&term),
 				term.synchronized.is_some(),
@@ -67,12 +70,44 @@ impl App {
 		if !notifications.is_empty() {
 			self.deliver_notifications(id, notifications);
 		}
+		if !window_requests.is_empty() {
+			self.apply_window_requests(id, &window_requests);
+		}
 	}
 
 	/// Requests a frame now, or at the next frame boundary if one was just drawn.
 	pub(super) fn schedule_redraw(&mut self) {
 		if self.pacer.request(Instant::now()) {
 			self.request_redraw();
+		}
+	}
+}
+
+impl App {
+	/// OSC 1337 StealFocus brings session `id` to the front;
+	/// RequestAttention asks the window manager to flag the window.
+	fn apply_window_requests(&mut self, id: u64, requests: &[WindowRequest]) {
+		use winit::window::UserAttentionType;
+		for request in requests {
+			match request {
+				WindowRequest::Focus => {
+					if let Some(index) = self.sessions.iter().position(|session| session.id == id) {
+						self.activate_tab(index);
+					}
+					if let Some(window) = &self.window {
+						window.focus_window();
+					}
+				}
+				WindowRequest::Attention(attention) => {
+					let attention = attention.map(|attention| match attention {
+						Attention::Critical => UserAttentionType::Critical,
+						Attention::Informational => UserAttentionType::Informational,
+					});
+					if let Some(window) = &self.window {
+						window.request_user_attention(attention);
+					}
+				}
+			}
 		}
 	}
 }

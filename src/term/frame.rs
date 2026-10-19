@@ -24,6 +24,8 @@ pub(crate) struct Frame {
 	/// Cursor cell, when visible on screen.
 	pub cursor: Option<(usize, usize)>,
 	pub cursor_shape: CursorShape,
+	/// The row iTerm2's cursor guide highlights.
+	pub guide: Option<usize>,
 	/// Cursor and selection colors programs set (OSC 12, 17, 19, 21).
 	pub colors: super::Colors,
 	pub scroll_offset: usize,
@@ -92,6 +94,8 @@ impl Term {
 		frame.top_line = self.history_base + first_row;
 		frame.scroll_offset = self.scroll_offset;
 		frame.cursor_shape = self.cursor_shape;
+		frame.guide =
+			Some(self.cy + self.scroll_offset).filter(|&row| self.iterm.cursor_guide && row < rows);
 		frame.colors = self.colors;
 		frame.cursor = (self.cursor_visible && self.scroll_offset == 0 && self.cx < cols)
 			.then_some((self.cx, self.cy));

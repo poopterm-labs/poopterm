@@ -354,6 +354,20 @@ Poopterm is MIT licensed; see [LICENSE](LICENSE).
   leaving them in place. While you act as another user (`run0`, `elevate`,
   `chpriv`), on a remote host, or in a container or VM, the status bar names
   it in front of the directory.
+- **iTerm2 commands:** OSC 1337 supports:
+  - `CursorShape`, `HighlightCursorLine` (a cursor guide), `SetMark` (a
+    prompt-jump target), `StealFocus`, `RequestAttention` and
+    `ClearScrollback`;
+  - `CurrentDir`, and `RemoteHost`, which the status bar names when it is
+    not this machine;
+  - `SetUserVar` and `ReportVariable` (only `user.` variables are reported);
+  - `Copy` and `CopyToClipboard`/`EndCopy`, up to 1 MiB;
+  - `SetColors` and `ReportCellSize`;
+  - `RequestUpload`, answered with `abort`.
+
+  Commands that need features poopterm lacks (profiles, the Touch Bar,
+  annotations, blocks, buttons, custom sequences) or the user's
+  confirmation (background image files, `OpenURL`) are ignored.
 - **OSC 52:** Clipboard writes to the `c` selection are supported up to 1 MiB.
   Clipboard read requests are ignored so shell programs cannot read clipboard
   contents without consent.

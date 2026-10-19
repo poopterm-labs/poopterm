@@ -180,6 +180,10 @@ impl App {
 			let mut term = session.term();
 			term.cell_width = self.cw;
 			term.cell_height = self.ch;
+			term.scale = self
+				.window
+				.as_ref()
+				.map_or(1.0, |w| w.scale_factor() as f32);
 			if let Some(pending) = &mut term.synchronized {
 				pending.cell_width = self.cw;
 				pending.cell_height = self.ch;

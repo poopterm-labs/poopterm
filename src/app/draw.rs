@@ -265,7 +265,10 @@ impl App {
 				.take(p.width / ui.cw.max(1) / 2)
 				.collect(),
 			// Say when the user acts as someone else or somewhere else.
-			None => match term.contexts.label() {
+			None => match term.contexts.label().or_else(|| {
+				let local = crate::term::iterm::hostname();
+				term.iterm.remote_label(local).map(str::to_owned)
+			}) {
 				Some(place) => format!("{place}  ·  {cwd}"),
 				None => cwd.to_owned(),
 			}

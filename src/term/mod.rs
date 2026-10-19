@@ -12,6 +12,9 @@ mod extras;
 mod frame;
 mod grid;
 mod images;
+pub(crate) mod iterm;
+#[cfg(test)]
+mod iterm_tests;
 mod kitty;
 mod kitty_animation;
 #[cfg(test)]
@@ -120,6 +123,8 @@ pub(crate) struct Term {
 	pub(crate) kitty_images: crate::graphics::kitty::Store,
 	pub(crate) cell_width: usize,
 	pub(crate) cell_height: usize,
+	/// Physical pixels per logical point of the window showing the terminal.
+	pub(crate) scale: f32,
 	pub(crate) synchronized: Option<Box<Term>>,
 	pub(crate) sync_deadline: Option<Instant>,
 	pub(crate) shell: crate::shell_integration::ShellIntegration,
@@ -191,6 +196,10 @@ pub(crate) struct Term {
 	pub(crate) notifications: notifications::Notifications,
 	/// What programs report they are doing (OSC 7501, OSC 9;4).
 	pub(crate) status: status::Status,
+	/// iTerm2's OSC 1337 state.
+	pub(crate) iterm: iterm::Iterm,
+	/// Focus and attention requests for the UI thread.
+	pub(crate) window_requests: Vec<iterm::WindowRequest>,
 	/// OSC 3008 contexts, kept across resets.
 	pub(crate) contexts: contexts::Contexts,
 	/// OSC 22 pointer shapes of the main and alternate screens.
@@ -285,6 +294,7 @@ impl Term {
 			kitty_images: Default::default(),
 			cell_width: 10,
 			cell_height: 20,
+			scale: 1.0,
 			synchronized: None,
 			sync_deadline: None,
 			shell: Default::default(),
@@ -351,6 +361,8 @@ impl Term {
 			notifications: notifications::Notifications::default(),
 			status: status::Status::default(),
 			contexts: contexts::Contexts::default(),
+			iterm: iterm::Iterm::default(),
+			window_requests: Vec::new(),
 			pointer_shapes: pointer::PointerShapes::default(),
 			title: "Shell".into(),
 			title_generation: 0,

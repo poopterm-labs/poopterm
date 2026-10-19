@@ -221,12 +221,7 @@ impl Term {
 					self.clear_range(0, self.rows * self.cols);
 					self.clear_kitty_placements(false);
 				}
-				3 => {
-					self.clear_kitty_placements(true);
-					self.history_base = self.history_base.saturating_add(self.scrollback.len());
-					self.scrollback.clear();
-					self.scroll_offset = 0;
-				}
+				3 => self.clear_scrollback(),
 				_ => {}
 			},
 			'K' => self.erase_line(raw0),

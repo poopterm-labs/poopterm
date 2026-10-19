@@ -68,6 +68,7 @@ impl Term {
 			b"7" if params.len() >= 2 => self.osc_cwd_uri(params[1]),
 			b"633" => self.osc_vscode(&params[1..]),
 			b"3008" => self.contexts.apply(&params[1..]),
+			b"1337" if params.len() >= 2 => self.osc_iterm(&params[1..], bell),
 			_ => {}
 		}
 	}

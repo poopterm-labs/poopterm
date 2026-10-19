@@ -1,5 +1,6 @@
 //! Draws the visible part of a terminal grid (cells, cursor, highlights, images).
 use super::{
+	blend::blend,
 	glyphs::FontSet,
 	images::draw_placement,
 	painter::{Painter, glyph_top},
@@ -135,6 +136,8 @@ fn draw_row(p: &mut Painter, fonts: &mut FontSet, view: &GridView, row: usize, l
 				colors.cursor_text.or(cell.bg, cell.bg),
 				colors.cursor.or(cell.fg, cell.fg),
 			)
+		} else if frame.guide == Some(row) {
+			(cell.fg, blend(cell.bg, cell.fg, 24))
 		} else {
 			(cell.fg, cell.bg)
 		};

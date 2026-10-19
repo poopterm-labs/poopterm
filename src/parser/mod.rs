@@ -11,6 +11,7 @@ mod esc;
 mod osc;
 mod osc_clipboard;
 mod osc_color;
+mod osc_iterm;
 mod osc_notify;
 mod osc_pointer;
 mod osc_shell;
@@ -48,15 +49,30 @@ impl Parser {
 impl Handler for Term {
 	#[inline(always)]
 	fn print_ascii(&mut self, text: &[u8]) {
-		self.pending().print_ascii(text);
+		let term = self.pending();
+		if term.iterm.capture.is_some() {
+			// Printable ASCII is UTF-8.
+			term
+				.iterm
+				.capture(std::str::from_utf8(text).unwrap_or_default());
+		}
+		term.print_ascii(text);
 	}
 	#[inline(always)]
 	fn print(&mut self, text: &str) {
-		self.pending().print_text(text);
+		let term = self.pending();
+		if term.iterm.capture.is_some() {
+			term.iterm.capture(text);
+		}
+		term.print_text(text);
 	}
 	#[inline(always)]
 	fn execute(&mut self, byte: u8) {
-		self.pending().apply_execute(byte);
+		let term = self.pending();
+		if term.iterm.capture.is_some() && matches!(byte, b'\n' | 0x0b | 0x0c) {
+			term.iterm.capture("\n");
+		}
+		term.apply_execute(byte);
 	}
 	#[inline(always)]
 	fn csi_dispatch(&mut self, params: &vt::Params, intermediates: &[u8], ignore: bool, action: u8) {
