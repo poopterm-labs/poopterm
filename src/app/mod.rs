@@ -48,8 +48,8 @@ use crate::{
 		search::find_matches,
 		selection::{CellPoint, Selection},
 		tabs::{
-			TabLayout, TabStripOptions, VerticalTabLayout, VerticalTabOptions,
-			compact_sidebar_width, sidebar_width, tab_layout_with_compaction, vertical_tab_layout,
+			TabLayout, TabStripOptions, VerticalTabLayout, VerticalTabOptions, compact_sidebar_width,
+			sidebar_width, tab_layout_with_compaction, vertical_tab_layout,
 		},
 	},
 	wallpaper::Wallpaper,
