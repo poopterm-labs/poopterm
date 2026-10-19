@@ -45,6 +45,29 @@ match text throughput, within the explicit size limits on untrusted input.
   same session; the benchmark now names terminals by XTVERSION and no longer
   aborts in kitty.
 
+## Hardware-accelerated rendering
+
+Full GPU rendering, after kitty graphics lands. CPU drawing is the main
+latency cost: a full redraw takes 25.6 ms at 1000×600, and much longer at
+HiDPI sizes. It also takes memory bandwidth from the parser during floods,
+which is why floods are capped at 30 fps. Parse throughput stays CPU work.
+
+- **Strict rule: no `wgpu`, WebGPU or other GPU abstraction crates.**
+  Write our own renderers on raw bindings: Vulkan on Linux and FreeBSD,
+  Metal on macOS. Use thin FFI bindings (like `ash`, `objc2-metal`), or
+  write our own where that is practical.
+- **Software rendering stays as the fallback**, used when the GPU path fails
+  to start (VMs, X forwarding, broken or missing drivers). It is also the
+  reference: GPU output must match it in the pixel-equivalence tests.
+- **Design:** a small `Renderer` boundary (a `term::Frame` and damage go in,
+  a presented frame comes out), so `term` and `parser` never see the
+  backend. Expected pieces: a glyph atlas with partial uploads, instanced
+  cell quads for backgrounds, cursor and selection, and image textures for
+  Sixel and kitty placements (GPU scaling and blending). The 30 fps flood
+  cap goes away if measurements show parsing no longer suffers.
+- Measure frame time, input latency and flood throughput before and after
+  on every platform, as for any performance work.
+
 ## CI and platforms
 
 - **First automatic release.** The release job (version bump, GitHub
