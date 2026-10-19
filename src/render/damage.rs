@@ -22,9 +22,12 @@ impl GridDamage {
 /// Compares `next` with `prev`. With `allow_scroll`, lines that moved up
 /// (output scrolled into history) are matched against their old position
 /// and shifted instead of redrawn. Returns `None` when everything must be
-/// redrawn (size changed, or text scrolled under visible images).
+/// redrawn (size or cursor and selection colors changed, or text scrolled
+/// under visible images).
 pub(crate) fn grid_damage(prev: &Frame, next: &Frame, allow_scroll: bool) -> Option<GridDamage> {
-	if (prev.cols, prev.rows, prev.cell) != (next.cols, next.rows, next.cell) {
+	if (prev.cols, prev.rows, prev.cell) != (next.cols, next.rows, next.cell)
+		|| prev.colors != next.colors
+	{
 		return None;
 	}
 	let rows = next.rows;

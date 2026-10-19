@@ -60,21 +60,7 @@ pub(super) fn sixel(rng: &mut Rng, size: Size, out: &mut Vec<u8>) {
 
 /// Standard base64 with padding, as the kitty protocol expects.
 pub(crate) fn base64(data: &[u8]) -> Vec<u8> {
-	const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
-	for chunk in data.chunks(3) {
-		let n = u32::from(chunk[0]) << 16
-			| u32::from(*chunk.get(1).unwrap_or(&0)) << 8
-			| u32::from(*chunk.get(2).unwrap_or(&0));
-		for i in 0..4 {
-			out.push(if i <= chunk.len() {
-				TABLE[(n >> (18 - 6 * i)) as usize & 63]
-			} else {
-				b'='
-			});
-		}
-	}
-	out
+	crate::graphics::base64::encode(data, true).into_bytes()
 }
 
 /// Sends `payload` as one kitty graphics transmission in 4096-byte chunks

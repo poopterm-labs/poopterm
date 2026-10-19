@@ -7,6 +7,18 @@ use crate::{
 
 impl Term {
 	pub(crate) fn sgr(&mut self, params: &(impl ParamList + ?Sized)) {
+		if !self.special_colors_active() {
+			return self.apply_sgr(params);
+		}
+		// Special colors replace the foreground SGR chose; start from it.
+		self.fg = self.sgr_fg;
+		self.apply_sgr(params);
+		self.sgr_fg = self.fg;
+		self.apply_special_colors();
+	}
+
+	#[inline(always)]
+	fn apply_sgr(&mut self, params: &(impl ParamList + ?Sized)) {
 		// vte stores at most 32 parameters/subparameters in its parser state.
 		// Keep group slices on the stack instead of allocating nested Vecs for
 		// every SGR sequence (which is common in full-screen terminal apps).

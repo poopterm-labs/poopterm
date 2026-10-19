@@ -4,10 +4,12 @@
 //! each event to the submodule that applies it. While synchronized output
 //! (`?2026`) is active, everything except the mode switch itself goes to the
 //! pending snapshot returned by [`Term::pending`].
+mod color_spec;
 mod csi;
 mod erase;
 mod esc;
 mod osc;
+mod osc_color;
 mod params;
 mod print;
 mod sgr;
@@ -17,6 +19,8 @@ use crate::{
 	term::Term,
 	vt::{self, Handler},
 };
+#[cfg(test)]
+pub(crate) use color_spec::encode as encode_color;
 use params::ParamList;
 
 /// Stateful parser for one PTY stream. Keep it beside `Term` in a session so

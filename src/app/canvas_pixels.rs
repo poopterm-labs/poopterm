@@ -233,6 +233,39 @@ fn placeholders_show_the_image_fitted_and_centered_in_their_cells() {
 }
 
 #[test]
+fn program_cursor_and_selection_colors_are_drawn_and_redraw_the_grid() {
+	let mut term = Term::new(4, 2, Theme::from_kind(ThemeKind::Poop), "/".into());
+	let mut parser = Parser::new();
+	let mut fonts = fonts();
+	let mut canvas = Canvas::new();
+	let key = DrawKey {
+		selection: Some((CellPoint { row: 1, col: 0 }, CellPoint { row: 1, col: 1 })),
+		..KEY
+	};
+	for input in [
+		"",
+		// Block cursor at (0, 0); selection on row 1.
+		"\x1b]12;#ff0000\x07\x1b]17;#00ff00\x07",
+		"\x1b]21;selection_background=;selection_foreground=\x07",
+	] {
+		parser.advance(&mut term, input.as_bytes());
+		let mut frame = Frame::default();
+		term.snapshot(&mut frame);
+		let mut expected = vec![0; 4 * 10 * 2 * 20];
+		draw(&mut expected, &mut fonts, &frame, key, None);
+		update(&mut canvas, &mut fonts, &mut frame, key);
+		assert!(canvas.pixels == expected, "input {input:?}");
+	}
+	let mut frame = Frame::default();
+	parser.advance(&mut term, b"\x1b]21;selection_background=#00ff00\x07");
+	term.snapshot(&mut frame);
+	let mut pixels = vec![0; 4 * 10 * 2 * 20];
+	draw(&mut pixels, &mut fonts, &frame, key, None);
+	assert_eq!(pixels[0], 0xff0000, "cursor");
+	assert_eq!(pixels[20 * 40], 0x00ff00, "selection background");
+}
+
+#[test]
 #[ignore = "rendering benchmark; run explicitly in release mode"]
 fn highlight_rendering_throughput() {
 	let mut term = Term::new(100, 30, Theme::from_kind(ThemeKind::Poop), "/".into());

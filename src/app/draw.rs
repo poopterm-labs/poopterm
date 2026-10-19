@@ -144,7 +144,7 @@ impl App {
 			scale,
 			default_bg: self.theme.bg,
 			link_color: self.theme.palette[4],
-			selection_colors: (0x1E1E2E, 0x89B4FA),
+			selection_colors: crate::theme::SELECTION_COLORS,
 			match_colors: (self.theme.bg, self.theme.palette[3]),
 			selection: self.selection.map(Selection::ordered),
 			search_match: self

@@ -24,6 +24,8 @@ pub(crate) struct Frame {
 	/// Cursor cell, when visible on screen.
 	pub cursor: Option<(usize, usize)>,
 	pub cursor_shape: CursorShape,
+	/// Cursor and selection colors programs set (OSC 12, 17, 19, 21).
+	pub colors: super::Colors,
 	pub scroll_offset: usize,
 	/// Cell size images were laid out with.
 	pub cell: (usize, usize),
@@ -90,6 +92,7 @@ impl Term {
 		frame.top_line = self.history_base + first_row;
 		frame.scroll_offset = self.scroll_offset;
 		frame.cursor_shape = self.cursor_shape;
+		frame.colors = self.colors;
 		frame.cursor = (self.cursor_visible && self.scroll_offset == 0 && self.cx < cols)
 			.then_some((self.cx, self.cy));
 		let cell = self.cell_size();

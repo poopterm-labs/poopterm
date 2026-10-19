@@ -25,6 +25,35 @@ const TABLE: [u8; 256] = {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Invalid;
 
+/// Encodes `data` with the standard alphabet; `pad` appends `=` to a
+/// partial last quantum.
+pub(crate) fn encode(data: &[u8], pad: bool) -> String {
+	const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+	for chunk in data.chunks(3) {
+		let n = u32::from(chunk[0]) << 16
+			| u32::from(*chunk.get(1).unwrap_or(&0)) << 8
+			| u32::from(*chunk.get(2).unwrap_or(&0));
+		for i in 0..4 {
+			if i <= chunk.len() {
+				out.push(ALPHABET[(n >> (18 - 6 * i)) as usize & 63] as char);
+			} else if pad {
+				out.push('=');
+			}
+		}
+	}
+	out
+}
+
+/// Decodes a complete base64 string; padding is optional.
+pub(crate) fn decode(input: &[u8]) -> Option<Vec<u8>> {
+	let mut out = Vec::new();
+	let mut decoder = Decoder::default();
+	decoder.push(input, &mut out).ok()?;
+	decoder.finish(&mut out).ok()?;
+	Some(out)
+}
+
 /// Decodes base64 pushed in pieces of any length.
 #[derive(Default)]
 pub(crate) struct Decoder {
@@ -171,12 +200,20 @@ mod tests {
 	use super::*;
 	use crate::bench::corpus::Rng;
 
-	fn decode(input: &[u8]) -> Option<Vec<u8>> {
-		let mut decoder = Decoder::default();
-		let mut out = Vec::new();
-		decoder.push(input, &mut out).ok()?;
-		decoder.finish(&mut out).ok()?;
-		Some(out)
+	#[test]
+	fn encodes_the_rfc_4648_vectors_with_and_without_padding() {
+		for (plain, padded) in [
+			("", ""),
+			("f", "Zg=="),
+			("fo", "Zm8="),
+			("foobar", "Zm9vYmFy"),
+		] {
+			assert_eq!(encode(plain.as_bytes(), true), padded);
+			assert_eq!(
+				encode(plain.as_bytes(), false),
+				padded.trim_end_matches('=')
+			);
+		}
 	}
 
 	#[test]

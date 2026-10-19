@@ -1,4 +1,7 @@
 //! Terminal grid, scrollback, cursor and screen state.
+#[cfg(test)]
+mod color_tests;
+mod colors;
 mod extras;
 mod frame;
 mod grid;
@@ -17,6 +20,7 @@ mod sync;
 mod tests;
 
 use crate::theme::Theme;
+pub(crate) use colors::{Colors, Dynamic, Setting};
 pub(crate) use extras::NONE as NO_EXTRA;
 pub(crate) use frame::Frame;
 pub(crate) use grid::Grid;
@@ -115,8 +119,13 @@ pub(crate) struct Term {
 	pub(crate) cursor_visible: bool,
 	pub(crate) default_fg: u32,
 	pub(crate) default_bg: u32,
+	/// The theme's default colors, which OSC 110 and 111 restore.
+	pub(crate) theme_fg: u32,
+	pub(crate) theme_bg: u32,
 	pub(crate) palette: [u32; 8],
 	pub(crate) color_overrides: [Option<u32>; 256],
+	pub(crate) colors: Colors,
+	pub(crate) color_stack: Vec<colors::Saved>,
 	pub(crate) cx: usize,
 	pub(crate) cy: usize,
 	pub(crate) fg: u32,
@@ -124,6 +133,8 @@ pub(crate) struct Term {
 	/// or 0 for the default. Kitty Unicode placeholders take their image id
 	/// from it.
 	pub(crate) fg_id: u32,
+	/// The foreground SGR chose, before special colors (OSC 5/6) replace it.
+	pub(crate) sgr_fg: u32,
 	pub(crate) bg: u32,
 	pub(crate) scroll_top: usize,
 	pub(crate) scroll_bottom: usize,
@@ -215,44 +226,12 @@ impl Term {
 
 	pub(crate) fn set_theme(&mut self, theme: Theme) {
 		self.finish_sync();
-		let (old_fg, old_bg) = (self.default_fg, self.default_bg);
-		let recolor = |cells: &mut [Cell]| {
-			for cell in cells {
-				if cell.fg == old_fg {
-					cell.fg = theme.fg;
-				}
-				if cell.bg == old_bg {
-					cell.bg = theme.bg;
-				}
-			}
-		};
-		for row in self.grid.iter_mut() {
-			recolor(row);
-		}
-		for line in &mut self.scrollback {
-			recolor(Arc::make_mut(line).as_mut_slice());
-		}
-		if let Some((grid, _, _, fg, bg)) = &mut self.primary_screen {
-			for row in grid.iter_mut() {
-				recolor(row);
-			}
-			if *fg == old_fg {
-				*fg = theme.fg;
-			}
-			if *bg == old_bg {
-				*bg = theme.bg;
-			}
-		}
-		self.default_fg = theme.fg;
-		self.default_bg = theme.bg;
+		self.set_default_colors(theme.fg, theme.bg);
+		self.theme_fg = theme.fg;
+		self.theme_bg = theme.bg;
 		self.palette = theme.palette;
 		self.color_overrides.fill(None);
-		if self.fg == old_fg {
-			self.fg = theme.fg;
-		}
-		if self.bg == old_bg {
-			self.bg = theme.bg;
-		}
+		self.colors = Colors::default();
 	}
 
 	#[inline(always)]
@@ -304,10 +283,15 @@ impl Term {
 			cy: 0,
 			default_fg: theme.fg,
 			default_bg: theme.bg,
+			theme_fg: theme.fg,
+			theme_bg: theme.bg,
 			palette: theme.palette,
 			color_overrides: [None; 256],
+			colors: Colors::default(),
+			color_stack: Vec::new(),
 			fg: theme.fg,
 			fg_id: 0,
+			sgr_fg: theme.fg,
 			bg: theme.bg,
 			scroll_top: 0,
 			scroll_bottom: rows.saturating_sub(1),

@@ -316,7 +316,7 @@ fn osc_palette_and_default_color_queries_are_answered() {
 	assert_eq!(
 		t.responses[1],
 		format!(
-			"\x1b]10;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+			"\x1b]10;rgb:{:02x}/{:02x}/{:02x}\x07",
 			t.default_fg >> 16,
 			(t.default_fg >> 8) & 0xff,
 			t.default_fg & 0xff

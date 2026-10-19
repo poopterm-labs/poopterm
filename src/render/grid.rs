@@ -120,12 +120,21 @@ fn draw_row(p: &mut Painter, fonts: &mut FontSet, view: &GridView, row: usize, l
 		};
 		let is_cursor = frame.cursor == Some((col, row));
 		let solid_block = is_cursor && view.focused && frame.cursor_shape == CursorShape::Block;
+		let colors = &frame.colors;
 		let (fg, bg) = if contains(view.selection, point) {
-			view.selection_colors
+			// Dynamic selection colors are reverse video.
+			let (default_fg, default_bg) = view.selection_colors;
+			(
+				colors.selection_foreground.or(default_fg, cell.bg),
+				colors.selection_background.or(default_bg, cell.fg),
+			)
 		} else if contains(view.search_match, point) {
 			view.match_colors
 		} else if solid_block {
-			(cell.bg, cell.fg)
+			(
+				colors.cursor_text.or(cell.bg, cell.bg),
+				colors.cursor.or(cell.fg, cell.fg),
+			)
 		} else {
 			(cell.fg, cell.bg)
 		};
@@ -233,15 +242,16 @@ fn draw_cursor(p: &mut Painter, view: &GridView, cell: &Cell, (col, row): (usize
 	let y = view.origin.1 + row * ch;
 	let thick = 2 * view.scale.max(1);
 	let width = cw * usize::from(cell.width.max(1));
+	let color = view.frame.colors.cursor.or(cell.fg, cell.fg);
 	match (view.frame.cursor_shape, view.focused) {
-		(CursorShape::Bar, _) => p.rect(x, y, thick, ch, cell.fg),
-		(CursorShape::Underline, _) => p.rect(x, y + ch.saturating_sub(thick), width, thick, cell.fg),
+		(CursorShape::Bar, _) => p.rect(x, y, thick, ch, color),
+		(CursorShape::Underline, _) => p.rect(x, y + ch.saturating_sub(thick), width, thick, color),
 		(CursorShape::Block, _) => {
 			let line = view.scale.max(1);
-			p.rect(x, y, width, line, cell.fg);
-			p.rect(x, y + ch.saturating_sub(line), width, line, cell.fg);
-			p.rect(x, y, line, ch, cell.fg);
-			p.rect(x + width.saturating_sub(line), y, line, ch, cell.fg);
+			p.rect(x, y, width, line, color);
+			p.rect(x, y + ch.saturating_sub(line), width, line, color);
+			p.rect(x, y, line, ch, color);
+			p.rect(x + width.saturating_sub(line), y, line, ch, color);
 		}
 	}
 }

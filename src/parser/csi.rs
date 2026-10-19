@@ -45,6 +45,28 @@ impl Term {
 					.push(format!("\x1bP>|poopterm {}\x1b\\", env!("CARGO_PKG_VERSION")).into_bytes()),
 				// DECSTR
 				(b"!", 'p') => self.soft_reset(),
+				// XTPUSHCOLORS, XTPOPCOLORS: each parameter is a slot; 0 or
+				// none pushes or pops.
+				(b"#", 'P' | 'Q') => {
+					let slots: Vec<usize> = params
+						.iter()
+						.map(|p| usize::from(p.first().copied().unwrap_or(0)))
+						.collect();
+					for slot in if slots.is_empty() { vec![0] } else { slots } {
+						if action == 'P' {
+							self.push_colors(slot);
+						} else {
+							self.pop_colors(slot);
+						}
+					}
+				}
+				// XTREPORTCOLORS: the current entry and the number saved.
+				(b"#", 'R') => {
+					let saved = self.color_stack.len();
+					self
+						.responses
+						.push(format!("\x1b[{saved};{saved}#Q").into_bytes());
+				}
 				_ => {}
 			}
 			return;

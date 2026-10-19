@@ -19,6 +19,9 @@ pub(crate) const PALETTE: [u32; 8] = [
 	0xE8D5B0, // white
 ];
 
+/// Selected text's foreground and background, unless a program sets them.
+pub(crate) const SELECTION_COLORS: (u32, u32) = (0x1E1E2E, 0x89B4FA);
+
 #[derive(Clone, Copy)]
 pub(crate) struct Theme {
 	pub(crate) kind: ThemeKind,
