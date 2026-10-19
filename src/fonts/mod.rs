@@ -7,6 +7,8 @@ mod db_tests;
 mod face;
 mod font;
 #[cfg(test)]
+mod font_bench;
+#[cfg(test)]
 mod font_tests;
 mod glyf;
 mod raster;
