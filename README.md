@@ -60,7 +60,7 @@ brew install poopterm-labs/poopterm/poopterm
 
 ### Debian
 
-Poopterm packages for 64-bit Debian are published through the [Poop Labs APT
+Poopterm packages for 64-bit Debian are published through the [pooplabs APT
 repository](https://github.com/poopterm-labs/pooplabs-apt-repo). Add the
 repository, refresh APT, and install the package:
 
