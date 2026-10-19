@@ -143,7 +143,8 @@ pub(crate) struct Term {
 	pub(crate) cell_height: usize,
 	/// Physical pixels per logical point of the window showing the terminal.
 	pub(crate) scale: f32,
-	pub(crate) synchronized: Option<Box<Term>>,
+	/// What frames show during synchronized output.
+	pub(crate) synchronized: Option<Box<Frame>>,
 	pub(crate) sync_deadline: Option<Instant>,
 	pub(crate) shell: crate::shell_integration::ShellIntegration,
 	pub(crate) history_base: usize,
@@ -195,8 +196,8 @@ pub(crate) struct Term {
 	pub(crate) active_hyperlink: u16,
 	/// `extra` id applied to printed cells while a hyperlink is active.
 	pub(crate) active_extra: u16,
-	/// Combining marks and hyperlinks referenced by [`Cell::extra`]. Shared
-	/// copy-on-write with synchronized-output snapshots.
+	/// Combining marks and hyperlinks referenced by [`Cell::extra`], shared
+	/// copy-on-write between clones.
 	pub(crate) extras: Arc<extras::Extras>,
 	pub(crate) hyperlinks: Vec<String>,
 	pub(crate) wrap_pending: bool,

@@ -1,9 +1,7 @@
 //! Applies escape sequences to a [`Term`].
 //!
 //! [`crate::vt`] tokenizes the byte stream; the [`Handler`] impl here routes
-//! each event to the submodule that applies it. While synchronized output
-//! (`?2026`) is active, everything except the mode switch itself goes to the
-//! pending snapshot returned by [`Term::pending`].
+//! each event to the submodule that applies it.
 mod color_spec;
 mod csi;
 mod dcs;
@@ -53,30 +51,27 @@ impl Parser {
 impl Handler for Term {
 	#[inline(always)]
 	fn print_ascii(&mut self, text: &[u8]) {
-		let term = self.pending();
-		if term.iterm.capture.is_some() {
+		if self.iterm.capture.is_some() {
 			// Printable ASCII is UTF-8.
-			term
+			self
 				.iterm
 				.capture(std::str::from_utf8(text).unwrap_or_default());
 		}
-		term.print_ascii(text);
+		self.print_ascii(text);
 	}
 	#[inline(always)]
 	fn print(&mut self, text: &str) {
-		let term = self.pending();
-		if term.iterm.capture.is_some() {
-			term.iterm.capture(text);
+		if self.iterm.capture.is_some() {
+			self.iterm.capture(text);
 		}
-		term.print_text(text);
+		self.print_text(text);
 	}
 	#[inline(always)]
 	fn execute(&mut self, byte: u8) {
-		let term = self.pending();
-		if term.iterm.capture.is_some() && matches!(byte, b'\n' | 0x0b | 0x0c) {
-			term.iterm.capture("\n");
+		if self.iterm.capture.is_some() && matches!(byte, b'\n' | 0x0b | 0x0c) {
+			self.iterm.capture("\n");
 		}
-		term.apply_execute(byte);
+		self.apply_execute(byte);
 	}
 	#[inline(always)]
 	fn csi_dispatch(&mut self, params: &vt::Params, intermediates: &[u8], ignore: bool, action: u8) {
@@ -84,17 +79,11 @@ impl Handler for Term {
 	}
 	#[inline(always)]
 	fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
-		self
-			.pending()
-			.apply_esc_dispatch(intermediates, ignore, byte);
+		self.apply_esc_dispatch(intermediates, ignore, byte);
 	}
 	#[inline(always)]
 	fn osc_dispatch(&mut self, params: &[&[u8]], bell: bool) {
-		self.pending().apply_osc_dispatch(params, bell);
-		// Replies are not held back by synchronized output.
-		if let Some(pending) = &mut self.synchronized {
-			self.responses.append(&mut pending.responses);
-		}
+		self.apply_osc_dispatch(params, bell);
 	}
 	#[inline(always)]
 	fn hook(&mut self, params: &vt::Params, intermediates: &[u8], ignore: bool, action: u8) {
@@ -102,27 +91,19 @@ impl Handler for Term {
 	}
 	#[inline(always)]
 	fn put(&mut self, bytes: &[u8]) {
-		let target = self.pending();
-		if let Some(transfer) = &mut target.sixel_transfer {
+		if let Some(transfer) = &mut self.sixel_transfer {
 			transfer.extend(bytes);
-		} else if let Some(request) = &mut target.dcs_request {
+		} else if let Some(request) = &mut self.dcs_request {
 			request.extend(bytes);
 		}
 	}
 	#[inline(always)]
 	fn unhook(&mut self) {
-		let target = self.pending();
-		target.finish_sixel();
-		if let Some(request) = target.dcs_request.take() {
-			target.answer_dcs(request);
-			// Replies are not held back by synchronized output.
-			if let Some(pending) = &mut self.synchronized {
-				self.responses.append(&mut pending.responses);
-			}
+		self.finish_sixel();
+		if let Some(request) = self.dcs_request.take() {
+			self.answer_dcs(request);
 		}
 	}
-	// The receiver belongs to the live terminal so a transfer spans
-	// synchronized output; finished commands apply to the pending state.
 	fn apc_start(&mut self) {
 		self.kitty_receiver.start();
 	}
@@ -131,9 +112,8 @@ impl Handler for Term {
 	}
 	fn apc_end(&mut self, complete: bool) {
 		if let Some(transmission) = self.kitty_receiver.end(complete)
-			&& let Some(reply) = self.pending().apply_kitty(transmission)
+			&& let Some(reply) = self.apply_kitty(transmission)
 		{
-			// Replies are not held back by synchronized output.
 			self.responses.push(reply);
 		}
 	}
@@ -148,7 +128,7 @@ impl Term {
 		action: char,
 	) {
 		use crate::term::dcs::{Kind, Request};
-		let target = self.pending();
+		let target = &mut *self;
 		target.sixel_transfer = if !ignore && intermediates.is_empty() && action == 'q' {
 			let mut values = params.iter().map(|p| p.first().copied().unwrap_or(0));
 			Some(crate::sixel::Transfer::new(
@@ -191,16 +171,11 @@ impl Term {
 				return;
 			}
 		}
-		self
-			.pending()
-			.apply_csi_dispatch(params, intermediates, false, action);
-		if let Some(pending) = &mut self.synchronized {
-			self.responses.append(&mut pending.responses);
-		}
+		self.apply_csi_dispatch(params, intermediates, false, action);
 	}
 
 	/// DECRQM (`CSI ? Ps $ p`) and synchronized output (`CSI ? 2026 h/l`),
-	/// which act on the terminal rather than on the pending snapshot.
+	/// which the terminal answers itself.
 	fn dispatch_mode_sequences(
 		&mut self,
 		params: &impl ParamList,
@@ -213,7 +188,7 @@ impl Term {
 				let state = if mode == 2026 {
 					Some(self.synchronized.is_some())
 				} else {
-					self.pending().private_mode(mode)
+					self.private_mode(mode)
 				};
 				let status = match state {
 					Some(true) => 1,
@@ -247,7 +222,7 @@ pub(crate) struct PerCharacter<'a>(pub &'a mut Term);
 #[cfg(test)]
 impl vte::Perform for PerCharacter<'_> {
 	fn print(&mut self, c: char) {
-		self.0.pending().apply_print(c);
+		self.0.apply_print(c);
 	}
 	fn execute(&mut self, byte: u8) {
 		self.0.execute(byte);

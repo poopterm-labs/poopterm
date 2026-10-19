@@ -99,8 +99,13 @@ impl Frame {
 }
 
 impl Term {
-	/// Copies the visible screen into `frame`.
+	/// Copies the visible screen into `frame`, or the screen synchronized
+	/// output froze.
 	pub(crate) fn snapshot(&self, frame: &mut Frame) {
+		if let Some(frozen) = self.frozen_frame() {
+			frame.clone_from(frozen);
+			return;
+		}
 		let (cols, rows) = (self.cols, self.rows);
 		let first_row = self.scrollback.len().saturating_sub(self.scroll_offset);
 		frame.cols = cols;

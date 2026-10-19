@@ -156,8 +156,8 @@ impl Term {
 			while scrollback.len() >= *scrollback_limit {
 				*history_base = history_base.saturating_add(1);
 				if let Some(mut oldest) = scrollback.pop_front() {
-					// Reuse both allocations when no synchronized snapshot shares
-					// the history entry. Shared rows remain immutable.
+					// Reuse both allocations when no clone shares the history
+					// entry. Shared rows remain immutable.
 					if let Some(cells) = Arc::get_mut(&mut oldest)
 						&& scrollback.len() < *scrollback_limit
 					{

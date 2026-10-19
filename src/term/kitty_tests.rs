@@ -4,7 +4,7 @@ use crate::{
 	bench::images::base64,
 	graphics::{Extent, KittyId, Rect},
 	parser::Parser,
-	term::Term,
+	term::{Frame, Term},
 	theme::{Theme, ThemeKind},
 };
 
@@ -256,7 +256,7 @@ fn alternate_screen_has_its_own_placements() {
 }
 
 #[test]
-fn commands_inside_synchronized_output_apply_when_it_ends() {
+fn images_inside_synchronized_output_show_when_it_ends() {
 	let mut t = terminal(20, 10);
 	let encoded = base64(&rgb(2, 2));
 	let mut stream = b"\x1b_Ga=T,f=24,s=2,v=2,i=1,m=1;".to_vec();
@@ -265,11 +265,15 @@ fn commands_inside_synchronized_output_apply_when_it_ends() {
 	stream.extend_from_slice(&encoded[8..]);
 	stream.extend_from_slice(b"\x1b\\");
 	feed(&mut t, &stream);
-	assert!(t.images.is_empty());
+	let mut frame = Frame::default();
+	t.snapshot(&mut frame);
+	assert!(frame.images.is_empty());
 	// Replies are not held back.
 	assert_eq!(replies(&mut t), ["\x1b_Gi=1;OK\x1b\\"]);
 	feed(&mut t, b"\x1b[?2026l");
 	assert_eq!(placements(&t), [(1, 0, 0, 0)]);
+	t.snapshot(&mut frame);
+	assert_eq!(frame.images.len(), 1);
 }
 
 /// Places image 1 three times and image 2 once on a 20×10 screen:
@@ -387,7 +391,7 @@ const PLACEHOLDER: char = '\u{10EEEE}';
 /// `(screen row, screen col, image row, image col, bitmap width)` of the
 /// placeholder cells in a frame.
 fn placeholder_cells(term: &Term) -> Vec<(usize, usize, usize, usize, usize)> {
-	let mut frame = crate::term::Frame::default();
+	let mut frame = Frame::default();
 	term.snapshot(&mut frame);
 	frame
 		.placeholders
@@ -455,7 +459,7 @@ fn virtual_placements_without_a_size_cover_the_image_in_cells() {
 		&mut t,
 		format!("\x1b[38;5;7m{PLACEHOLDER}{}{}", D[1], D[2]).as_bytes(),
 	);
-	let mut frame = crate::term::Frame::default();
+	let mut frame = Frame::default();
 	t.snapshot(&mut frame);
 	assert_eq!(frame.placeholders[0].cells, (3, 2));
 }

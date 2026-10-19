@@ -184,10 +184,6 @@ impl App {
 				.window
 				.as_ref()
 				.map_or(1.0, |w| w.scale_factor() as f32);
-			if let Some(pending) = &mut term.synchronized {
-				pending.cell_width = self.cw;
-				pending.cell_height = self.ch;
-			}
 			if cols != term.cols || rows != term.rows {
 				term.resize(cols, rows);
 				let _ = session.master.resize(PtySize {

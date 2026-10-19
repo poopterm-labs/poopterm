@@ -2,7 +2,7 @@
 use crate::{
 	parser::{Parser, PerCharacter},
 	shell_integration::{self, decode_uri_path},
-	term::{Cell, Term},
+	term::{Cell, Frame, Term},
 	theme::{Theme, ThemeKind},
 };
 
@@ -386,14 +386,22 @@ fn synchronized_output_is_committed_atomically_with_protocol_replies() {
 		&mut t,
 		b"before\r\x1b[?2026h\x1b[2Jafter\x1b[?2026$p\x1b[6n",
 	);
-	assert_eq!(row(&t, 0), "before  ");
+	// Updates apply at once, but frames show the screen as it was until
+	// the block ends.
+	let shown = |t: &Term| {
+		let mut frame = Frame::default();
+		t.snapshot(&mut frame);
+		frame.row(0).iter().map(|cell| cell.ch).collect::<String>()
+	};
+	assert_eq!(row(&t, 0), "after   ");
+	assert_eq!(shown(&t), "before  ");
 	assert!(t.synchronized.is_some());
 	assert_eq!(
 		t.responses,
 		vec![b"\x1b[?2026;1$y".to_vec(), b"\x1b[1;6R".to_vec()]
 	);
 	feed(&mut t, b"\x1b[?2026l");
-	assert_eq!(row(&t, 0), "after   ");
+	assert_eq!(shown(&t), "after   ");
 	assert!(t.synchronized.is_none());
 	feed(&mut t, b"\x1b[?2026$p");
 	assert_eq!(t.responses.last().unwrap(), b"\x1b[?2026;2$y");
@@ -455,9 +463,12 @@ fn sixel_dcs_is_incremental_and_cursor_advances_at_termination() {
 fn sixel_obeys_sync_and_alternate_screen_boundaries() {
 	let mut t = terminal(20, 10);
 	feed(&mut t, b"\x1b[?2026h\x1bP7;1q~\x1b\\");
-	assert!(t.images.is_empty());
+	let mut frame = Frame::default();
+	t.snapshot(&mut frame);
+	assert!(frame.images.is_empty());
 	feed(&mut t, b"\x1b[?2026l");
-	assert_eq!(t.images.len(), 1);
+	t.snapshot(&mut frame);
+	assert_eq!(frame.images.len(), 1);
 	feed(&mut t, b"\x1b[?1049h");
 	assert!(t.images.is_empty());
 	feed(&mut t, b"\x1b[?1049l");

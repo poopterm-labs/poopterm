@@ -43,9 +43,7 @@ pub(crate) struct Receiver {
 	limit: usize,
 }
 
-/// Synchronized-output snapshots clone the terminal; they get an idle
-/// receiver, and the live one stays with the terminal
-/// (`Term::finish_sync`), so a transfer is never copied.
+/// A cloned terminal gets an idle receiver, so a transfer is never copied.
 impl Clone for Receiver {
 	fn clone(&self) -> Self {
 		Self::default()

@@ -55,10 +55,11 @@ deadlock, so debug builds track held locks and panic instead.
   (`term::attr`), width (1 normal, 2 wide, 0 wide-character spacer) and an
   `extra` id. Combining marks, OSC 8 hyperlinks and OSC 66 blocks are interned in
   `term::extras::Extras`, shared copy-on-write with snapshots.
-- **Synchronized output** (`?2026`): `begin_sync` clones the `Term` into a
-  pending snapshot; all updates go to `Term::pending()` until the end marker
-  or a 250 ms timeout, so the renderer never shows a half-drawn frame.
-  Scrollback lines are `Arc`s, so the clone is cheap.
+- **Synchronized output** (`?2026`): `begin_sync` freezes a `Frame` of the
+  visible screen. Updates and replies apply to the terminal as usual, but
+  `Term::snapshot` hands the renderer the frozen frame until the end marker
+  or a 250 ms timeout, so it never shows a half-drawn screen. The copy is
+  one screen, whatever the history holds.
 - The alternate screen swaps in a fresh `Grid` and keeps the primary one in
   `primary_screen`.
 
