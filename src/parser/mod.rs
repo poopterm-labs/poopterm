@@ -70,9 +70,7 @@ impl Handler for Term {
 	#[inline(always)]
 	fn put(&mut self, bytes: &[u8]) {
 		if let Some(transfer) = &mut self.pending().sixel_transfer {
-			for &byte in bytes {
-				transfer.push(byte);
-			}
+			transfer.extend(bytes);
 		}
 	}
 	#[inline(always)]

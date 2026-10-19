@@ -28,12 +28,23 @@ impl Transfer {
 			overflow: false,
 		}
 	}
+	/// One byte at a time: the reference [`Transfer::extend`] is tested
+	/// against.
+	#[cfg(test)]
 	pub fn push(&mut self, byte: u8) {
 		if self.bytes.len() < MAX_PAYLOAD {
 			self.bytes.push(byte);
 		} else {
 			self.overflow = true;
 		}
+	}
+	/// Appends payload bytes in bulk, as [`Transfer::push`] would one by one.
+	pub fn extend(&mut self, bytes: &[u8]) {
+		let room = MAX_PAYLOAD.saturating_sub(self.bytes.len());
+		self
+			.bytes
+			.extend_from_slice(&bytes[..bytes.len().min(room)]);
+		self.overflow |= bytes.len() > room;
 	}
 	pub fn finish(self, background: u32, foreground: u32) -> Option<Bitmap> {
 		if self.overflow {
@@ -241,6 +252,31 @@ fn hls(h: usize, l: usize, s: usize) -> u32 {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn extending_matches_pushing_byte_by_byte_up_to_the_limit() {
+		let data: Vec<u8> = (0..MAX_PAYLOAD + 10)
+			.map(|i| b'?' + (i % 63) as u8)
+			.collect();
+		for split in [0, 1, MAX_PAYLOAD - 1, MAX_PAYLOAD, MAX_PAYLOAD + 3] {
+			let (mut one, mut bulk) = (Transfer::new(7, 1), Transfer::new(7, 1));
+			for &byte in &data[..split] {
+				one.push(byte);
+			}
+			bulk.extend(&data[..split]);
+			assert_eq!(
+				(&one.bytes, one.overflow),
+				(&bulk.bytes, bulk.overflow),
+				"{split}"
+			);
+		}
+		let mut bulk = Transfer::new(7, 1);
+		bulk.extend(&data[..MAX_PAYLOAD - 2]);
+		bulk.extend(&data[..5]);
+		assert!(bulk.overflow);
+		assert_eq!(bulk.bytes.len(), MAX_PAYLOAD);
+	}
+
 	fn decode(data: &[u8]) -> Option<Bitmap> {
 		let mut t = Transfer::new(7, 1);
 		for &byte in data {
