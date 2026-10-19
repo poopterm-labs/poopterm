@@ -96,7 +96,7 @@ impl App {
 							"About poopterm" => {
 								self.command_palette = false;
 								self.open_settings_window(event_loop);
-								self.settings_editor.about = true;
+								self.settings_editor.page = super::settings_hit::SettingsPage::About;
 								if let Some(window) = &self.settings_window {
 									window.request_redraw();
 								}

@@ -13,6 +13,8 @@ mod output;
 mod repaint;
 mod search;
 mod settings;
+mod settings_hit;
+mod settings_pen;
 mod settings_view;
 mod tabs;
 
@@ -92,6 +94,8 @@ pub(crate) struct App {
 	width: u32,
 	height: u32,
 	mods: Modifiers,
+	/// Modifiers held in the Settings window, which has its own focus.
+	settings_mods: Modifiers,
 	shortcuts: Shortcuts,
 	cursor_pos: (f64, f64),
 	held_button: Option<MouseButtonCode>,
@@ -328,6 +332,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		width: 0,
 		height: 0,
 		mods: Modifiers::default(),
+		settings_mods: Modifiers::default(),
 		shortcuts: Shortcuts::load(),
 		cursor_pos: (0.0, 0.0),
 		held_button: None,
