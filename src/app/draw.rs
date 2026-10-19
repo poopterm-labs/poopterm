@@ -264,7 +264,15 @@ impl App {
 				.chars()
 				.take(p.width / ui.cw.max(1) / 2)
 				.collect(),
-			None => cwd.chars().take(p.width / ui.cw.max(1) / 3).collect(),
+			// Say when the user acts as someone else or somewhere else.
+			None => match term.contexts.label() {
+				Some(place) => format!("{place}  ·  {cwd}"),
+				None => cwd.to_owned(),
+			}
+			.chars()
+			.filter(|c| !c.is_control())
+			.take(p.width / ui.cw.max(1) / 3)
+			.collect(),
 		};
 		let shell = &term.shell;
 		let command = match (shell.phase, &shell.command_line, &shell.last_error) {

@@ -346,6 +346,14 @@ Poopterm is MIT licensed; see [LICENSE](LICENSE).
   in the status bar. Optional hooks are available for zsh, Bash, and fish;
   install them explicitly with the instructions below. The hooks also emit
   OSC 7 so BSD shells can report their working directory.
+- **VS Code shell integration:** OSC 633 `A` to `D` mark commands like OSC 133,
+  `E` reports the command line, and `P;Cwd=` the working directory. Other
+  properties and the nonce are ignored.
+- **Contexts:** OSC 3008 ([UAPI.15](https://uapi-group.org/specifications/specs/osc_context/))
+  contexts are tracked up to 32 deep, with invalid fields dropped and resets
+  leaving them in place. While you act as another user (`run0`, `elevate`,
+  `chpriv`), on a remote host, or in a container or VM, the status bar names
+  it in front of the directory.
 - **OSC 52:** Clipboard writes to the `c` selection are supported up to 1 MiB.
   Clipboard read requests are ignored so shell programs cannot read clipboard
   contents without consent.

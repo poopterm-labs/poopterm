@@ -31,7 +31,9 @@ impl Term {
 					..Theme::from_kind(ThemeKind::Poop)
 				};
 				let (cw, ch, limit) = (self.cell_width, self.cell_height, self.scrollback_limit);
+				let contexts = std::mem::take(&mut self.contexts);
 				*self = Self::new(self.cols, self.rows, theme, self.cwd.clone());
+				self.contexts = contexts;
 				self.cell_width = cw;
 				self.cell_height = ch;
 				self.scrollback_limit = limit;

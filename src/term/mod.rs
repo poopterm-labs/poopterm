@@ -5,6 +5,9 @@ mod clipboard_tests;
 #[cfg(test)]
 mod color_tests;
 mod colors;
+#[cfg(test)]
+mod context_tests;
+pub(crate) mod contexts;
 mod extras;
 mod frame;
 mod grid;
@@ -188,6 +191,8 @@ pub(crate) struct Term {
 	pub(crate) notifications: notifications::Notifications,
 	/// What programs report they are doing (OSC 7501, OSC 9;4).
 	pub(crate) status: status::Status,
+	/// OSC 3008 contexts, kept across resets.
+	pub(crate) contexts: contexts::Contexts,
 	/// OSC 22 pointer shapes of the main and alternate screens.
 	pub(crate) pointer_shapes: pointer::PointerShapes,
 	pub(crate) title: String,
@@ -345,6 +350,7 @@ impl Term {
 			clipboard_upload: None,
 			notifications: notifications::Notifications::default(),
 			status: status::Status::default(),
+			contexts: contexts::Contexts::default(),
 			pointer_shapes: pointer::PointerShapes::default(),
 			title: "Shell".into(),
 			title_generation: 0,

@@ -63,17 +63,19 @@ fn option<'a>(options: &[&'a [u8]], name: &str) -> Option<&'a str> {
 	})
 }
 
-/// The command line of a C marker. Quoting may leave `;` in a `cmdline`,
-/// so it runs to the end of the sequence.
-fn command_line(options: &[&[u8]]) -> Option<String> {
+/// The command line of a C marker, if it has one: `None` inside when it
+/// cannot be decoded. Quoting may leave `;` in a `cmdline`, so it runs to
+/// the end of the sequence.
+fn command_line(options: &[&[u8]]) -> Option<Option<String>> {
 	if let Some(index) = options
 		.iter()
 		.position(|option| option.starts_with(b"cmdline="))
 	{
 		let joined = options[index..].join(&b';');
-		return unquote(std::str::from_utf8(&joined[b"cmdline=".len()..]).ok()?);
+		let text = std::str::from_utf8(&joined[b"cmdline=".len()..]).ok();
+		return Some(text.and_then(unquote));
 	}
-	option(options, "cmdline_url").and_then(percent_decode)
+	option(options, "cmdline_url").map(percent_decode)
 }
 
 impl ShellIntegration {
@@ -124,7 +126,10 @@ impl ShellIntegration {
 					Some((_, started)) => *started = true,
 					None => self.open.push((String::new(), true)),
 				}
-				self.command_line = command_line(options);
+				// Without one, keep a line reported earlier (OSC 633 E).
+				if let Some(line) = command_line(options) {
+					self.command_line = line;
+				}
 				self.last_exit_code = None;
 				self.last_error = None;
 				self.command_started = Some(now);

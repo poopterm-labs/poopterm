@@ -200,3 +200,48 @@ fn clicks_in_the_input_line_move_the_cursor_when_asked() {
 	send(&mut t, "\r\n\x1b]133;A\x07$ \x1b]133;B\x07ab");
 	assert_eq!(t.prompt_click(1, 2), None);
 }
+
+#[test]
+fn vscode_markers_work_like_semantic_prompts() {
+	let mut t = terminal();
+	send(
+		&mut t,
+		"ab\x1b]633;A\x07$ \x1b]633;B\x07\x1b]633;E;echo a\\x3bb\\\\c\\x0a;nonce\x07\
+		 \x1b]633;C\x07\x1b]633;D;3\x07",
+	);
+	// VS Code's A marks where the prompt is; it does not start a line.
+	assert_eq!(t.shell.markers[0].col, 2);
+	assert_eq!(
+		phases(&t),
+		[
+			Phase::Prompt,
+			Phase::Command,
+			Phase::Output,
+			Phase::Finished
+		]
+	);
+	assert_eq!(t.shell.last_exit_code, Some(3));
+	assert_eq!(t.shell.command_line.as_deref(), Some("echo a;b\\c\n"));
+	// Bad escapes drop the command line.
+	for line in ["a\\x3", "a\\xzz", "a\\q", "a\\"] {
+		send(&mut t, &format!("\x1b]633;E;{line}\x07"));
+		assert_eq!(t.shell.command_line, None, "{line}");
+	}
+	// Like any prompt, A means running programs are gone.
+	send(&mut t, "\x1b]7501;state=working\x07\x1b]633;A\x07");
+	assert_eq!(t.status.summary(), None);
+}
+
+#[test]
+fn vscode_properties_report_the_directory() {
+	let mut t = terminal();
+	send(&mut t, "\x1b]633;P;Cwd=/usr/lib\x07");
+	assert_eq!(t.cwd, std::path::Path::new("/usr/lib"));
+	send(&mut t, "\x1b]633;P;Cwd=file://host/srv/a%20b\x07");
+	assert_eq!(t.cwd, std::path::Path::new("/srv/a b"));
+	// Relative paths, unknown properties and malformed pairs change nothing.
+	for property in ["Cwd=tmp", "IsWindows=True", "Cwd", "Other=/x"] {
+		send(&mut t, &format!("\x1b]633;P;{property}\x07"));
+		assert_eq!(t.cwd, std::path::Path::new("/srv/a b"), "{property}");
+	}
+}

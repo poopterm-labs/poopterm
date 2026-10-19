@@ -2,10 +2,7 @@
 //! clipboard and notifications have their own modules.
 use std::sync::Arc;
 
-use crate::{
-	shell_integration::decode_uri_path,
-	term::{NO_EXTRA, Term},
-};
+use crate::term::{NO_EXTRA, Term};
 
 impl Term {
 	pub(super) fn apply_osc_dispatch(&mut self, params: &[&[u8]], bell: bool) {
@@ -68,18 +65,9 @@ impl Term {
 					self.title_generation = self.title_generation.wrapping_add(1);
 				}
 			}
-			b"7" if params.len() >= 2 => {
-				if let Ok(uri) = std::str::from_utf8(params[1])
-					&& let Some(path) = uri.strip_prefix("file://")
-					&& let Some(path) = path
-						.find('/')
-						.and_then(|index| decode_uri_path(&path[index..]))
-					&& self.cwd != path
-				{
-					self.cwd = path;
-					self.cwd_generation = self.cwd_generation.wrapping_add(1);
-				}
-			}
+			b"7" if params.len() >= 2 => self.osc_cwd_uri(params[1]),
+			b"633" => self.osc_vscode(&params[1..]),
+			b"3008" => self.contexts.apply(&params[1..]),
 			_ => {}
 		}
 	}

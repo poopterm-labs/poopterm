@@ -13,6 +13,7 @@ mod osc_clipboard;
 mod osc_color;
 mod osc_notify;
 mod osc_pointer;
+mod osc_shell;
 mod osc_status;
 mod params;
 mod print;
