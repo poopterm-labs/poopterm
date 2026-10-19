@@ -1,5 +1,19 @@
 # Changelog
 
+## 26.10.13 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Choose the terminal font from a list of installed fonts (settings).
+
+### Fixed
+
+- Count only text fonts with Latin letters as monospace (fonts).
+
+### Maintenance
+
+- Pin the third-party FreeBSD VM action to a commit.
+
 ## 26.10.12 "Giga Fly" — 2026-10-19
 
 ### Added
