@@ -6,6 +6,7 @@
 //! pending snapshot returned by [`Term::pending`].
 mod color_spec;
 mod csi;
+mod dcs;
 mod erase;
 mod esc;
 mod osc;
@@ -100,13 +101,24 @@ impl Handler for Term {
 	}
 	#[inline(always)]
 	fn put(&mut self, bytes: &[u8]) {
-		if let Some(transfer) = &mut self.pending().sixel_transfer {
+		let target = self.pending();
+		if let Some(transfer) = &mut target.sixel_transfer {
 			transfer.extend(bytes);
+		} else if let Some(request) = &mut target.dcs_request {
+			request.extend(bytes);
 		}
 	}
 	#[inline(always)]
 	fn unhook(&mut self) {
-		self.pending().finish_sixel();
+		let target = self.pending();
+		target.finish_sixel();
+		if let Some(request) = target.dcs_request.take() {
+			target.answer_dcs(request);
+			// Replies are not held back by synchronized output.
+			if let Some(pending) = &mut self.synchronized {
+				self.responses.append(&mut pending.responses);
+			}
+		}
 	}
 	// The receiver belongs to the live terminal so a transfer spans
 	// synchronized output; finished commands apply to the pending state.
@@ -134,6 +146,7 @@ impl Term {
 		ignore: bool,
 		action: char,
 	) {
+		use crate::term::dcs::{Kind, Request};
 		let target = self.pending();
 		target.sixel_transfer = if !ignore && intermediates.is_empty() && action == 'q' {
 			let mut values = params.iter().map(|p| p.first().copied().unwrap_or(0));
@@ -144,6 +157,20 @@ impl Term {
 		} else {
 			None
 		};
+		// DECRQSS and XTGETTCAP take no parameters.
+		let kind = match (intermediates, action) {
+			_ if ignore
+				|| params
+					.iter()
+					.any(|param| param.iter().any(|&value| value != 0)) =>
+			{
+				None
+			}
+			(b"$", 'q') => Some(Kind::Status),
+			(b"+", 'q') => Some(Kind::Capabilities),
+			_ => None,
+		};
+		target.dcs_request = kind.map(Request::new);
 	}
 
 	fn dispatch_csi(

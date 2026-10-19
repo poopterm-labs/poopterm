@@ -10,6 +10,9 @@ mod conemu_tests;
 #[cfg(test)]
 mod context_tests;
 pub(crate) mod contexts;
+pub(crate) mod dcs;
+#[cfg(test)]
+mod dcs_tests;
 mod extras;
 mod frame;
 mod grid;
@@ -126,6 +129,8 @@ pub(crate) struct Term {
 	pub(crate) images: Vec<crate::graphics::Placement>,
 	pub(crate) primary_images: Vec<crate::graphics::Placement>,
 	pub(crate) sixel_transfer: Option<crate::sixel::Transfer>,
+	/// A DECRQSS or XTGETTCAP request being received.
+	pub(crate) dcs_request: Option<dcs::Request>,
 	pub(crate) sixel_scrolling: bool,
 	/// Receives kitty graphics APC strings; always the live terminal's.
 	pub(crate) kitty_receiver: crate::graphics::kitty::Receiver,
@@ -308,6 +313,7 @@ impl Term {
 			images: Vec::new(),
 			primary_images: Vec::new(),
 			sixel_transfer: None,
+			dcs_request: None,
 			sixel_scrolling: true,
 			kitty_receiver: Default::default(),
 			kitty_images: Default::default(),
