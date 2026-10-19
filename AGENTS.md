@@ -192,9 +192,12 @@ a merge.
   release title. Patch releases keep their release's codename.
 - After fully green CI on `main`, CI increments the patch or starts a new
   month at `YY.M.0` with a new random codename. It commits `Cargo.toml`,
-  `Cargo.lock`, and `CHANGELOG.md` together, atomically pushes the commit and
-  tag only if `main` still matches the checked revision, publishes the release,
-  and then updates `Formula/poopterm.rb`. The changelog entry is built from
+  `Cargo.lock`, `CHANGELOG.md` and `Formula/poopterm.rb` together and
+  atomically pushes the commit and tag only if `main` still matches the
+  checked revision: one push per release, so merges cannot race it. If `main`
+  moved, the run skips and the newer commit's run releases. Then it builds
+  the Debian package from the tag and publishes the release; a rerun resumes
+  without pushing again. The changelog entry is built from
   the Conventional Commits since the last tag (`feat` → Added, `fix` → Fixed,
   `perf` → Performance, breaking changes first, the rest under Maintenance),
   so write pull request titles that read well there. The release job pushes
