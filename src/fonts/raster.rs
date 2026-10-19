@@ -28,9 +28,13 @@ impl Path {
 	/// out of: curves add their extremes, where the derivative is zero.
 	/// Segments that stay on one point draw nothing and add nothing, so
 	/// one-point contours (anchors, bounding-box marks) are left out.
+	/// A curve passes its endpoints only where a control point does, so
+	/// extremes are solved for only then, which is rare in fonts.
 	pub(crate) fn bounds(&self) -> Option<Bounds> {
 		let mut bounds = None;
 		let mut at = (0.0, 0.0);
+		// Whether control coordinate `c` lies outside the span `a..=b`.
+		let outside = |c: f32, a: f32, b: f32| c < a.min(b) || c > a.max(b);
 		for &segment in &self.0 {
 			let (to, moved, extremes) = match segment {
 				Segment::Move(x, y) => {
@@ -39,13 +43,19 @@ impl Path {
 				}
 				Segment::Line(x, y) => ((x, y), (x, y) != at, [None; 4]),
 				Segment::Quad(x1, y1, x, y) => {
-					let t = |a: f32, b: f32, c: f32| quad_extreme(a, b, c);
+					let t = |a, b, c| outside(b, a, c).then(|| quad_extreme(a, b, c)).flatten();
 					let moved = (x1, y1) != at || (x, y) != at;
 					((x, y), moved, [t(at.0, x1, x), t(at.1, y1, y), None, None])
 				}
 				Segment::Curve(x1, y1, x2, y2, x, y) => {
-					let [tx0, tx1] = cubic_extremes(at.0, x1, x2, x);
-					let [ty0, ty1] = cubic_extremes(at.1, y1, y2, y);
+					let t = |a, b, c, d| {
+						if outside(b, a, d) || outside(c, a, d) {
+							cubic_extremes(a, b, c, d)
+						} else {
+							[None; 2]
+						}
+					};
+					let ([tx0, tx1], [ty0, ty1]) = (t(at.0, x1, x2, x), t(at.1, y1, y2, y));
 					let moved = (x1, y1) != at || (x2, y2) != at || (x, y) != at;
 					((x, y), moved, [tx0, tx1, ty0, ty1])
 				}
