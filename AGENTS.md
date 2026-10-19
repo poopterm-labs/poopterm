@@ -142,7 +142,10 @@ Details: [`docs/architecture.md`](docs/architecture.md).
   month at `YY.M.0` with a new random codename. It commits `Cargo.toml`,
   `Cargo.lock`, and `CHANGELOG.md` together, atomically pushes the commit and
   tag only if `main` still matches the checked revision, publishes the release,
-  and then updates `Formula/poopterm.rb`. `GITHUB_TOKEN` pushes do not retrigger
+  and then updates `Formula/poopterm.rb`. The changelog entry is built from
+  the Conventional Commits since the last tag (`feat` → Added, `fix` → Fixed,
+  `perf` → Performance, breaking changes first, the rest under Maintenance),
+  so write summaries that read well there. `GITHUB_TOKEN` pushes do not retrigger
   CI. Do not bump versions manually for normal work; `git pull --rebase`
   before pushing. Release logic lives in `scripts/release.py` and
   `scripts/release.sh`; test it with `python3 -m unittest discover -s tests`.

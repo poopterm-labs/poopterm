@@ -4,7 +4,14 @@ import datetime
 from pathlib import Path
 import re
 import secrets
+import subprocess
 import tomllib
+
+# Changelog sections for Conventional Commits types, in order. Other types
+# go under Maintenance; release bookkeeping is left out.
+SECTIONS = {'feat': 'Added', 'fix': 'Fixed', 'perf': 'Performance'}
+BOOKKEEPING = {('chore', 'release'), ('chore', 'homebrew')}
+HEADER = re.compile(r'(?P<type>\w+)(?:\((?P<scope>[^)]*)\))?(?P<breaking>!)?: (?P<summary>.+)')
 
 
 def next_version(current, today):
@@ -15,7 +22,48 @@ def next_version(current, today):
     return f'{period[0]}.{period[1]}.{patch + 1 if period == (year, month) else 0}'
 
 
-def prepare(root, today):
+def notes(messages):
+    """Changelog notes for the commit messages since the last release."""
+    sections = {'Breaking changes': [], **{name: [] for name in SECTIONS.values()}, 'Maintenance': []}
+    for message in messages:
+        subject = message.strip().split('\n', 1)[0].strip()
+        header = HEADER.fullmatch(subject)
+        if not header:
+            sections['Maintenance'].append(sentence(subject))
+            continue
+        kind, scope = header['type'], header['scope']
+        if (kind, scope) in BOOKKEEPING:
+            continue
+        entry = sentence(header['summary'], scope)
+        # A footer runs until the next footer token or a blank line.
+        footer = re.search(r'(?ms)^BREAKING[ -]CHANGE: (.+?)(?=\n\n|\n[\w-]+: |\Z)', message)
+        if header['breaking'] or footer:
+            explanation = ' '.join(footer[1].split()).rstrip('.') + '.' if footer else ''
+            sections['Breaking changes'].append(f'{entry} {explanation}'.rstrip())
+        else:
+            sections[SECTIONS.get(kind, 'Maintenance')].append(entry)
+    text = '\n'.join(f'### {name}\n\n' + ''.join(f'- {entry}\n' for entry in entries)
+                     for name, entries in sections.items() if entries)
+    return text or '- No changes besides release bookkeeping.\n'
+
+
+def sentence(text, scope=None):
+    text = text.strip().rstrip('.')
+    text = text[:1].upper() + text[1:]
+    return f'{text} ({scope}).' if scope else f'{text}.'
+
+
+def commits_since_last_release(root):
+    """Messages of the commits after the newest release tag, oldest first."""
+    described = subprocess.run(['git', 'describe', '--tags', '--abbrev=0', '--match', 'v*'],
+                               cwd=root, capture_output=True, text=True)
+    revisions = f'{described.stdout.strip()}..HEAD' if described.returncode == 0 else 'HEAD'
+    log = subprocess.run(['git', 'log', '--reverse', '--format=%B%x00', revisions],
+                         cwd=root, check=True, capture_output=True, text=True).stdout
+    return [message for message in log.split('\0') if message.strip()]
+
+
+def prepare(root, today, messages):
     manifest = (root / 'Cargo.toml').read_text()
     package = tomllib.loads(manifest)['package']
     old = package['version']
@@ -39,10 +87,10 @@ def prepare(root, today):
         raise ValueError('exactly one poopterm lockfile entry is required')
     changelog = (root / 'CHANGELOG.md').read_text()
     heading, separator, history = changelog.partition('\n')
-    notes = f'## {new} "{codename}" — {today.isoformat()}\n\n- Includes the changes verified by CI on main.\n\n'
+    entry = f'## {new} "{codename}" — {today.isoformat()}\n\n{notes(messages)}\n'
     (root / 'Cargo.toml').write_text(manifest)
     (root / 'Cargo.lock').write_text(lock)
-    (root / 'CHANGELOG.md').write_text(heading + '\n\n' + notes + history.lstrip('\n'))
+    (root / 'CHANGELOG.md').write_text(heading + '\n\n' + entry + history.lstrip('\n'))
     return new, codename
 
 
@@ -65,5 +113,6 @@ if __name__ == '__main__':
     if args.formula:
         update_formula(root, args.formula)
     else:
-        version, codename = prepare(root, datetime.datetime.now(datetime.timezone.utc).date())
+        today = datetime.datetime.now(datetime.timezone.utc).date()
+        version, codename = prepare(root, today, commits_since_last_release(root))
         print(f'{version}\n{codename}')
