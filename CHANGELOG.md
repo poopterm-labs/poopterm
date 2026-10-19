@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.28 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Add modifyotherkeys and the key modifier options (#18) (input).
+
 ## 26.10.27 "Giga Fly" — 2026-10-19
 
 ### Added
