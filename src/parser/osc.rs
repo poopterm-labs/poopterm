@@ -22,6 +22,7 @@ impl Term {
 			}
 			b"9" => self.osc_notify(&params[1..]),
 			b"777" => self.osc_notify_777(&params[1..]),
+			b"22" => self.osc_pointer(params.get(1).copied().unwrap_or_default(), bell),
 			b"7501" => self.osc_program_status(&params[1..], bell),
 			b"99" if params.len() >= 3 => self.osc_kitty_notify(params[1], &params[2..], bell),
 			b"8" if params.len() >= 3 => {

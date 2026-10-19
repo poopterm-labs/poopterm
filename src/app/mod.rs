@@ -97,6 +97,8 @@ pub(crate) struct App {
 	notifications: notifications::Notifications,
 	/// Hyperlink target under the pointer, shown in the status bar.
 	hovered_link: Option<String>,
+	/// The pointer shape last set on the window.
+	pointer_icon: winit::window::CursorIcon,
 	pacer: frame_pacer::FramePacer,
 	/// The active terminal's visible screen, copied for rendering.
 	frame: Frame,
@@ -285,6 +287,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		occluded: false,
 		notifications: notifications::Notifications::default(),
 		hovered_link: None,
+		pointer_icon: winit::window::CursorIcon::Default,
 		pacer: frame_pacer::FramePacer::new(std::time::Duration::from_micros(16_667)),
 		frame: Frame::default(),
 		canvas: canvas::Canvas::new(),

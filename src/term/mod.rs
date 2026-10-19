@@ -18,6 +18,9 @@ mod kitty_tests;
 #[cfg(test)]
 mod notification_tests;
 pub(crate) mod notifications;
+pub(crate) mod pointer;
+#[cfg(test)]
+mod pointer_tests;
 mod screen;
 mod shared;
 mod shell;
@@ -183,6 +186,8 @@ pub(crate) struct Term {
 	pub(crate) notifications: notifications::Notifications,
 	/// What programs report they are doing (OSC 7501, OSC 9;4).
 	pub(crate) status: status::Status,
+	/// OSC 22 pointer shapes of the main and alternate screens.
+	pub(crate) pointer_shapes: pointer::PointerShapes,
 	pub(crate) title: String,
 	pub(crate) title_generation: u64,
 	pub(crate) cwd: PathBuf,
@@ -338,6 +343,7 @@ impl Term {
 			clipboard_upload: None,
 			notifications: notifications::Notifications::default(),
 			status: status::Status::default(),
+			pointer_shapes: pointer::PointerShapes::default(),
 			title: "Shell".into(),
 			title_generation: 0,
 			cwd,

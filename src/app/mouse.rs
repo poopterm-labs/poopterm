@@ -123,6 +123,21 @@ impl App {
 			let cell = term.row_cells(point.row)?.get(point.col)?;
 			term.hyperlink_uri(cell).map(str::to_owned)
 		});
+		// Links show a hand; otherwise the program's OSC 22 shape, if any.
+		let shape = if link.is_some() {
+			Some("pointer")
+		} else {
+			self.active_term().pointer_shape()
+		};
+		let icon = shape
+			.and_then(|name| name.parse().ok())
+			.unwrap_or(winit::window::CursorIcon::Default);
+		if icon != self.pointer_icon
+			&& let Some(window) = &self.window
+		{
+			window.set_cursor(icon);
+			self.pointer_icon = icon;
+		}
 		if link != self.hovered_link {
 			self.hovered_link = link;
 			self.request_redraw();
