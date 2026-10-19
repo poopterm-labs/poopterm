@@ -1,5 +1,22 @@
 # Changelog
 
+## 26.10.4 "Giga Fly" — 2026-10-19
+
+### Fixed
+
+- Write changelog notes from the commits since the last tag (release).
+
+### Performance
+
+- Freeze a frame for synchronized output instead of cloning the terminal (term).
+- Cache recent combining-mark lookups in front of the interner (term).
+
+### Maintenance
+
+- Start headless runs with a full scrollback.
+- Fill in 26.10.1 to 26.10.3 from their commits (changelog).
+- Replace outdated performance numbers with current measurements.
+
 ## 26.10.3 "Giga Fly" — 2026-10-19
 
 ### Maintenance
