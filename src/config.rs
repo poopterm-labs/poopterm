@@ -169,6 +169,13 @@ pub fn state_dir() -> Option<PathBuf> {
 	user_dir("XDG_STATE_HOME", ".local/state")
 }
 
+/// Regenerable files such as the font database:
+/// `$XDG_CACHE_HOME/poopterm` (default `~/.cache/poopterm`), or
+/// `~/Library/Application Support/poopterm` on macOS.
+pub fn cache_dir() -> Option<PathBuf> {
+	user_dir("XDG_CACHE_HOME", ".cache")
+}
+
 /// `poopterm` inside an XDG base directory. On macOS, an unset variable
 /// means Application Support instead of `default`.
 fn user_dir(variable: &str, default: &str) -> Option<PathBuf> {

@@ -162,15 +162,19 @@ color4 = "#5C9BD6"
 color5 = "#B06AC8"
 color6 = "#4FB6B0"
 color7 = "#E8D5B0"
-font_path = "/path/to/YourNerdFontMono-Regular.ttf"
+font_family = "JetBrains Mono"
 ```
 
-`font_path` or the `POOPTERM_FONT` environment variable selects a TrueType font
-file; glyphs missing from a custom font fall back to the bundled DejaVu Sans Mono
-for Powerline font. Poopterm does not search system fonts automatically. For
-complete htop or other Nerd Font icon coverage, set `font_path` to a Nerd Font
-Mono file. Use a monospaced font for predictable cell alignment.
-`POOPTERM_FONT` takes precedence over `font_path`.
+`font_family` picks an installed font by family name (any case). Poopterm keeps
+a database of installed fonts in `~/.cache/poopterm/fonts.db` (under
+`$XDG_CACHE_HOME`), checks it against the font directories' modification times
+at startup, and reads only new or changed fonts when they differ.
+`font_path` or the `POOPTERM_FONT` environment variable selects a font file
+instead, and takes precedence over `font_family`; `POOPTERM_FONT` takes
+precedence over `font_path`. Glyphs missing from a custom font fall back to the
+bundled DejaVu Sans Mono for Powerline font. For complete htop or other Nerd
+Font icon coverage, choose a Nerd Font Mono family or file. Use a monospaced
+font for predictable cell alignment.
 The older `macos-dark` and `macos-light` values remain accepted for existing configs.
 Settings changes apply immediately after saving; session restore takes effect on
 the next launch. Reducing scrollback discards the oldest lines. Invalid numbers
