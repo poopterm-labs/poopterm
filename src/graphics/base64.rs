@@ -55,7 +55,7 @@ pub(crate) fn decode(input: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// Decodes base64 pushed in pieces of any length.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Decoder {
 	/// Sextets of an incomplete quantum.
 	held: [u8; 4],

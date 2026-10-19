@@ -1,4 +1,7 @@
 //! Terminal grid, scrollback, cursor and screen state.
+pub(crate) mod clipboard;
+#[cfg(test)]
+mod clipboard_tests;
 #[cfg(test)]
 mod color_tests;
 mod colors;
@@ -167,7 +170,9 @@ pub(crate) struct Term {
 	pub(crate) bold: bool,
 	pub(crate) reverse: bool,
 	pub(crate) responses: Vec<Vec<u8>>,
-	pub(crate) clipboard_write: Option<String>,
+	/// Clipboard writes for the UI thread to perform.
+	pub(crate) clipboard_writes: Vec<clipboard::ClipboardWrite>,
+	pub(crate) clipboard_upload: Option<clipboard::Upload>,
 	pub(crate) title: String,
 	pub(crate) title_generation: u64,
 	pub(crate) cwd: PathBuf,
@@ -319,7 +324,8 @@ impl Term {
 			bold: false,
 			reverse: false,
 			responses: Vec::new(),
-			clipboard_write: None,
+			clipboard_writes: Vec::new(),
+			clipboard_upload: None,
 			title: "Shell".into(),
 			title_generation: 0,
 			cwd,

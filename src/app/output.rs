@@ -14,7 +14,7 @@ impl App {
 		let unseen = Some(id) != active_id || !self.focused;
 		let (clipboard, long_command_finished, now, synchronized) = {
 			let mut term = session.term();
-			let clipboard = term.clipboard_write.take();
+			let clipboard = std::mem::take(&mut term.clipboard_writes);
 			// A long command finished where the user may not be looking: mark
 			// the tab and ask the window manager for attention.
 			let long_command_finished = term.shell.take_long_command_finished() && unseen;
@@ -28,10 +28,8 @@ impl App {
 				term.synchronized.is_some(),
 			)
 		};
-		if let Some(text) = clipboard
-			&& let Err(error) = clipboard_write(&text)
-		{
-			eprintln!("poopterm: OSC 52 clipboard write failed: {error}");
+		for write in clipboard {
+			crate::clipboard::write_from_program(write);
 		}
 		if long_command_finished
 			&& !self.focused

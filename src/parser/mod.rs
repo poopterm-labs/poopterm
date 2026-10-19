@@ -9,6 +9,7 @@ mod csi;
 mod erase;
 mod esc;
 mod osc;
+mod osc_clipboard;
 mod osc_color;
 mod params;
 mod print;
@@ -66,6 +67,10 @@ impl Handler for Term {
 	#[inline(always)]
 	fn osc_dispatch(&mut self, params: &[&[u8]], bell: bool) {
 		self.pending().apply_osc_dispatch(params, bell);
+		// Replies are not held back by synchronized output.
+		if let Some(pending) = &mut self.synchronized {
+			self.responses.append(&mut pending.responses);
+		}
 	}
 	#[inline(always)]
 	fn hook(&mut self, params: &vt::Params, intermediates: &[u8], ignore: bool, action: u8) {
