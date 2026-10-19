@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.27 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Add xtsave, xtrestore and the ansi modes (#16) (parser).
+
 ## 26.10.26 "Giga Fly" — 2026-10-19
 
 ### Added
