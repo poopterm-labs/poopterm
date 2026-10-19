@@ -93,7 +93,7 @@ jobs:
 
       # Kept for trying out a pull request's package; releases build their own.
       - name: Upload Debian package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: poopterm-deb
           path: dist/*.deb
