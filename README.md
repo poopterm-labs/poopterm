@@ -380,7 +380,17 @@ common system font directories for up to eight TTF fonts with Nerd Font, Symbol,
 or Awesome in their filenames. For the broadest htop icon coverage, set
 `font_path` to a Nerd Font Mono file.
 
-Poopterm is MIT licensed; see [LICENSE](LICENSE).
+Poopterm is free software: you can redistribute it and/or modify it under the
+terms of the [GNU Affero General Public License](LICENSE) as published by the
+Free Software Foundation, either version 3 of the License, or (at your option)
+any later version. It is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. Earlier releases were published under the
+MIT License.
+
+Copyright © 2026 poopware-labs and contributors. Third-party notices (the
+Catppuccin palette) are in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES); the
+bundled font keeps its own license, above.
 
 ## Modern terminal protocols
 
