@@ -1,5 +1,9 @@
 # Changelog
 
+## 26.10.3 "Giga Fly" — 2026-10-19
+
+- Includes the changes verified by CI on main.
+
 ## 26.10.2 "Giga Fly" — 2026-10-19
 
 - Includes the changes verified by CI on main.
