@@ -117,7 +117,7 @@ jobs:
           # bypass, so the release commits can land there.
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
       - name: Download Debian package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: poopterm-deb
           path: dist
