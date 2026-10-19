@@ -136,8 +136,8 @@ fn vertical_plus_button_configuration_has_no_phantom_control() {
 			show_settings: false,
 		},
 	);
-	assert_eq!(layout.plus_y.is_some(), true);
-	assert_eq!(layout.settings_y.is_some(), false);
+	assert!(layout.plus_y.is_some());
+	assert!(layout.settings_y.is_none());
 	assert!(layout.button_width > 0);
 	assert!(layout.button_height > 0);
 }
@@ -158,8 +158,8 @@ fn vertical_settings_button_configuration_has_no_phantom_control() {
 			show_settings: true,
 		},
 	);
-	assert_eq!(layout.plus_y.is_some(), false);
-	assert_eq!(layout.settings_y.is_some(), true);
+	assert!(layout.plus_y.is_none());
+	assert!(layout.settings_y.is_some());
 	assert!(layout.button_width > 0);
 	assert!(layout.button_height > 0);
 }
@@ -180,8 +180,8 @@ fn vertical_hidden_button_configuration_has_no_phantom_control() {
 			show_settings: false,
 		},
 	);
-	assert_eq!(layout.plus_y.is_some(), false);
-	assert_eq!(layout.settings_y.is_some(), false);
+	assert!(layout.plus_y.is_none());
+	assert!(layout.settings_y.is_none());
 	assert!(layout.button_width > 0);
 	assert!(layout.button_height > 0);
 }
