@@ -1,6 +1,8 @@
 //! The kitty graphics protocol: commands, transfers, decoding and storage.
 //! `term/kitty.rs` applies commands to the terminal.
+mod animation;
 mod command;
+mod compose;
 mod decode;
 mod diacritics;
 mod media;
@@ -8,7 +10,9 @@ mod placeholder;
 mod receiver;
 mod store;
 
+pub(crate) use animation::Playback;
 pub(crate) use command::{Command, Error};
+pub(crate) use compose::compose;
 pub(crate) use decode::decode;
 pub(crate) use media::load;
 pub(crate) use placeholder::{Cell as PlaceholderInput, PLACEHOLDER, resolve_row};

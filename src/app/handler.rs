@@ -142,24 +142,29 @@ impl ApplicationHandler<UserEvent> for App {
 
 	fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
 		let now = Instant::now();
-		let mut expired = false;
+		let (mut expired, mut animated) = (false, false);
+		// The earliest synchronized-output timeout or animation frame.
+		let mut term_wake = None;
 		for session in &self.sessions {
-			expired |= session.term().finish_sync_if_expired(now);
+			let mut term = session.term();
+			expired |= term.finish_sync_if_expired(now);
+			animated |= term.advance_animations(now);
+			term_wake = [term_wake, term.sync_deadline, term.animation_deadline()]
+				.into_iter()
+				.flatten()
+				.min();
 		}
 		if expired {
 			self.search_dirty = true;
 			self.update_window_title();
+		}
+		if expired || animated {
 			self.schedule_redraw();
 		}
 		if self.pacer.due(now) {
 			self.request_redraw();
 		}
-		let sync_deadline = self
-			.sessions
-			.iter()
-			.filter_map(|s| s.term().sync_deadline)
-			.min();
-		let wake = [sync_deadline, self.pacer.deadline()]
+		let wake = [term_wake, self.pacer.deadline()]
 			.into_iter()
 			.flatten()
 			.min();

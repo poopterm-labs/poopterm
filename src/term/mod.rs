@@ -4,6 +4,9 @@ mod frame;
 mod grid;
 mod images;
 mod kitty;
+mod kitty_animation;
+#[cfg(test)]
+mod kitty_animation_tests;
 #[cfg(test)]
 mod kitty_tests;
 mod screen;

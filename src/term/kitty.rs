@@ -25,6 +25,9 @@ impl Term {
 			match action {
 				b't' | b'T' | b'q' => self.kitty_transmit(&mut command, data, action),
 				b'p' => self.kitty_place(&mut command),
+				b'f' => self.kitty_frame(&mut command, data),
+				b'c' => self.kitty_compose(&mut command),
+				b'a' => self.kitty_animate(&mut command),
 				b'd' => {
 					self.kitty_delete(&command);
 					return None;
@@ -66,17 +69,8 @@ impl Term {
 	}
 
 	fn kitty_place(&mut self, command: &mut Command) -> Result<(), Error> {
-		let number = command.uint(b'I');
-		let image = if number != 0 {
-			self.kitty_images.by_number(number)
-		} else {
-			self.kitty_images.get(command.uint(b'i'))
-		};
-		let image = image.ok_or_else(|| Error::new("ENOENT", "image not found"))?;
-		let (id, bitmap) = (image.id, image.bitmap.clone());
-		if number != 0 {
-			command.set(b'i', i64::from(id));
-		}
+		let id = self.kitty_target(command)?;
+		let bitmap = self.kitty_images.get(id).unwrap().bitmap().clone();
 		self.kitty_images.touch(id);
 		self.place_kitty_image(command, id, bitmap)
 	}
@@ -186,6 +180,10 @@ impl Term {
 
 	fn kitty_delete(&mut self, command: &Command) {
 		let which = command.letter(b'd', b'a');
+		if which.eq_ignore_ascii_case(&b'f') {
+			self.kitty_delete_frames(command);
+			return;
+		}
 		let free = which.is_ascii_uppercase();
 		let cell = self.cell_size();
 		// Cells are 1-based in the protocol.
@@ -279,7 +277,7 @@ impl Term {
 	}
 
 	/// Kitty placements on both screens.
-	fn kitty_placements(&self) -> impl Iterator<Item = KittyId> {
+	pub(super) fn kitty_placements(&self) -> impl Iterator<Item = KittyId> {
 		self
 			.images
 			.iter()
@@ -288,13 +286,13 @@ impl Term {
 	}
 
 	/// Images with a placement on either screen or a virtual placement.
-	fn kitty_images_in_use(&self) -> Vec<u32> {
+	pub(super) fn kitty_images_in_use(&self) -> Vec<u32> {
 		let placed = self.kitty_placements().map(|id| id.image);
 		placed.chain(self.kitty_images.virtual_ids()).collect()
 	}
 
 	/// Removes kitty placements on both screens, and their children.
-	fn remove_kitty_placements(&mut self, remove: impl Fn(KittyId) -> bool) {
+	pub(super) fn remove_kitty_placements(&mut self, remove: impl Fn(KittyId) -> bool) {
 		let keep = |placement: &Placement| !placement.kitty.is_some_and(&remove);
 		self.images.retain(keep);
 		self.primary_images.retain(keep);

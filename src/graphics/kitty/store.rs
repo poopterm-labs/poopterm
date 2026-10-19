@@ -1,20 +1,30 @@
 //! Transmitted kitty images by id and number, with a memory quota enforced
 //! by evicting the least recently used images.
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
+use super::animation::Animation;
 use crate::graphics::{Bitmap, KittyId};
 
 /// Decoded bytes kept per terminal before old images are evicted.
 pub(crate) const QUOTA: usize = 320 << 20;
+/// Most images kept per terminal, so floods of tiny images stay cheap.
+pub(crate) const MAX_IMAGES: usize = 4096;
 
 #[derive(Clone)]
 pub(crate) struct Image {
 	pub id: u32,
 	/// The client's image number (`I`), or 0.
 	pub number: u32,
-	pub bitmap: Arc<Bitmap>,
+	pub animation: Animation,
 	/// When the image was last transmitted or placed, for eviction.
 	used: u64,
+}
+
+impl Image {
+	/// The frame shown.
+	pub(crate) fn bitmap(&self) -> &Arc<Bitmap> {
+		self.animation.current_bitmap()
+	}
 }
 
 #[derive(Clone)]
@@ -114,7 +124,7 @@ impl Store {
 			.iter()
 			.rev()
 			.find(|(key, _)| key.image == id)?;
-		Some((&self.get(id)?.bitmap, cells))
+		Some((self.get(id)?.bitmap(), cells))
 	}
 
 	/// Removes an image and its virtual placements.
@@ -122,8 +132,42 @@ impl Store {
 		self.virtuals.retain(|(key, _)| key.image != id);
 		if let Some(index) = self.images.iter().position(|image| image.id == id) {
 			let image = self.images.remove(index);
-			self.bytes -= size(&image.bitmap);
+			self.bytes -= image.animation.bytes();
 		}
+	}
+
+	/// Changes an image's frames, keeping the byte count, and marks it used.
+	pub(crate) fn animation_mut<R>(
+		&mut self,
+		id: u32,
+		change: impl FnOnce(&mut Animation) -> R,
+	) -> Option<R> {
+		self.clock += 1;
+		let image = self.images.iter_mut().find(|image| image.id == id)?;
+		image.used = self.clock;
+		let before = image.animation.bytes();
+		let result = change(&mut image.animation);
+		self.bytes = self.bytes - before + image.animation.bytes();
+		Some(result)
+	}
+
+	/// Moves running animations to `now`; returns the images whose shown
+	/// frame changed.
+	pub(crate) fn advance(&mut self, now: Instant) -> Vec<u32> {
+		self
+			.images
+			.iter_mut()
+			.filter_map(|image| image.animation.advance(now).then_some(image.id))
+			.collect()
+	}
+
+	/// When the next frame of an animation `shown` says is visible is due.
+	pub(crate) fn deadline(&self, shown: impl Fn(u32) -> bool) -> Option<Instant> {
+		self
+			.images
+			.iter()
+			.filter_map(|image| image.animation.deadline().filter(|_| shown(image.id)))
+			.min()
 	}
 
 	/// Stores an image under `id`, or under a new id when `id` is 0, then
@@ -139,20 +183,33 @@ impl Store {
 	) -> (u32, Vec<u32>) {
 		let id = if id == 0 { self.free_id() } else { id };
 		self.remove(id);
-		self.bytes += size(&bitmap);
+		let animation = Animation::new(bitmap);
+		self.bytes += animation.bytes();
 		self.clock += 1;
 		self.images.push(Image {
 			id,
 			number,
-			bitmap,
+			animation,
 			used: self.clock,
 		});
+		(id, self.evict(id, shown))
+	}
+
+	/// Whether the images fit the quota.
+	pub(crate) fn fits(&self) -> bool {
+		self.bytes <= self.quota
+	}
+
+	/// Evicts the least recently used images other than `keep` until the
+	/// store fits its quota and image limit, preferring images `shown` says
+	/// are not on screen. Returns the evicted ids.
+	pub(crate) fn evict(&mut self, keep: u32, shown: impl Fn(u32) -> bool) -> Vec<u32> {
 		let mut evicted = Vec::new();
-		while self.bytes > self.quota {
+		while !self.fits() || self.images.len() > MAX_IMAGES {
 			let victim = self
 				.images
 				.iter()
-				.filter(|image| image.id != id)
+				.filter(|image| image.id != keep)
 				.min_by_key(|image| (shown(image.id), image.used))
 				.map(|image| image.id);
 			let Some(victim) = victim else {
@@ -161,7 +218,7 @@ impl Store {
 			self.remove(victim);
 			evicted.push(victim);
 		}
-		(id, evicted)
+		evicted
 	}
 
 	fn free_id(&mut self) -> u32 {
@@ -179,13 +236,10 @@ impl Store {
 	}
 }
 
-fn size(bitmap: &Bitmap) -> usize {
-	bitmap.pixels.len() * 4
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::graphics::kitty::animation::FRAME_OVERHEAD;
 
 	fn bitmap(pixels: usize) -> Arc<Bitmap> {
 		Arc::new(Bitmap::new(pixels, 1, vec![0xff000000; pixels]))
@@ -198,21 +252,21 @@ mod tests {
 		let (first, _) = store.insert(0, 3, bitmap(2), |_| false);
 		let (second, _) = store.insert(0, 3, bitmap(3), |_| false);
 		assert!(first != 0 && first != 7 && second != first && second != 7);
-		assert_eq!(store.get(7).unwrap().bitmap.width, 1);
+		assert_eq!(store.get(7).unwrap().bitmap().width, 1);
 		assert_eq!(store.by_number(3).unwrap().id, second);
 		assert!(store.by_number(4).is_none());
 		// Same id replaces the image.
 		store.insert(7, 0, bitmap(5), |_| false);
-		assert_eq!(store.get(7).unwrap().bitmap.width, 5);
+		assert_eq!(store.get(7).unwrap().bitmap().width, 5);
 		assert_eq!(store.len(), 3);
 		store.remove(7);
 		assert!(store.get(7).is_none());
-		assert_eq!(store.bytes(), (2 + 3) * 4);
+		assert_eq!(store.bytes(), (2 + 3) * 4 + 2 * FRAME_OVERHEAD);
 	}
 
 	#[test]
 	fn eviction_keeps_the_quota_and_prefers_unplaced_old_images() {
-		let mut store = Store::with_quota(10 * 4);
+		let mut store = Store::with_quota(10 * 4 + 3 * FRAME_OVERHEAD);
 		store.insert(1, 0, bitmap(4), |_| false);
 		store.insert(2, 0, bitmap(4), |_| false);
 		store.insert(3, 0, bitmap(1), |_| false);
@@ -220,7 +274,7 @@ mod tests {
 		// Image 2 is the oldest not shown, image 3 is shown.
 		let (_, evicted) = store.insert(4, 0, bitmap(4), |id| id == 3);
 		assert_eq!(evicted, [2]);
-		assert!(store.bytes() <= 10 * 4);
+		assert!(store.fits());
 		// When everything is shown, the least recently used goes anyway.
 		let (_, evicted) = store.insert(5, 0, bitmap(6), |_| true);
 		assert_eq!(evicted, [3, 1]);
@@ -234,5 +288,15 @@ mod tests {
 		let (_, evicted) = store.insert(2, 0, bitmap(2), |_| false);
 		assert_eq!(evicted, [1]);
 		assert!(store.get(2).is_some());
+	}
+
+	#[test]
+	fn the_image_count_is_capped_too() {
+		let mut store = Store::default();
+		for id in 1..=MAX_IMAGES as u32 {
+			store.insert(id, 0, bitmap(1), |_| false);
+		}
+		let (_, evicted) = store.insert(0, 0, bitmap(1), |_| false);
+		assert_eq!((evicted, store.len()), (vec![1], MAX_IMAGES));
 	}
 }

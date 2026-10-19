@@ -138,6 +138,12 @@ fn images_match_a_full_redraw_pixel_for_pixel() {
 		"\x1b[5;5H\x1b_Ga=p,i=1,p=1,C=1,q=2\x1b\\".to_owned(),
 		"\x1b[6;1Hbottom".to_owned(),
 		"\x1b_Ga=d,d=i,i=3\x1b\\".to_owned(),
+		// An animation frame of image 1, then showing it.
+		format!(
+			"\x1b_Ga=f,i=1,f=24,x=2,y=3,s=2,v=2,q=2;{}\x1b\\",
+			String::from_utf8(crate::bench::images::base64(&[200; 12])).unwrap()
+		),
+		"\x1b_Ga=a,i=1,c=2,q=2\x1b\\".to_owned(),
 		"\r\n\r\nscrolled".to_owned(),
 		"\x1b[2J".to_owned(),
 		// Unicode placeholders: text showing a virtual placement, then the

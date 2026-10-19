@@ -9,19 +9,19 @@ use crate::{
 };
 
 /// A terminal with 10×20 pixel cells.
-fn terminal(cols: usize, rows: usize) -> Term {
+pub(super) fn terminal(cols: usize, rows: usize) -> Term {
 	let mut term = Term::new(cols, rows, Theme::from_kind(ThemeKind::Poop), "/tmp".into());
 	term.cell_width = 10;
 	term.cell_height = 20;
 	term
 }
 
-fn feed(term: &mut Term, bytes: &[u8]) {
+pub(super) fn feed(term: &mut Term, bytes: &[u8]) {
 	Parser::new().advance(term, bytes);
 }
 
 /// One graphics command with `payload` base64-encoded.
-fn command(control: &str, payload: &[u8]) -> Vec<u8> {
+pub(super) fn command(control: &str, payload: &[u8]) -> Vec<u8> {
 	let mut bytes = format!("\x1b_G{control};").into_bytes();
 	bytes.extend(base64(payload));
 	bytes.extend_from_slice(b"\x1b\\");
@@ -34,12 +34,12 @@ fn rgb(width: usize, height: usize) -> Vec<u8> {
 }
 
 /// Transmits a `width`×`height` RGB image with extra control keys.
-fn send(term: &mut Term, control: &str, width: usize, height: usize) {
+pub(super) fn send(term: &mut Term, control: &str, width: usize, height: usize) {
 	let control = format!("f=24,s={width},v={height},{control}");
 	feed(term, &command(&control, &rgb(width, height)));
 }
 
-fn replies(term: &mut Term) -> Vec<String> {
+pub(super) fn replies(term: &mut Term) -> Vec<String> {
 	term
 		.responses
 		.drain(..)
