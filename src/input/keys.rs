@@ -15,6 +15,8 @@ pub(crate) struct Modifiers {
 pub(crate) struct KeyModes {
 	/// DECCKM (`CSI ? 1 h`): arrows send `ESC O x` instead of `ESC [ x`.
 	pub application_cursor: bool,
+	/// DECKPAM (`ESC =`): the numeric keypad sends `SS3` sequences.
+	pub application_keypad: bool,
 	/// Kitty keyboard protocol disambiguation (`CSI > 1 u`).
 	pub kitty: bool,
 }
@@ -199,7 +201,7 @@ mod tests {
 	fn application_cursor_mode_applies_to_home_and_end() {
 		let modes = KeyModes {
 			application_cursor: true,
-			kitty: false,
+			..KeyModes::default()
 		};
 		let none = Modifiers::default();
 		assert_eq!(
@@ -224,8 +226,8 @@ mod tests {
 	#[test]
 	fn kitty_mode_disambiguates_modified_text_keys() {
 		let kitty = KeyModes {
-			application_cursor: false,
 			kitty: true,
+			..KeyModes::default()
 		};
 		let shift = Modifiers {
 			shift: true,

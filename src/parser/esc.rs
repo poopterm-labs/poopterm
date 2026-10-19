@@ -24,7 +24,7 @@ impl Term {
 		if !intermediates.is_empty() {
 			return;
 		}
-		if !matches!(byte, b'7' | b'8') {
+		if !matches!(byte, b'7' | b'8' | b'=' | b'>') {
 			self.wrap_pending = false;
 		}
 		match byte {
@@ -58,6 +58,9 @@ impl Term {
 				self.cx = 0;
 				self.linefeed();
 			}
+			// DECKPAM and DECKPNM.
+			b'=' => self.application_keypad = true,
+			b'>' => self.application_keypad = false,
 			b'7' => self.save_cursor(),
 			b'8' => self.restore_cursor(),
 			_ => {}

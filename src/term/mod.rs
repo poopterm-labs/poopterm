@@ -30,6 +30,8 @@ mod kitty_animation_tests;
 #[cfg(test)]
 mod kitty_tests;
 #[cfg(test)]
+mod mode_tests;
+#[cfg(test)]
 mod movement_tests;
 pub(crate) mod multicell;
 #[cfg(test)]
@@ -188,6 +190,8 @@ pub(crate) struct Term {
 	pub(crate) mouse_tracking: u16,
 	pub(crate) mouse_sgr: bool,
 	pub(crate) application_cursor: bool,
+	/// DECKPAM / DECNKM: the numeric keypad sends application sequences.
+	pub(crate) application_keypad: bool,
 	pub(crate) origin_mode: bool,
 	pub(crate) auto_wrap: bool,
 	pub(crate) insert_mode: bool,
@@ -374,6 +378,7 @@ impl Term {
 			mouse_tracking: 0,
 			mouse_sgr: false,
 			application_cursor: false,
+			application_keypad: false,
 			origin_mode: false,
 			auto_wrap: true,
 			insert_mode: false,

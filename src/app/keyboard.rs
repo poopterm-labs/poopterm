@@ -1,14 +1,18 @@
 //! Keyboard events: application shortcuts, overlays, then PTY input.
 use super::draw::PALETTE_COMMANDS;
 use super::*;
-use crate::input::keys::{KeyModes, encode_key};
-use winit::event::KeyEvent;
+use crate::input::{
+	keypad::encode_keypad,
+	keys::{KeyModes, encode_key},
+};
+use winit::{event::KeyEvent, keyboard::KeyLocation};
 
 impl App {
 	pub(super) fn key_modes(&self) -> KeyModes {
 		let term = self.active_term();
 		KeyModes {
 			application_cursor: term.application_cursor,
+			application_keypad: term.application_keypad,
 			kitty: term.kitty_keyboard,
 		}
 	}
@@ -236,7 +240,11 @@ impl App {
 			self.close_active_tab(event_loop);
 			return;
 		}
-		if let Some(bytes) = encode_key(&event.logical_key, self.mods, self.key_modes()) {
+		let modes = self.key_modes();
+		let keypad = (event.location == KeyLocation::Numpad)
+			.then(|| encode_keypad(&event.logical_key, self.mods, modes))
+			.flatten();
+		if let Some(bytes) = keypad.or_else(|| encode_key(&event.logical_key, self.mods, modes)) {
 			self.active_session().write(&bytes);
 			// Typing means finished work reported in this session was seen,
 			// and shows the live screen the input goes to.
