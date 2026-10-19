@@ -45,6 +45,26 @@ impl Term {
 					.push(format!("\x1bP>|poopterm {}\x1b\\", env!("CARGO_PKG_VERSION")).into_bytes()),
 				// DECSTR
 				(b"!", 'p') => self.soft_reset(),
+				// XTMODKEYS: a resource (with an optional mask subparameter)
+				// and its value; no parameters reset them all.
+				(b">", 'm') => match params.get(0) {
+					Some(resource) if !params.is_default() => {
+						let value = params.get(1).and_then(|p| p.first().copied());
+						let options = &mut self.key_options;
+						options.set_modify(resource[0], resource.get(1).copied(), value);
+					}
+					_ => self.key_options.reset_modify(),
+				},
+				(b">", 'n') => {
+					let index = params.get(0).filter(|_| !params.is_default());
+					self.key_options.disable(index.map(|p| p[0]));
+				}
+				// XTFMTKEYS
+				(b">", 'f') => {
+					let [index, value] = [0, 1].map(|i| params.get(i).map(|p| p[0]));
+					let index = index.filter(|_| !params.is_default());
+					self.key_options.set_format(index, value);
+				}
 				// XTPUSHCOLORS, XTPOPCOLORS: each parameter is a slot; 0 or
 				// none pushes or pops.
 				(b"#", 'P' | 'Q') => {
@@ -121,6 +141,16 @@ impl Term {
 			} else {
 				self.restore_private_modes(modes);
 			}
+			return;
+		}
+		// XTQMODKEYS and XTQFMTKEYS.
+		if private && matches!(action, 'm' | 'g') {
+			let options = &self.key_options;
+			let reply = params.get(0).and_then(|p| match action {
+				'm' => options.modify_reply(p[0]),
+				_ => options.format_reply(p[0]),
+			});
+			self.responses.extend(reply.map(String::into_bytes));
 			return;
 		}
 		if private && action == 'u' {

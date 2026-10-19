@@ -14,6 +14,7 @@ impl App {
 			application_cursor: term.application_cursor,
 			application_keypad: term.application_keypad,
 			newline: term.newline_mode,
+			options: term.key_options,
 			kitty: term.kitty_keyboard,
 		}
 	}
