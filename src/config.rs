@@ -132,6 +132,10 @@ pub fn updated(text: &str, values: &[(&str, String)]) -> String {
 		})
 		.map(str::to_owned)
 		.collect();
+	// Releases before 0.4 prepended this header on every save; keep one.
+	const OLD_HEADER: &str = "# Poopterm configuration";
+	let mut seen_header = false;
+	lines.retain(|line| line != OLD_HEADER || !std::mem::replace(&mut seen_header, true));
 	for (key, value) in values {
 		lines.push(format!("{key} = {value}"));
 	}
@@ -243,6 +247,19 @@ mod tests {
 		assert!(result.contains("custom = \"a#b\""));
 		assert!(result.starts_with("# User config\n"));
 		assert_eq!(updated(&result, &[("font_size", "24".into())]), result);
+	}
+	#[test]
+	fn headers_stacked_by_old_releases_collapse_to_one() {
+		// Releases before 0.4 prepended this header on every save.
+		let text = "# Poopterm configuration\n# Poopterm configuration\n# Poopterm configuration\ntheme = \"bark\"\n# mine\n# mine\n";
+		let result = updated(text, &[("font_size", "16".into())]);
+		assert_eq!(result.matches("# Poopterm configuration").count(), 1);
+		assert!(result.starts_with("# Poopterm configuration\ntheme"));
+		assert_eq!(
+			result.matches("# mine").count(),
+			2,
+			"other comments are the user's"
+		);
 	}
 	#[test]
 	fn invalid_preferences_are_bounded() {
