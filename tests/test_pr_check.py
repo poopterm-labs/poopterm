@@ -260,8 +260,8 @@ class Main(unittest.TestCase):
         self.git(root, 'commit', '-q', '-m', 'feat: start')
         return directory, root
 
-    def run_check(self, root, title):
-        base = subprocess.run(['git', 'rev-parse', 'main'], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    def run_check(self, root, title, base='main'):
+        base = subprocess.run(['git', 'rev-parse', base], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as errors:
             code = pr_check.main(['--base', base, '--title', title], cwd=root)
         self.errors = errors.getvalue()
@@ -315,6 +315,42 @@ class Main(unittest.TestCase):
             self.git(root, 'commit', '-qam', 'feat: untested')
             self.git(root, 'switch', '-q', 'work')
             self.assertEqual(self.run_check(root, 'docs: add readme'), 0)
+
+    def github_merge(self, root):
+        """Like a pull_request run: a docs branch, an untested change merged
+        to main after it, and HEAD at GitHub's merge of the branch into main.
+        Returns the stale base, main before that change."""
+        stale = subprocess.run(['git', 'rev-parse', 'main'], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+        self.git(root, 'switch', '-q', '-c', 'work')
+        (root / 'README.md').write_text('words\n')
+        self.git(root, 'add', '.')
+        self.git(root, 'commit', '-qm', 'docs: add readme')
+        self.git(root, 'switch', '-q', 'main')
+        (root / 'src/a.rs').write_text('fn a() {}\nfn untested() {}\n')
+        self.git(root, 'commit', '-qam', 'feat: untested')
+        self.git(root, 'switch', '-q', '--detach')
+        self.git(root, 'merge', '-q', '--no-ff', '-m', 'Merge work into main', 'work')
+        return stale
+
+    def test_on_a_merge_commit_the_first_parent_counts_only_the_pull_request(self):
+        directory, root = self.repository()
+        with directory:
+            self.github_merge(root)
+            self.assertEqual(self.run_check(root, 'docs: add readme', base='HEAD^1'), 0)
+
+    def test_a_stale_base_counts_what_main_gained_since(self):
+        # Why the workflow does not pass pull_request.base.sha: it can predate
+        # merges to main, whose lines would then count for the pull request.
+        directory, root = self.repository()
+        with directory:
+            stale = self.github_merge(root)
+            self.assertEqual(self.run_check(root, 'docs: add readme', base=stale), 1)
+            self.assertIn('0 test lines for 1 lines of code', self.errors)
+
+    def test_the_workflow_compares_with_the_merge_commits_first_parent(self):
+        workflow = (Path(__file__).parents[1] / '.github/workflows/pr.yml').read_text()
+        self.assertIn('--base HEAD^1', workflow)
+        self.assertNotIn('${{ github.event.pull_request.base.sha }}', workflow)
 
 
 if __name__ == '__main__':
