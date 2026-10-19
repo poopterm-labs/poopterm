@@ -48,10 +48,12 @@ latency cost: a full redraw takes 25.6 ms at 1000×600, and much longer at
 HiDPI sizes. It also takes memory bandwidth from the parser during floods,
 which is why floods are capped at 30 fps. Parse throughput stays CPU work.
 
-- **Strict rule: no `wgpu`, WebGPU or other GPU abstraction crates.**
-  Write our own renderers on raw bindings: Vulkan on Linux and FreeBSD,
-  Metal on macOS. Use thin FFI bindings (like `ash`, `objc2-metal`), or
-  write our own where that is practical.
+Tracked in [#30](https://github.com/poopterm-labs/poopterm/issues/30), with
+one issue per piece (#20–#29); claim one there.
+
+- **Strict rule: no `wgpu`, WebGPU, OpenGL or binding crates.** Write our
+  own renderers on our own thin FFI: Vulkan on Linux and FreeBSD (loaded
+  with `dlopen`), Metal on macOS (through the Objective-C runtime).
 - **Software rendering stays as the fallback**, used when the GPU path fails
   to start (VMs, X forwarding, broken or missing drivers). It is also the
   reference: GPU output must match it in the pixel-equivalence tests.

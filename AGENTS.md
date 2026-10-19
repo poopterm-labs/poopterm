@@ -33,6 +33,14 @@ cargo test --release -- --ignored --nocapture parser_throughput   # parser bench
   `rustup target add aarch64-apple-darwin x86_64-unknown-freebsd`, then
   `cargo clippy --target <triple> --all-targets -- -D warnings` for each.
 
+## Before you start
+
+Check [`TODO.md`](TODO.md) and the open
+[issues](https://github.com/poopterm-labs/poopterm/issues) first. Someone may
+already be working on the change, an issue may set out how it should be
+done, or a higher-priority item may come first. Comment on an issue to claim
+it, and link the issue from your pull request (`Closes #N`).
+
 ## Workflow: 3:1 test-driven development
 
 Every behavior change and bug fix follows red → green → refactor:
