@@ -162,6 +162,11 @@ impl Receiver {
 		match command {
 			Ok(command) => {
 				self.more = command.int(b'm') == 1;
+				// Continuation chunks carry only `m`, `q` and `a=f`; a delete
+				// command aborts the transmission in progress.
+				if command.letter(b'a', 0) == b'd' {
+					self.upload = None;
+				}
 				if self.upload.is_none() {
 					self.upload = Some(Upload {
 						command,
@@ -278,6 +283,17 @@ mod tests {
 		let next = apc(&mut receiver, b"Ga=t,i=2;AAAA", 5).unwrap();
 		assert_eq!(next.command.uint(b'i'), 2);
 		assert_eq!(next.data.unwrap(), [0, 0, 0]);
+	}
+
+	#[test]
+	fn a_delete_command_aborts_a_chunked_transmission() {
+		let mut receiver = Receiver::default();
+		assert!(apc(&mut receiver, b"Ga=t,i=1,m=1;AAAA", 5).is_none());
+		let delete = apc(&mut receiver, b"Ga=d,d=i,i=1", 5).unwrap();
+		assert_eq!(delete.command.letter(b'a', 0), b'd');
+		// The rest of the abandoned transmission is not joined to anything.
+		let next = apc(&mut receiver, b"Ga=t,i=2;AAAA", 5).unwrap();
+		assert_eq!(next.command.uint(b'i'), 2);
 	}
 
 	#[test]
