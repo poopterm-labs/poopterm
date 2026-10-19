@@ -1,5 +1,15 @@
 # Changelog
 
+## 26.10.29 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Add decarm, decbkm and the meta, numlock and delete modes (#19) (input).
+
+### Maintenance
+
+- Check todo and the issues before starting work (#31).
+
 ## 26.10.28 "Giga Fly" — 2026-10-19
 
 ### Added
