@@ -408,6 +408,25 @@ fn synchronized_output_is_committed_atomically_with_protocol_replies() {
 }
 
 #[test]
+fn each_synchronized_block_freezes_the_screen_it_began_with() {
+	let mut t = terminal(8, 3);
+	let shown = |t: &Term| {
+		let mut frame = Frame::default();
+		t.snapshot(&mut frame);
+		frame.row(0).iter().map(|cell| cell.ch).collect::<String>()
+	};
+	feed(&mut t, b"one\x1b[?2026h\rtwo\x1b[?2026l");
+	assert!(
+		t.spare_frame.is_some(),
+		"the frozen frame is kept for the next block"
+	);
+	feed(&mut t, b"\x1b[?2026h\rsix");
+	assert_eq!(shown(&t), "two     ");
+	feed(&mut t, b"\x1b[?2026l");
+	assert_eq!(shown(&t), "six     ");
+}
+
+#[test]
 fn synchronization_timeout_recovers_and_duplicate_begin_is_not_nested() {
 	let mut t = terminal(8, 3);
 	feed(&mut t, b"\x1b[?2026hA\x1b[?2026hB");

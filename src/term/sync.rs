@@ -9,7 +9,7 @@ impl Term {
 	/// does not grow with history.
 	pub(crate) fn begin_sync(&mut self) {
 		if self.synchronized.is_none() {
-			let mut frozen = Box::default();
+			let mut frozen = self.spare_frame.take().unwrap_or_default();
 			self.snapshot(&mut frozen);
 			self.synchronized = Some(frozen);
 			self.sync_deadline = Some(Instant::now() + Duration::from_millis(250));
@@ -18,7 +18,13 @@ impl Term {
 
 	pub(crate) fn finish_sync(&mut self) -> bool {
 		self.sync_deadline = None;
-		self.synchronized.take().is_some()
+		let Some(frozen) = self.synchronized.take() else {
+			return false;
+		};
+		// Programs open a block per redraw; reusing the buffers spares the
+		// allocator, which on musl maps and unmaps fresh pages for them.
+		self.spare_frame = Some(frozen);
+		true
 	}
 
 	pub(crate) fn finish_sync_if_expired(&mut self, now: Instant) -> bool {

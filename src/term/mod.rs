@@ -145,6 +145,8 @@ pub(crate) struct Term {
 	pub(crate) scale: f32,
 	/// What frames show during synchronized output.
 	pub(crate) synchronized: Option<Box<Frame>>,
+	/// The last block's frame, kept so the next one reuses its buffers.
+	pub(crate) spare_frame: Option<Box<Frame>>,
 	pub(crate) sync_deadline: Option<Instant>,
 	pub(crate) shell: crate::shell_integration::ShellIntegration,
 	pub(crate) history_base: usize,
@@ -328,6 +330,7 @@ impl Term {
 			cell_height: 20,
 			scale: 1.0,
 			synchronized: None,
+			spare_frame: None,
 			sync_deadline: None,
 			shell: Default::default(),
 			history_base: 0,
