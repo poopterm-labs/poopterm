@@ -1,5 +1,15 @@
 # Changelog
 
+## 26.10.10 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Add configurable tabs and appearance controls.
+
+### Fixed
+
+- Move draw tests after implementation (ui).
+
 ## 26.10.9 "Giga Fly" — 2026-10-19
 
 ### Maintenance
