@@ -155,7 +155,7 @@ impl App {
 			return;
 		}
 		self.settings_editor = SettingsEditor::load();
-		let attributes = Window::default_attributes()
+		let attributes = crate::platform::identify(Window::default_attributes())
 			.with_title("Poopterm Settings")
 			.with_inner_size(LogicalSize::new(760.0, 640.0))
 			.with_min_inner_size(LogicalSize::new(680.0, 600.0));

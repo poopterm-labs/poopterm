@@ -1,6 +1,36 @@
 //! Platform-specific window tweaks.
 #[cfg(target_os = "macos")]
 use winit::window::Window;
+use winit::window::WindowAttributes;
+
+/// Tags windows with Wayland app_id and X11 WM_CLASS `poopterm`. Desktops
+/// match it to `poopterm.desktop` for the window's icon, name, and dock
+/// pinning.
+#[cfg(any(
+	target_os = "linux",
+	target_os = "dragonfly",
+	target_os = "freebsd",
+	target_os = "netbsd",
+	target_os = "openbsd"
+))]
+pub(crate) fn identify(attributes: WindowAttributes) -> WindowAttributes {
+	use winit::platform::{wayland::WindowAttributesExtWayland, x11::WindowAttributesExtX11};
+	const APP_ID: &str = "poopterm";
+	let attributes = WindowAttributesExtWayland::with_name(attributes, APP_ID, APP_ID);
+	WindowAttributesExtX11::with_name(attributes, APP_ID, APP_ID)
+}
+
+/// Other platforms identify windows by their app bundle.
+#[cfg(not(any(
+	target_os = "linux",
+	target_os = "dragonfly",
+	target_os = "freebsd",
+	target_os = "netbsd",
+	target_os = "openbsd"
+)))]
+pub(crate) fn identify(attributes: WindowAttributes) -> WindowAttributes {
+	attributes
+}
 
 #[cfg(target_os = "macos")]
 pub(crate) fn set_window_opacity(window: &Window, opacity: usize) {

@@ -1,6 +1,8 @@
 //! Small, flat configuration format. Unknown keys and comments survive saves.
 use std::{
-	env, fs, io,
+	env,
+	ffi::OsString,
+	fs, io,
 	path::{Path, PathBuf},
 };
 
@@ -124,31 +126,47 @@ pub fn config_path() -> PathBuf {
 	if let Some(path) = env::var_os("POOPTERM_CONFIG") {
 		return PathBuf::from(path);
 	}
-	if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
-		return PathBuf::from(xdg).join("poopterm/config.toml");
-	}
-	let home = env::var_os("HOME")
-		.map(PathBuf::from)
-		.unwrap_or_else(|| PathBuf::from("."));
-	if cfg!(target_os = "macos") {
-		home.join("Library/Application Support/poopterm/config.toml")
-	} else {
-		home.join(".config/poopterm/config.toml")
-	}
+	user_dir("XDG_CONFIG_HOME", ".config")
+		.unwrap_or_else(|| PathBuf::from("./poopterm"))
+		.join("config.toml")
 }
 
 /// Per-user data directory for generated files: `$XDG_DATA_HOME/poopterm`
 /// (default `~/.local/share/poopterm`), or `~/Library/Application Support/poopterm` on macOS.
 pub fn data_dir() -> Option<PathBuf> {
+	user_dir("XDG_DATA_HOME", ".local/share")
+}
+
+/// Per-user state that is not worth backing up, such as open tabs:
+/// `$XDG_STATE_HOME/poopterm` (default `~/.local/state/poopterm`), or
+/// `~/Library/Application Support/poopterm` on macOS.
+pub fn state_dir() -> Option<PathBuf> {
+	user_dir("XDG_STATE_HOME", ".local/state")
+}
+
+/// `poopterm` inside an XDG base directory. On macOS, an unset variable
+/// means Application Support instead of `default`.
+fn user_dir(variable: &str, default: &str) -> Option<PathBuf> {
 	let home = env::var_os("HOME").map(PathBuf::from);
-	let base = if cfg!(target_os = "macos") {
-		home?.join("Library/Application Support")
+	let default = if cfg!(target_os = "macos") {
+		"Library/Application Support"
 	} else {
-		env::var_os("XDG_DATA_HOME")
-			.map(PathBuf::from)
-			.or_else(|| home.map(|home| home.join(".local/share")))?
+		default
 	};
-	Some(base.join("poopterm"))
+	Some(xdg_base(env::var_os(variable), home.as_deref(), default)?.join("poopterm"))
+}
+
+/// An XDG base directory: `value` if absolute (the spec says to ignore empty
+/// and relative values), else `default` under `home`.
+pub(crate) fn xdg_base(
+	value: Option<OsString>,
+	home: Option<&Path>,
+	default: &str,
+) -> Option<PathBuf> {
+	value
+		.map(PathBuf::from)
+		.filter(|path| path.is_absolute())
+		.or_else(|| Some(home?.join(default)))
 }
 
 pub fn read_config_value(key: &str) -> Option<String> {
@@ -198,5 +216,16 @@ mod tests {
 		assert_eq!(p.opacity, 100);
 		assert_eq!(Preferences::parse("font_size = -1").font_size, 18);
 		assert_eq!(Preferences::parse("opacity = 25").opacity, 60);
+	}
+	#[test]
+	fn xdg_variables_must_be_absolute_paths() {
+		// The XDG Base Directory spec says to ignore empty and relative values.
+		let home = Path::new("/home/me");
+		let base = |value: Option<&str>| xdg_base(value.map(Into::into), Some(home), ".local/state");
+		assert_eq!(base(Some("/srv/state")), Some("/srv/state".into()));
+		assert_eq!(base(Some("")), Some("/home/me/.local/state".into()));
+		assert_eq!(base(Some("state")), Some("/home/me/.local/state".into()));
+		assert_eq!(base(None), Some("/home/me/.local/state".into()));
+		assert_eq!(xdg_base(None, None, ".local/state"), None);
 	}
 }

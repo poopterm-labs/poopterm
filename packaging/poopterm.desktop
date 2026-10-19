@@ -1,10 +1,19 @@
 [Desktop Entry]
 Type=Application
-Name=poopterm
+Version=1.5
+Name=Poopterm
 GenericName=Terminal Emulator
 Comment=A tiny, poop-colored terminal
+TryExec=poopterm
 Exec=poopterm
 Icon=poopterm
 Terminal=false
+StartupNotify=true
+StartupWMClass=poopterm
 Categories=System;TerminalEmulator;
-Keywords=terminal;shell;console;poop;
+Keywords=terminal;shell;console;prompt;command;commandline;cmd;poop;
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=poopterm

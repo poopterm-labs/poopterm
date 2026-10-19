@@ -270,25 +270,26 @@ tab clears its indicator.
 
 ## Install on Linux or FreeBSD
 
-Install system-wide (requires administrator access):
+Install for your user (no root needed). This builds with cargo and follows
+the XDG layout: the binary goes to `~/.local/bin`, the desktop entry and icons
+to `$XDG_DATA_HOME` (default `~/.local/share`), so GNOME, KDE, and other
+desktops list Poopterm in their app menus:
 
 ```sh
-sudo make install
+scripts/install.sh
+scripts/install.sh --uninstall
 ```
 
-Install for your user on Linux:
+Install system-wide (`/usr/local`, including the terminfo entry):
 
 ```sh
-PREFIX="$HOME/.local" make install
+make && sudo make install
+sudo make uninstall
 ```
 
-For a user install, make sure `~/.local/bin` is in your `PATH`. To uninstall,
-run `sudo make uninstall` for a system install, or use the same `PREFIX` as the
-user install:
-
-```sh
-PREFIX="$HOME/.local" make uninstall
-```
+`PREFIX` and `DESTDIR` work with both, for packaging. Poopterm keeps its
+config in `$XDG_CONFIG_HOME/poopterm`, open tabs in `$XDG_STATE_HOME/poopterm`,
+and generated files in `$XDG_DATA_HOME/poopterm`.
 
 ## Login shell
 

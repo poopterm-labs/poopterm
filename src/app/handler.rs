@@ -18,7 +18,7 @@ impl ApplicationHandler<UserEvent> for App {
 			return;
 		}
 
-		let attrs = Window::default_attributes()
+		let attrs = crate::platform::identify(Window::default_attributes())
 			.with_title("💩 poopterm")
 			.with_inner_size(LogicalSize::new(900.0, 560.0))
 			.with_min_inner_size(LogicalSize::new(480.0, 240.0));

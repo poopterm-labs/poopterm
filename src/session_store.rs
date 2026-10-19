@@ -1,11 +1,31 @@
-//! Saved tab working directories (`sessions.txt` next to the config file).
-use std::{env, fs, path::PathBuf};
+//! Saved tab working directories (`sessions.txt` in the state directory).
+use std::{
+	env, fs,
+	path::{Path, PathBuf},
+};
 
-use crate::config::{Preferences, config_path};
+use crate::config::{Preferences, config_path, state_dir};
+
+/// Where tabs are saved; falls back beside the config file without `HOME`.
+fn session_path() -> PathBuf {
+	state_dir().map_or_else(legacy_session_path, |dir| dir.join("sessions.txt"))
+}
+
+/// Where versions before the XDG state directory saved tabs.
+fn legacy_session_path() -> PathBuf {
+	config_path().with_file_name("sessions.txt")
+}
 
 // Session state is separate from user settings; hex encoding preserves unusual paths.
 pub(crate) fn read_session_dirs() -> Vec<PathBuf> {
-	fs::read_to_string(config_path().with_file_name("sessions.txt"))
+	read_session_dirs_from(&[&session_path(), &legacy_session_path()])
+}
+
+/// Reads the first of `paths` that exists.
+fn read_session_dirs_from(paths: &[&Path]) -> Vec<PathBuf> {
+	paths
+		.iter()
+		.find_map(|path| fs::read_to_string(path).ok())
 		.unwrap_or_default()
 		.lines()
 		.filter_map(decode_session_path)
@@ -31,7 +51,7 @@ pub(crate) fn decode_session_path(line: &str) -> Option<PathBuf> {
 }
 
 pub(crate) fn save_session_dirs(dirs: &[PathBuf]) -> std::io::Result<()> {
-	let path = config_path().with_file_name("sessions.txt");
+	let path = session_path();
 	if let Some(parent) = path.parent() {
 		fs::create_dir_all(parent)?;
 	}
@@ -89,5 +109,23 @@ mod tests {
 			.collect::<String>();
 		assert_eq!(decode_session_path(&encoded), Some(path.into()));
 		assert!(decode_session_path("xyz").is_none());
+	}
+
+	#[test]
+	fn sessions_saved_beside_the_config_are_still_restored() {
+		let dir = env::temp_dir().join(format!("poopterm-sessions-{}", std::process::id()));
+		fs::create_dir_all(&dir).unwrap();
+		let (state, legacy) = (dir.join("state.txt"), dir.join("legacy.txt"));
+		fs::write(&legacy, "2f746d70").unwrap();
+		assert_eq!(
+			read_session_dirs_from(&[&state, &legacy]),
+			[PathBuf::from("/tmp")]
+		);
+		fs::write(&state, "2f").unwrap();
+		assert_eq!(
+			read_session_dirs_from(&[&state, &legacy]),
+			[PathBuf::from("/")]
+		);
+		fs::remove_dir_all(dir).unwrap();
 	}
 }

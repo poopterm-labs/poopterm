@@ -1,9 +1,12 @@
 //! Terminal font loading with bundled and system symbol-font fallbacks.
-use std::{env, fs, path::PathBuf};
+use std::{env, ffi::OsString, fs, path::PathBuf};
 
 use fontdue::{Font, FontSettings};
 
-use crate::{config::read_config_value, session_store::default_cwd};
+use crate::{
+	config::{read_config_value, xdg_base},
+	session_store::default_cwd,
+};
 
 pub(crate) fn load_fonts() -> (Font, Vec<Font>) {
 	let bundled = Font::from_bytes(
@@ -84,19 +87,11 @@ pub(crate) fn installed_symbol_font_paths() -> Vec<PathBuf> {
 		}
 	}
 
-	let mut roots = vec![
-		PathBuf::from("/usr/share/fonts"),
-		PathBuf::from("/usr/local/share/fonts"),
-		PathBuf::from("/Library/Fonts"),
-		PathBuf::from("/System/Library/Fonts"),
-	];
-	if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-		roots.extend([
-			home.join(".local/share/fonts"),
-			home.join(".fonts"),
-			home.join("Library/Fonts"),
-		]);
-	}
+	let roots = font_roots(
+		env::var_os("HOME"),
+		env::var_os("XDG_DATA_HOME"),
+		env::var_os("XDG_DATA_DIRS"),
+	);
 	let mut out = Vec::new();
 	let mut budget = 2048;
 	for root in roots {
@@ -108,4 +103,67 @@ pub(crate) fn installed_symbol_font_paths() -> Vec<PathBuf> {
 	out.sort();
 	out.dedup();
 	out
+}
+
+/// Font directories: `fonts` in each XDG data directory, then the macOS and
+/// legacy (`~/.fonts`) locations.
+fn font_roots(
+	home: Option<OsString>,
+	data_home: Option<OsString>,
+	data_dirs: Option<OsString>,
+) -> Vec<PathBuf> {
+	let home = home.map(PathBuf::from);
+	let data_dirs = data_dirs.filter(|dirs| !dirs.is_empty());
+	let mut roots: Vec<PathBuf> = env::split_paths(
+		data_dirs
+			.as_deref()
+			.unwrap_or("/usr/local/share:/usr/share".as_ref()),
+	)
+	.chain(xdg_base(data_home, home.as_deref(), ".local/share"))
+	.filter(|dir| dir.is_absolute())
+	.map(|dir| dir.join("fonts"))
+	.collect();
+	roots.extend(["/Library/Fonts", "/System/Library/Fonts"].map(PathBuf::from));
+	if let Some(home) = home {
+		roots.extend([home.join(".fonts"), home.join("Library/Fonts")]);
+	}
+	let mut seen = std::collections::HashSet::new();
+	roots.retain(|dir| seen.insert(dir.clone()));
+	roots
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn font_directories_follow_xdg_data_variables() {
+		let roots = font_roots(
+			Some("/h".into()),
+			Some("/data".into()),
+			Some("/a:relative::/usr/share".into()),
+		);
+		for dir in ["/a/fonts", "/usr/share/fonts", "/data/fonts", "/h/.fonts"] {
+			assert!(roots.contains(&PathBuf::from(dir)), "{dir} in {roots:?}");
+		}
+		assert!(!roots.iter().any(|dir| dir.is_relative()), "{roots:?}");
+		assert_eq!(
+			roots.len(),
+			roots
+				.iter()
+				.collect::<std::collections::BTreeSet<_>>()
+				.len()
+		);
+		let defaults = font_roots(Some("/h".into()), None, None);
+		for dir in [
+			"/usr/share/fonts",
+			"/usr/local/share/fonts",
+			"/h/.local/share/fonts",
+		] {
+			assert!(
+				defaults.contains(&PathBuf::from(dir)),
+				"{dir} in {defaults:?}"
+			);
+		}
+	}
 }
