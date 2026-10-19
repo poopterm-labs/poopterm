@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.14 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Fill the window with the grid and extend edge colors (render).
+
 ## 26.10.13 "Giga Fly" — 2026-10-19
 
 ### Added
