@@ -31,6 +31,24 @@ strip = true
 panic = "abort"
 overflow-checks = false
 
+# Release optimizations with every compile-time debugging aid: full debug
+# info, debug assertions (including the terminal lock's double-lock check),
+# overflow checks, and unwinding panics with backtraces. For chasing bugs at
+# full speed; the checks change timings, so benchmark with `profiling`.
+[profile.debugging]
+inherits = "release"
+debug = "full"
+strip = "none"
+debug-assertions = true
+overflow-checks = true
+panic = "unwind"
+
+# Release exactly, plus symbols, for perf and callgrind.
+[profile.profiling]
+inherits = "release"
+debug = "full"
+strip = "none"
+
 [dev-dependencies]
 # The reference that `vt` and the terminal are tested against.
 vte = "^0.15"

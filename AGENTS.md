@@ -15,6 +15,8 @@ cargo test                              # unit + emulation tests (fast, no windo
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release                   # binary: target/release/poopterm
+cargo build --profile debugging         # release speed with debug info, assertions, overflow checks, backtraces
+cargo build --profile profiling         # release plus symbols, for perf and callgrind
 cargo test --release -- --ignored --nocapture parser_throughput   # parser benchmark
 ```
 

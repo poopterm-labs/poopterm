@@ -44,12 +44,12 @@ xterm, but dropped by kitty, which used to abort the run.
 **Parser only**, without rendering: `cargo test --release -- --ignored
 --nocapture parser_throughput`. **PTY ceiling**: `scripts/bench-pty.py`.
 
-To profile, build with symbols and use `perf` (user-space events work
-without root):
+To profile, build the `profiling` profile (release plus symbols) and use
+`perf` (user-space events work without root):
 
 ```sh
-CARGO_PROFILE_RELEASE_DEBUG=true CARGO_PROFILE_RELEASE_STRIP=false cargo build --release
-perf record -e cycles:u -- ./target/release/poopterm --benchmark --only emoji
+cargo build --profile profiling
+perf record -e cycles:u -- ./target/profiling/poopterm --benchmark --only emoji
 perf report --sort sym
 ```
 
@@ -57,7 +57,7 @@ Where `perf` is unavailable, callgrind works on the same build (slower, but
 exact instruction counts):
 
 ```sh
-valgrind --tool=callgrind ./target/release/poopterm --benchmark --only kitty-png --mib 4 --no-render
+valgrind --tool=callgrind ./target/profiling/poopterm --benchmark --only kitty-png --mib 4 --no-render
 callgrind_annotate --inclusive=yes callgrind.out.<pid> | head -40
 ```
 
