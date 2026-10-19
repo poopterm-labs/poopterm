@@ -1,5 +1,6 @@
 //! Pixel-level drawing helpers shared by the terminal and settings windows.
 pub(crate) mod blend;
+pub(crate) mod boxdraw;
 pub(crate) mod damage;
 pub(crate) mod fit;
 pub(crate) mod fxhash;

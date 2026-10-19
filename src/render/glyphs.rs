@@ -1,7 +1,9 @@
 //! Font fallback resolution and the rasterized-glyph cache.
+use std::collections::hash_map::Entry;
+
 use crate::fonts::{Font, Metrics};
 
-use super::fxhash::FxHashMap;
+use super::{boxdraw, fxhash::FxHashMap};
 
 /// Upper bound on cached rasterizations before the cache is reset.
 const MAX_CACHED_GLYPHS: usize = 4096;
@@ -20,6 +22,9 @@ pub(crate) struct FontSet {
 	primary: Font,
 	fallbacks: Vec<Font>,
 	cache: FxHashMap<(char, u32), Glyph>,
+	/// Box drawing and other glyphs drawn in code, for cells of `drawn_cell`.
+	drawn: FxHashMap<char, boxdraw::Drawn>,
+	drawn_cell: (usize, usize),
 }
 
 impl FontSet {
@@ -28,6 +33,8 @@ impl FontSet {
 			primary,
 			fallbacks,
 			cache: FxHashMap::default(),
+			drawn: FxHashMap::default(),
+			drawn_cell: (0, 0),
 		}
 	}
 
@@ -54,6 +61,27 @@ impl FontSet {
 		})
 	}
 
+	/// Returns `ch` drawn in code to fill a `cell` exactly (box drawing,
+	/// blocks, Braille, Powerline), or `None` for glyphs taken from fonts.
+	#[inline]
+	pub(crate) fn drawn(&mut self, ch: char, cell: (usize, usize)) -> Option<&boxdraw::Drawn> {
+		if !boxdraw::covers(ch) {
+			return None;
+		}
+		// One cell size at a time bounds the cache to the covered characters.
+		if self.drawn_cell != cell {
+			self.drawn.clear();
+			self.drawn_cell = cell;
+		}
+		match self.drawn.entry(ch) {
+			Entry::Occupied(entry) => Some(entry.into_mut()),
+			Entry::Vacant(entry) => {
+				let coverage = boxdraw::draw(ch, cell)?;
+				Some(entry.insert(boxdraw::compact(&coverage, cell)))
+			}
+		}
+	}
+
 	/// Bounds memory use; call once per frame, before drawing.
 	pub(crate) fn trim(&mut self) {
 		if self.cache.len() > MAX_CACHED_GLYPHS {
@@ -64,6 +92,7 @@ impl FontSet {
 	/// Drops every rasterization, e.g. after the font size changes.
 	pub(crate) fn clear(&mut self) {
 		self.cache.clear();
+		self.drawn.clear();
 	}
 
 	#[cfg(test)]

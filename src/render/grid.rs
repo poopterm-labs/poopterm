@@ -1,6 +1,7 @@
 //! Draws the visible part of a terminal grid (cells, cursor, highlights, images).
 use super::{
 	blend::blend,
+	boxdraw::{self, Drawn},
 	fit::{fit_left, fit_scale},
 	glyphs::FontSet,
 	images::draw_placement,
@@ -224,14 +225,18 @@ fn draw_cell(
 	}
 	let span = cw * cell.width as usize;
 	let (top, bottom) = (y0 as i32, (y0 + ch) as i32);
-	let glyph = fonts.glyph(cell.ch, view.px);
-	let m = &glyph.metrics;
-	if m.xmin >= 0 && m.xmin + m.width as i32 <= span as i32 && m.height <= ch + 1 {
-		let origin = (x0 as i32 + m.xmin, glyph_top(glyph, y0, view.ascent));
-		let clip = (x0 as i32, top, (x0 + span) as i32, bottom);
-		p.glyph(glyph, origin, clip, italic, fg);
+	if boxdraw::covers(cell.ch) {
+		draw_drawn(p, fonts, cell.ch, (x0, y0), (span, ch), fg);
 	} else {
-		draw_oversized(p, fonts, view, cell, (x0, y0), italic, fg, next);
+		let glyph = fonts.glyph(cell.ch, view.px);
+		let m = &glyph.metrics;
+		if m.xmin >= 0 && m.xmin + m.width as i32 <= span as i32 && m.height <= ch + 1 {
+			let origin = (x0 as i32 + m.xmin, glyph_top(glyph, y0, view.ascent));
+			let clip = (x0 as i32, top, (x0 + span) as i32, bottom);
+			p.glyph(glyph, origin, clip, italic, fg);
+		} else {
+			draw_oversized(p, fonts, view, cell, (x0, y0), italic, fg, next);
+		}
 	}
 	if cell.extra == NO_EXTRA {
 		return;
@@ -259,6 +264,37 @@ fn draw_cell(
 			false,
 			fg,
 		);
+	}
+}
+
+/// Draws a box drawing, block, Braille or Powerline character, made to fit
+/// the cell exactly.
+#[inline(never)]
+fn draw_drawn(
+	p: &mut Painter,
+	fonts: &mut FontSet,
+	ch: char,
+	(x0, y0): (usize, usize),
+	cell: (usize, usize),
+	fg: u32,
+) {
+	match fonts.drawn(ch, cell) {
+		Some(Drawn::Rects(rects)) => {
+			for &(x, y, w, h) in rects {
+				p.rect(x0 + x, y0 + y, w, h, fg);
+			}
+		}
+		Some(Drawn::Bitmap { left, top, glyph }) => {
+			let (x, y) = ((x0 + left) as i32, (y0 + top) as i32);
+			let clip = (
+				x0 as i32,
+				y0 as i32,
+				(x0 + cell.0) as i32,
+				(y0 + cell.1) as i32,
+			);
+			p.glyph(glyph, (x, y), clip, false, fg);
+		}
+		None => {}
 	}
 }
 
