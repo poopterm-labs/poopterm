@@ -1,5 +1,15 @@
 # Changelog
 
+## 26.10.26 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Add keypad application mode (#14) (input).
+
+### Maintenance
+
+- Attest the build provenance of released packages (#17) (release).
+
 ## 26.10.25 "Giga Fly" — 2026-10-19
 
 ### Fixed
