@@ -58,6 +58,25 @@ brew tap poopterm-labs/poopterm https://github.com/poopterm-labs/poopterm.git
 brew install poopterm-labs/poopterm/poopterm
 ```
 
+### Debian
+
+Poopterm packages for 64-bit Debian are published through the [Poop Labs APT
+repository](https://github.com/poopterm-labs/pooplabs-apt-repo). Add the
+repository, refresh APT, and install the package:
+
+```sh
+echo 'deb [trusted=yes] https://poopterm-labs.github.io/pooplabs-apt-repo/ ./' \
+  | sudo tee /etc/apt/sources.list.d/pooplabs.list
+sudo apt update
+sudo apt install poopterm
+```
+
+The repository is unsigned, so APT's `trusted=yes` option skips package
+signature verification. Install from it only if you trust Poopterm Labs. The
+package includes the desktop launcher, application icons, and terminfo entry;
+APT installs required system libraries automatically. The current package is
+built for `amd64` and requires Debian 12 or newer.
+
 On macOS, Homebrew builds both the `poopterm` command and a `Poopterm.app`
 bundle containing the `.icns` app icon. The bundle lives in Homebrew's managed
 prefix. Open it directly with:

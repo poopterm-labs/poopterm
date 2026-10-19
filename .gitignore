@@ -39,6 +39,7 @@ Temporary Items
 # will have compiled files and executables
 debug/
 target/
+/dist/
 
 # Cargo.lock is tracked: this is an application, not a library.
 

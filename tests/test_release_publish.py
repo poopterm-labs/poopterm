@@ -38,6 +38,9 @@ class Publish(unittest.TestCase):
         (self.repo / 'Cargo.lock').write_text(f'version = 4\n[[package]]\nname = "poopterm"\nversion = "{self.version}"\n')
         (self.repo / 'CHANGELOG.md').write_text('# Changelog\n\n## Old\n')
         (self.repo / 'Formula/poopterm.rb').write_text('  tag: "v0.43.0",\n  version "0.43.0"\n')
+        dist = self.repo / 'dist'
+        dist.mkdir()
+        (dist / f'poopterm_{self.version}-1_amd64.deb').write_bytes(b'test package')
         self.git('add', '.')
         self.git('commit', '-m', 'Initial checked revision')
         self.sha = self.git('rev-parse', 'HEAD').strip()
@@ -82,6 +85,7 @@ if sys.argv[1:3] == ['release', 'create']:
         self.assertIn('v0.43.0', self.git('show', f'v{version}:Formula/poopterm.rb'))
         self.assertEqual(self.publish().returncode, 0)
         self.assertEqual((self.root / 'api.log').read_text().count('release create'), 1)
+        self.assertEqual((self.root / 'api.log').read_text().count('release upload'), 1)
 
     def test_moved_main_skips_every_release_mutation(self):
         (self.repo / 'new').touch()
@@ -103,6 +107,7 @@ if sys.argv[1:3] == ['release', 'create']:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(self.git('tag').splitlines()), 1)
         self.assertEqual((self.root / 'api.log').read_text().count('release create'), 1)
+        self.assertEqual((self.root / 'api.log').read_text().count('release upload'), 1)
 
     def test_a_push_race_cannot_publish_a_tag_or_overwrite_main(self):
         racer = self.root / 'racer'

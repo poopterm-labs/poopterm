@@ -36,6 +36,14 @@ if ! gh api "repos/${GH_REPO}/releases/tags/v${version}" > /tmp/poopterm-release
   python3 -c 'from pathlib import Path; s=Path("CHANGELOG.md").read_text(); print("## " + s.split("\n## ", 2)[1])' > /tmp/poopterm-release-notes.md
   gh release create "v${version}" --verify-tag --title "Poopterm ${version} \"${codename}\"" --notes-file /tmp/poopterm-release-notes.md
 fi
+# The APT feed polls this release asset and republishes it from GitHub Pages.
+shopt -s nullglob
+packages=(dist/*.deb)
+if ((${#packages[@]} != 1)); then
+  echo "expected exactly one Debian package in dist/, found ${#packages[@]}" >&2
+  exit 1
+fi
+gh release upload "v${version}" "${packages[0]}" --clobber
 # The tag now exists. Update Homebrew in a separate commit, also guarded.
 release_commit=$(git rev-parse HEAD)
 python3 scripts/release.py --formula "$version"
