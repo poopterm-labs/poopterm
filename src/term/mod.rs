@@ -3,6 +3,9 @@ mod extras;
 mod frame;
 mod grid;
 mod images;
+mod kitty;
+#[cfg(test)]
+mod kitty_tests;
 mod screen;
 mod shared;
 mod shell;
@@ -86,6 +89,10 @@ pub(crate) struct Term {
 	pub(crate) primary_images: Vec<crate::graphics::Placement>,
 	pub(crate) sixel_transfer: Option<crate::sixel::Transfer>,
 	pub(crate) sixel_scrolling: bool,
+	/// Receives kitty graphics APC strings; always the live terminal's.
+	pub(crate) kitty_receiver: crate::graphics::kitty::Receiver,
+	/// Transmitted kitty images, shared by both screens.
+	pub(crate) kitty_images: crate::graphics::kitty::Store,
 	pub(crate) cell_width: usize,
 	pub(crate) cell_height: usize,
 	pub(crate) synchronized: Option<Box<Term>>,
@@ -258,6 +265,8 @@ impl Term {
 			primary_images: Vec::new(),
 			sixel_transfer: None,
 			sixel_scrolling: true,
+			kitty_receiver: Default::default(),
+			kitty_images: Default::default(),
 			cell_width: 10,
 			cell_height: 20,
 			synchronized: None,

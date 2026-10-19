@@ -10,13 +10,34 @@ impl Term {
 		(self.cell_width.max(1), self.cell_height.max(1))
 	}
 
+	/// Moves images with scrolled text. When the whole primary screen
+	/// scrolls up, images move into the scrollback and are dropped once they
+	/// leave it; inside a scroll region, only images entirely within it move.
 	pub(crate) fn scroll_images(&mut self, amount: isize) {
+		if self.images.is_empty() {
+			return;
+		}
 		let top = self.scroll_top as isize;
 		let bottom = self.scroll_bottom as isize;
+		let screen_rows = self.rows as isize;
+		let whole = top == 0 && bottom + 1 == screen_rows;
+		let history = if self.primary_screen.is_none() {
+			self.scrollback_limit as isize
+		} else {
+			0
+		};
 		let cell = self.cell_size();
 		self.images.retain_mut(|image| {
 			let rows = image.cells(cell).1 as isize;
 			let last_row = image.row + rows - 1;
+			if whole {
+				// Scrolling down leaves history alone.
+				if amount > 0 && image.row < 0 {
+					return true;
+				}
+				image.row += amount;
+				return image.row + rows > -history && image.row < screen_rows;
+			}
 			if image.row > bottom || last_row < top {
 				return true;
 			}
@@ -28,8 +49,15 @@ impl Term {
 		});
 	}
 
+	/// Text erases Sixel images only, so printing can skip image checks
+	/// without them.
+	#[inline]
+	pub(crate) fn has_sixel_images(&self) -> bool {
+		self.images.iter().any(|image| image.kitty.is_none())
+	}
+
 	pub(crate) fn erase_images(&mut self, from: usize, to: usize) {
-		if self.images.is_empty() || from >= to {
+		if !self.has_sixel_images() || from >= to {
 			return;
 		}
 		let cols = self.cols;
@@ -60,18 +88,19 @@ impl Term {
 		} else {
 			(0, 0)
 		};
+		// Sixel images have no ids to delete them by, so only the newest are
+		// kept; kitty placements have their own store and quota.
 		let count = bitmap.pixels.len();
-		while !self.images.is_empty()
-			&& (self.images.len() >= 16
-				|| self
-					.images
-					.iter()
-					.map(|image| image.bitmap.pixels.len())
-					.sum::<usize>()
-					+ count
-					> 4 * 1024 * 1024)
-		{
-			self.images.remove(0);
+		loop {
+			let sixels = self.images.iter().filter(|image| image.kitty.is_none());
+			let (len, pixels) = sixels.fold((0, 0), |(len, pixels), image| {
+				(len + 1, pixels + image.bitmap.pixels.len())
+			});
+			if len == 0 || (len < 16 && pixels + count <= 4 * 1024 * 1024) {
+				break;
+			}
+			let oldest = self.images.iter().position(|image| image.kitty.is_none());
+			self.images.remove(oldest.unwrap());
 		}
 		if self.sixel_scrolling {
 			for _ in 0..rows {

@@ -195,8 +195,12 @@ impl Term {
 					self.clear_range(from, self.rows * self.cols);
 				}
 				1 => self.clear_range(0, self.idx(self.cx + 1, self.cy)),
-				2 => self.clear_range(0, self.rows * self.cols),
+				2 => {
+					self.clear_range(0, self.rows * self.cols);
+					self.clear_kitty_placements(false);
+				}
 				3 => {
+					self.clear_kitty_placements(true);
 					self.history_base = self.history_base.saturating_add(self.scrollback.len());
 					self.scrollback.clear();
 					self.scroll_offset = 0;

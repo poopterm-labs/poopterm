@@ -79,6 +79,22 @@ impl Handler for Term {
 	fn unhook(&mut self) {
 		self.pending().finish_sixel();
 	}
+	// The receiver belongs to the live terminal so a transfer spans
+	// synchronized output; finished commands apply to the pending state.
+	fn apc_start(&mut self) {
+		self.kitty_receiver.start();
+	}
+	fn apc_put(&mut self, bytes: &[u8]) {
+		self.kitty_receiver.put(bytes);
+	}
+	fn apc_end(&mut self, complete: bool) {
+		if let Some(transmission) = self.kitty_receiver.end(complete)
+			&& let Some(reply) = self.pending().apply_kitty(transmission)
+		{
+			// Replies are not held back by synchronized output.
+			self.responses.push(reply);
+		}
+	}
 }
 
 impl Term {

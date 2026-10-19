@@ -1,5 +1,8 @@
 //! Images shown in the terminal (Sixel and the kitty graphics protocol):
 //! decoded bitmaps and where they are placed on the grid.
+pub(crate) mod base64;
+pub(crate) mod kitty;
+
 use std::sync::Arc;
 
 /// Decoded pixels, `0xAARRGGBB` with straight (not premultiplied) alpha.
@@ -41,8 +44,11 @@ pub(crate) enum Extent {
 	/// The source rectangle at one image pixel per screen pixel.
 	Natural,
 	/// Scaled to fill this many cells.
-	#[allow(dead_code, reason = "used by kitty placements")]
 	Cells { cols: usize, rows: usize },
+	/// This many columns wide; the height keeps the aspect ratio.
+	Cols(usize),
+	/// This many rows high; the width keeps the aspect ratio.
+	Rows(usize),
 }
 
 /// Identifies a kitty placement: image id and placement id.
@@ -69,6 +75,8 @@ pub(crate) struct Placement {
 	/// Set for kitty placements. Sixel images (`None`) are erased by text
 	/// written over them; kitty images are not.
 	pub kitty: Option<KittyId>,
+	/// The placement this one is relative to; it is deleted with it.
+	pub parent: Option<KittyId>,
 }
 
 impl Placement {
@@ -89,14 +97,24 @@ impl Placement {
 			extent: Extent::Natural,
 			z: 0,
 			kitty: None,
+			parent: None,
 		}
 	}
 
 	/// Size on screen in pixels for a given cell size.
 	pub(crate) fn size(&self, (cell_width, cell_height): (usize, usize)) -> (usize, usize) {
+		let source = self.source;
 		match self.extent {
-			Extent::Natural => (self.source.width, self.source.height),
+			Extent::Natural => (source.width, source.height),
 			Extent::Cells { cols, rows } => (cols * cell_width, rows * cell_height),
+			Extent::Cols(cols) => {
+				let width = cols * cell_width;
+				(width, width * source.height / source.width.max(1))
+			}
+			Extent::Rows(rows) => {
+				let height = rows * cell_height;
+				(height * source.width / source.height.max(1), height)
+			}
 		}
 	}
 

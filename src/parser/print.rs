@@ -74,7 +74,7 @@ impl Term {
 	pub(super) fn print_text(&mut self, text: &str) {
 		let template = self.styled_cell();
 		let blank = self.blank();
-		let general = self.charsets[self.active_charset] || self.insert_mode || !self.images.is_empty();
+		let general = self.charsets[self.active_charset] || self.insert_mode || self.has_sixel_images();
 		let mut chars = text.chars();
 		while let Some(c) = chars.next() {
 			debug_assert!(c >= ' ' && !('\u{80}'..='\u{9f}').contains(&c));
@@ -165,7 +165,7 @@ impl Term {
 			self.wrap_pending = false;
 			let (x, y, cols) = (self.cx, self.cy, self.cols);
 			let count = (cols - x).min(bytes.len());
-			if !self.images.is_empty() {
+			if self.has_sixel_images() {
 				let i = self.idx(x, y);
 				self.erase_images(i, i + count);
 			}

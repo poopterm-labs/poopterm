@@ -6,7 +6,7 @@
 //! `poopterm --bench-corpus NAME` prints a workload's bytes, so other
 //! terminals can be measured on identical input (`scripts/bench-throughput.py`).
 pub(crate) mod corpus;
-mod images;
+pub(crate) mod images;
 
 use crate::{
 	parser::Parser,

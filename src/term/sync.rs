@@ -16,8 +16,10 @@ impl Term {
 	pub(crate) fn finish_sync(&mut self) -> bool {
 		if let Some(pending) = self.synchronized.take() {
 			let responses = std::mem::take(&mut self.responses);
+			let receiver = std::mem::take(&mut self.kitty_receiver);
 			*self = *pending;
 			self.responses.extend(responses);
+			self.kitty_receiver = receiver;
 			self.sync_deadline = None;
 			true
 		} else {
