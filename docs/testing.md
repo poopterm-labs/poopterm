@@ -14,7 +14,7 @@ cargo test --release -- --ignored --nocapture parser_throughput   # benchmark
 ```
 
 Tests that need an external program (the shell-integration tests run `zsh`
-and `bash`) return early when it is missing, so they pass on minimal CI
+and `bash`, the D-Bus tests `dbus-daemon`) return early when it is missing, so they pass on minimal CI
 images and run fully on developer machines.
 
 ## Where tests go

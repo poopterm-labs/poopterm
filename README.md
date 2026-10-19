@@ -363,14 +363,42 @@ Poopterm is MIT licensed; see [LICENSE](LICENSE).
   - `SetUserVar` and `ReportVariable` (only `user.` variables are reported);
   - `Copy` and `CopyToClipboard`/`EndCopy`, up to 1 MiB;
   - `SetColors` and `ReportCellSize`;
-  - `RequestUpload`, answered with `abort`.
+  - `RequestUpload`, answered with `abort`;
+  - inline images (`File=`, or `MultipartFile`/`FilePart`/`FileEnd`):
+    PNG, JPEG and WebP, sized in cells, pixels, percent or automatically,
+    up to 32 MiB per file; files that are not inline (downloads) are
+    ignored;
+  - tab colors (OSC 6;1;bg) and OSC 21337 session status: an indicator
+    dot and a colored status after the tab title.
 
   Commands that need features poopterm lacks (profiles, the Touch Bar,
   annotations, blocks, buttons, custom sequences) or the user's
   confirmation (background image files, `OpenURL`) are ignored.
-- **OSC 52:** Clipboard writes to the `c` selection are supported up to 1 MiB.
-  Clipboard read requests are ignored so shell programs cannot read clipboard
-  contents without consent.
+- **Clipboard:** OSC 52 writes the clipboard (`c`, `s`, `s0`) and the
+  primary selection (`p`) up to 1 MiB; kitty's OSC 5522 adds chunked writes
+  in any MIME type, up to 64 MiB. Read requests are refused, so programs
+  cannot read clipboard contents without consent.
+- **Colors:** every xterm and kitty color sequence, with queries: OSC 4,
+  5/6, 10–19 and their resets, kitty's OSC 21, and the color stack
+  (XTPUSHCOLORS, XTPOPCOLORS, XTREPORTCOLORS).
+- **Notifications:** OSC 9, OSC 777 and kitty's OSC 99 (with buttons,
+  icons, closing and activation reports) become desktop notifications,
+  through D-Bus on Linux and FreeBSD and `osascript` on macOS, rate limited
+  per tab.
+- **Program status:** OSC 7501 (working, blocked, done, failed) and OSC 9;4
+  progress mark tabs and draw a progress bar.
+- **Titles and tabs:** OSC 0, 1 and 2 set the icon name and title, which
+  `CSI 22 t` / `CSI 23 t` save and restore. ConEmu's OSC 9;3 names a tab,
+  9;9 reports the directory and 9;12 marks a prompt. OSC 22 sets the mouse
+  pointer shape.
+- **Scaled text:** kitty's [text sizing protocol](https://sw.kovidgoyal.net/kitty/text-sizing-protocol/)
+  (OSC 66) draws text up to seven times larger, or at a fraction of a
+  cell, following its rules for wrapping, overwriting and erasing.
+- **Queries:** DECRQSS (`DCS $ q`) reports SGR, margins, cursor style,
+  conformance level and page size; XTGETTCAP (`DCS + q`) answers from
+  poopterm's terminfo entry; XTWINOPS reports sizes in cells and pixels
+  (`CSI 14/16/18/19 t`). Window moves, resizes and title reports are
+  ignored on purpose.
 - **Sixel:** DCS `q` images support RGB/HLS registers, repeated columns,
   transparency, raster dimensions, and integer pixel aspect ratios. Defensive
   limits cap an image at 4,096 × 4,096 pixels, 16 megapixels, and 4 MiB encoded.

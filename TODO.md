@@ -123,7 +123,16 @@ least as fast.
   damage handling are designed once.
 
 Kept for now: `winit` (windowing, IME and DPI are too much risk for the
-gain), `image` (wallpapers need JPEG and WebP), and `rfd`.
+gain), `image` (wallpapers and iTerm2 inline images need JPEG and WebP), and `rfd`.
+
+## Protocol gaps
+
+- **GIF inline images.** iTerm2 inline images accept PNG, JPEG and WebP;
+  GIF (often animated) needs our own decoder, since enabling the `image`
+  crate's GIF support would add a dependency. Animated GIFs can reuse the
+  kitty animation frames.
+- **OSC 176 (application id)** is ignored: a Wayland app id is fixed once
+  the window exists, so it cannot follow a program's request.
 
 ## CI and platforms
 

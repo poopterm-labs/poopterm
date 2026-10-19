@@ -53,7 +53,7 @@ deadlock, so debug builds track held locks and panic instead.
   O(columns), not O(screen).
 - `Cell` is 16 bytes: character, foreground, background, attribute bits
   (`term::attr`), width (1 normal, 2 wide, 0 wide-character spacer) and an
-  `extra` id. Combining marks and OSC 8 hyperlinks are interned in
+  `extra` id. Combining marks, OSC 8 hyperlinks and OSC 66 blocks are interned in
   `term::extras::Extras`, shared copy-on-write with snapshots.
 - **Synchronized output** (`?2026`): `begin_sync` clones the `Term` into a
   pending snapshot; all updates go to `Term::pending()` until the end marker
@@ -97,6 +97,43 @@ are `impl Term` blocks. `batched_printing_matches_per_character_printing`
 feeds random streams through `parser::Parser` and through vte driving
 `Term` one character at a time (`parser::PerCharacter`), and requires
 identical terminal state.
+
+Other families have modules of their own, each an `impl Term` that parses
+into bounded state in `src/term`:
+
+| Sequences | Parsing | State |
+|-----------|---------|-------|
+| Colors (OSC 4–6, 10–21, 104–119, color stack) | `osc_color.rs`, `color_spec.rs` | `term::colors` |
+| Clipboard (OSC 52, 5522) | `osc_clipboard.rs` | `term::clipboard`, written by the UI thread |
+| Notifications (OSC 9, 777, 99) | `osc_notify.rs` | `term::notifications`, shown by `app/notifications.rs` |
+| Program status (OSC 7501, 9;4) | `osc_status.rs` | `term::status` |
+| Pointer shapes (OSC 22) | `osc_pointer.rs` | `term::pointer` |
+| Shell integration (OSC 133, 633, ConEmu 9;n, 3008) | `osc.rs`, `osc_shell.rs` | `shell_integration::markers`, `term::contexts` |
+| iTerm2 (OSC 1337, 6;1, 21337) | `osc_iterm.rs`, `osc_tab.rs` | `term::iterm`, `term::iterm_images`, `term::tab_style`, `graphics::iterm` |
+| Text sizing (OSC 66) | `osc_text_size.rs` | `term::multicell`, drawn by `render::multicell` |
+| DECRQSS, XTGETTCAP (DCS) | `dcs.rs` | `term::dcs`; capabilities from `terminfo_caps` |
+| XTWINOPS (`CSI t`) | `window_ops.rs` | title stacks on `Term` |
+
+Requests the UI thread must act on (clipboard writes, notifications, focus
+and attention) are queued on `Term` and taken by `App::process_output`.
+Replies go to `Term::responses`, moved out of a synchronized-output
+snapshot at once so they are never held back.
+
+**Scaled text.** Every cell of an OSC 66 block holds its own copy of the
+block (text, size, offset in the block) in `term::extras`, so a row draws,
+scrolls and copies alone. While `Term::has_multicells` is set, printing
+takes the general path, which applies the protocol's overwriting rules,
+and erasing, inserting and deleting erase the blocks they would cut.
+
+## Desktop integration (`src/dbus`, `src/notifier`)
+
+- `dbus` is a D-Bus client written from the specification: the wire format
+  (`wire.rs`) in either byte order with the specification's limits, messages,
+  and a connection doing SASL EXTERNAL. Tests run against a private
+  `dbus-daemon` (`test_bus.rs`).
+- `notifier` delivers notifications through the freedesktop.org service, or
+  `osascript` on macOS; it rate limits each session (`rate.rs`) and maps
+  desktop notification ids back to the program that asked (`routes.rs`).
 
 ## Images (`src/graphics`, `src/sixel.rs`, `src/term/kitty*.rs`)
 
