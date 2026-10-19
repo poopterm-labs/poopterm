@@ -99,6 +99,15 @@ pub(crate) struct VerticalTabOptions {
 	pub(crate) show_settings: bool,
 }
 
+pub(crate) struct TabStripOptions {
+	pub(crate) left_reserve: usize,
+	pub(crate) scroll: usize,
+	pub(crate) show_plus: bool,
+	pub(crate) show_settings: bool,
+	pub(crate) active_tab: usize,
+	pub(crate) compact_tabs: bool,
+}
+
 #[cfg(test)]
 pub(crate) fn tab_layout(
 	width: usize,
@@ -113,12 +122,14 @@ pub(crate) fn tab_layout(
 		width,
 		count,
 		scale,
-		left_reserve,
-		scroll,
-		show_plus,
-		show_settings,
-		0,
-		false,
+		TabStripOptions {
+			left_reserve,
+			scroll,
+			show_plus,
+			show_settings,
+			active_tab: 0,
+			compact_tabs: false,
+		},
 	)
 }
 
@@ -126,13 +137,16 @@ pub(crate) fn tab_layout_with_compaction(
 	width: usize,
 	count: usize,
 	scale: usize,
-	left_reserve: usize,
-	scroll: usize,
-	show_plus: bool,
-	show_settings: bool,
-	active_tab: usize,
-	compact_tabs: bool,
+	options: TabStripOptions,
 ) -> TabLayout {
+	let TabStripOptions {
+		left_reserve,
+		scroll,
+		show_plus,
+		show_settings,
+		active_tab,
+		compact_tabs,
+	} = options;
 	let scale = scale.max(1);
 	let arrow_w = 28 * scale;
 	let left_arrow_x = left_reserve + 8 * scale;
