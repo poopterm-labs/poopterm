@@ -86,6 +86,13 @@ impl SettingsEditor {
 					self.wallpaper_strength.saturating_sub(5)
 				}
 			}
+			PADDING_ROW => {
+				prefs.padding = if up {
+					(prefs.padding + 1).min(32)
+				} else {
+					prefs.padding.saturating_sub(1)
+				}
+			}
 			OPACITY_ROW => {
 				prefs.opacity = if up {
 					(prefs.opacity + 5).min(100)
@@ -170,6 +177,7 @@ impl App {
 				preferences.show_settings_button.to_string(),
 			),
 			("show_bottom_bar", preferences.show_bottom_bar.to_string()),
+			("padding", preferences.padding.to_string()),
 			("wallpaper", wallpaper_path),
 			("wallpaper_strength", editor.wallpaper_strength.to_string()),
 			("font_family", quote_config_string(&editor.fonts.chosen)),

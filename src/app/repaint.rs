@@ -50,6 +50,13 @@ impl App {
 			self.draw_tab_bar(p, scale, ui);
 			bands.push((0, top.min(p.height)));
 		}
+		// The padding above and below the grid takes the first and last
+		// rows' backgrounds; it is a few pixel rows, so repaint it always.
+		let area = self.padding_area(width, p.height);
+		let below = (area.y + area.height).max(grid_bottom);
+		self.restore_background_from(p, area.y, top.saturating_sub(area.y), sidebar);
+		self.restore_background_from(p, grid_bottom, below - grid_bottom, sidebar);
+		bands.extend([(area.y, top), (grid_bottom, below)]);
 		self.draw_terminal(p, scale, Some(&damage.rows));
 		self.restore_background(p, status_y, self.status_height + self.border);
 		self.draw_status_bar(p, scale, ui);

@@ -6,4 +6,5 @@ pub(crate) mod glyphs;
 pub(crate) mod grid;
 pub(crate) mod images;
 mod multicell;
+pub(crate) mod padding;
 pub(crate) mod painter;

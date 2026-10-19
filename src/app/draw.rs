@@ -143,6 +143,20 @@ impl App {
 		self.draw_status_bar(p, scale, ui);
 	}
 
+	/// The space around the grid, inside the border and between the chrome,
+	/// that edge cell backgrounds extend into.
+	pub(super) fn padding_area(&self, width: usize, height: usize) -> crate::graphics::Rect {
+		let x = self.border + self.sidebar_width();
+		let y = self.top.saturating_sub(self.margin);
+		let bottom = height.saturating_sub(self.status_height + self.border);
+		crate::graphics::Rect {
+			x,
+			y,
+			width: width.saturating_sub(x + self.border),
+			height: bottom.saturating_sub(y),
+		}
+	}
+
 	pub(super) fn draw_terminal(&mut self, p: &mut Painter, scale: usize, rows: Option<&[bool]>) {
 		let view = GridView {
 			frame: &self.frame,
@@ -161,8 +175,15 @@ impl App {
 				.get(self.search_match_index)
 				.map(|selection| selection.ordered()),
 			focused: self.focused,
+			padding: Some(self.padding_area(p.width, p.height)),
 		};
 		draw_grid(p, &mut self.fonts, &view, rows);
+		if rows.is_some() {
+			// Partial redraws restore the padding above and below the grid
+			// every frame; it takes the first and last rows' backgrounds.
+			crate::render::padding::extend_above(p, &view);
+			crate::render::padding::extend_below(p, &view);
+		}
 	}
 
 	/// Draws a bordered, rounded panel and returns nothing; used by overlays.

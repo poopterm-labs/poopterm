@@ -40,9 +40,14 @@ impl ApplicationHandler<UserEvent> for App {
 		crate::platform::set_window_opacity(&window, Preferences::load().opacity);
 
 		let scale = window.scale_factor() as f32;
-		self.margin = (8.0 * scale) as usize;
 		// A subtle inset frame gives the client area the Ghostty window-border look.
-		self.border = (2.0 * scale) as usize;
+		// macOS draws its own rim that follows the rounded corners; a drawn
+		// one would be cut off there.
+		self.border = if cfg!(target_os = "macos") {
+			0
+		} else {
+			(2.0 * scale) as usize
+		};
 		self.titlebar_height = if cfg!(target_os = "macos") {
 			(44.0 * scale) as usize
 		} else {

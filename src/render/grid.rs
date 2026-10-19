@@ -4,6 +4,7 @@ use super::{
 	glyphs::FontSet,
 	images::draw_placement,
 	multicell::draw_multicell,
+	padding::extend_padding,
 	painter::{Painter, glyph_top},
 };
 use crate::{
@@ -31,6 +32,8 @@ pub(crate) struct GridView<'a> {
 	pub search_match: Option<(CellPoint, CellPoint)>,
 	/// Unfocused windows draw a hollow block cursor.
 	pub focused: bool,
+	/// The area around the grid that edge cell backgrounds extend into.
+	pub padding: Option<Rect>,
 }
 
 fn contains(range: Option<(CellPoint, CellPoint)>, point: CellPoint) -> bool {
@@ -64,6 +67,7 @@ pub(crate) fn draw_grid(
 	images.sort_by_key(|image| (image.z, image.kitty.map_or(0, |id| id.image)));
 	let wanted = |row: usize| rows.is_none_or(|rows| rows[row]);
 	for row in (0..frame.rows).filter(|&row| wanted(row)) {
+		extend_padding(p, view, row);
 		if images.is_empty() {
 			draw_row(p, fonts, view, row, Layer::All);
 			draw_placeholders(p, view, row);

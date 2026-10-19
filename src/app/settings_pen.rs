@@ -77,6 +77,17 @@ impl Pen<'_> {
 		self.text(p, x + 12 * s, row + 10, label, 0.76);
 	}
 
+	/// `−` and `+` buttons at the right of `row` with `value` between them.
+	pub(super) fn stepper(&mut self, p: &mut Painter, style: ButtonStyle, row: usize, value: &str) {
+		let s = self.scale;
+		for (offset, sign) in [(240, "−"), (72, "+")] {
+			let x = p.width.saturating_sub(offset * s);
+			p.button((x, row * s, 48 * s, ROW_HEIGHT * s), style, false);
+			self.text(p, x + 16 * s, row + 7, sign, 1.0);
+		}
+		self.text(p, p.width.saturating_sub(180 * s), row + 8, value, 0.82);
+	}
+
 	/// An Enabled/Disabled toggle at the right of `row`.
 	pub(super) fn toggle(&mut self, p: &mut Painter, style: ButtonStyle, row: usize, enabled: bool) {
 		let s = self.scale;

@@ -137,6 +137,7 @@ fn draw(pixels: &mut [u32], fonts: &mut FontSet, frame: &Frame, bg: u32) {
 		selection: None,
 		search_match: None,
 		focused: true,
+		padding: None,
 	};
 	draw_grid(&mut painter, fonts, &view, None);
 }

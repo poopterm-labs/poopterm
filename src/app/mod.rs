@@ -180,6 +180,7 @@ impl App {
 
 	/// Recomputes the areas reserved for window chrome after a settings change.
 	pub(super) fn update_chrome_layout(&mut self, scale: usize) {
+		self.margin = self.border + self.preferences.padding * scale;
 		self.status_height = if self.preferences.show_bottom_bar {
 			26 * scale
 		} else {

@@ -99,6 +99,14 @@ pub(super) fn settings_target(
 			SettingsPage::Fonts => &[],
 			_ => return None,
 		};
+		if page == SettingsPage::Layout && in_row(PADDING_ROW) {
+			if (right(240)..right(192)).contains(&x) {
+				return Some(SettingsTarget::Step(PADDING_ROW, -1));
+			}
+			if (right(72)..right(24)).contains(&x) {
+				return Some(SettingsTarget::Step(PADDING_ROW, 1));
+			}
+		}
 		if let Some(&(_, target)) = rows
 			.iter()
 			.find(|(row, _)| in_row(*row) && (right(240)..right(24)).contains(&x))
@@ -236,6 +244,16 @@ mod tests {
 			target(530, BOTTOM_BAR_ROW + 10),
 			Some(SettingsTarget::ToggleBottomBar)
 		);
+		assert_eq!(
+			target(530, PADDING_ROW + 10),
+			Some(SettingsTarget::Step(PADDING_ROW, -1))
+		);
+		assert_eq!(
+			target(700, PADDING_ROW + 10),
+			Some(SettingsTarget::Step(PADDING_ROW, 1))
+		);
+		assert_eq!(target(600, PADDING_ROW + 10), None);
+		assert!(PADDING_ROW + ROW_HEIGHT <= MIN_SIZE.1 - 52);
 		assert_eq!(target(630, 600), Some(SettingsTarget::Save));
 		// Main-page controls are not reachable from here.
 		assert_eq!(target(30, 240), None);

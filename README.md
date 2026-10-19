@@ -135,6 +135,7 @@ vertical_tabs = false
 show_new_tab_button = true
 show_settings_button = true
 show_bottom_bar = true
+padding = 0             # Space around the grid in logical pixels, 0–32
 wallpaper = "/Users/you/Pictures/terminal.webp" # optional PNG, JPEG, or WebP
 wallpaper_strength = 35 # 0–100; 0 hides the image, 100 shows it at full strength
 shortcut_new_tab = "super+t"
@@ -176,6 +177,10 @@ bundled DejaVu Sans Mono for Powerline font. For complete htop or other Nerd
 Font icon coverage, choose a Nerd Font Mono family or file. Use a monospaced
 font for predictable cell alignment.
 The older `macos-dark` and `macos-light` values remain accepted for existing configs.
+The grid fills the window by default; `padding` (also on the Settings Layout
+page) adds space around it. Whatever the padding, the space left over where the
+window is not a whole number of cells takes the colors of the cells at the
+grid's edges, so full-screen programs' backgrounds reach the window edge.
 Settings changes apply immediately after saving; session restore takes effect on
 the next launch. Reducing scrollback discards the oldest lines. Invalid numbers
 fall back to defaults or are clamped to supported limits. Other config keys and

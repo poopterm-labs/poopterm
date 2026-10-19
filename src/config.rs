@@ -19,6 +19,8 @@ pub struct Preferences {
 	pub show_new_tab_button: bool,
 	pub show_settings_button: bool,
 	pub show_bottom_bar: bool,
+	/// Space between the grid and the window edge, in logical pixels.
+	pub padding: usize,
 }
 
 impl Default for Preferences {
@@ -33,6 +35,7 @@ impl Default for Preferences {
 			show_new_tab_button: true,
 			show_settings_button: true,
 			show_bottom_bar: true,
+			padding: 0,
 		}
 	}
 }
@@ -71,6 +74,10 @@ impl Preferences {
 			show_bottom_bar: value(text, "show_bottom_bar")
 				.and_then(|s| s.parse().ok())
 				.unwrap_or(defaults.show_bottom_bar),
+			padding: value(text, "padding")
+				.and_then(|s| s.parse().ok())
+				.unwrap_or(defaults.padding)
+				.min(32),
 		}
 	}
 	pub fn load() -> Self {
@@ -266,6 +273,14 @@ mod tests {
 		assert!(!configured.show_new_tab_button);
 		assert!(!configured.show_settings_button);
 		assert!(!configured.show_bottom_bar);
+	}
+	#[test]
+	fn padding_defaults_to_none_and_is_bounded() {
+		assert_eq!(Preferences::default().padding, 0);
+		assert_eq!(Preferences::parse("padding = 0").padding, 0);
+		assert_eq!(Preferences::parse("padding = 12").padding, 12);
+		assert_eq!(Preferences::parse("padding = 400").padding, 32);
+		assert_eq!(Preferences::parse("padding = wide").padding, 0);
 	}
 	#[test]
 	fn xdg_variables_must_be_absolute_paths() {

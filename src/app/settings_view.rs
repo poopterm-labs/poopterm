@@ -21,6 +21,7 @@ pub(super) const VERTICAL_TABS_ROW: usize = 152;
 pub(super) const NEW_TAB_BUTTON_ROW: usize = 200;
 pub(super) const SETTINGS_BUTTON_ROW: usize = 248;
 pub(super) const BOTTOM_BAR_ROW: usize = 296;
+pub(super) const PADDING_ROW: usize = 344;
 pub(super) const SHORTCUT_ROWS: [(ShortcutAction, usize); 7] = [
 	(ShortcutAction::NewTab, 104),
 	(ShortcutAction::CommandPalette, 152),
@@ -196,6 +197,8 @@ impl App {
 					pen.text(p, x, row + 8, label, 0.82);
 					pen.toggle(p, style, row, enabled);
 				}
+				pen.text(p, x, PADDING_ROW + 8, "Padding", 0.82);
+				pen.stepper(p, style, PADDING_ROW, &format!("{} px", prefs.padding));
 			}
 			SettingsPage::Fonts => {
 				pen.text(p, x, 28, "Fonts", 1.0);
@@ -311,14 +314,7 @@ fn compose_main_settings(
 	}
 	for (row, label, value) in steppers {
 		pen.text(p, x, row + 8, label, 0.82);
-		for (bx, sign) in [
-			(width.saturating_sub(240 * s), "−"),
-			(width.saturating_sub(72 * s), "+"),
-		] {
-			p.button((bx, row * s, button_w, ROW_HEIGHT * s), style, false);
-			pen.text(p, bx + 16 * s, row + 7, sign, 1.0);
-		}
-		pen.text(p, width.saturating_sub(180 * s), row + 8, &value, 0.82);
+		pen.stepper(p, style, row, &value);
 	}
 
 	pen.text(p, x, RESTORE_ROW + 8, "Restore tabs on launch", 0.82);
