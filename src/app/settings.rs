@@ -168,6 +168,7 @@ impl App {
 			("opacity", preferences.opacity.to_string()),
 			("show_tabs", preferences.show_tabs.to_string()),
 			("vertical_tabs", preferences.vertical_tabs.to_string()),
+			("compact_tabs", preferences.compact_tabs.to_string()),
 			(
 				"show_new_tab_button",
 				preferences.show_new_tab_button.to_string(),
@@ -232,6 +233,7 @@ impl App {
 		self.selection = None;
 		self.end_search();
 		self.resize(self.width, self.height);
+		self.ensure_active_tab_visible();
 		let page = self.settings_editor.page;
 		let fonts = std::mem::take(&mut self.settings_editor.fonts);
 		self.settings_editor = SettingsEditor::load();
@@ -339,6 +341,9 @@ impl App {
 			}
 			Some(SettingsTarget::ToggleVerticalTabs) => {
 				editor.preferences.vertical_tabs = !editor.preferences.vertical_tabs
+			}
+			Some(SettingsTarget::ToggleCompactTabs) => {
+				editor.preferences.compact_tabs = !editor.preferences.compact_tabs
 			}
 			Some(SettingsTarget::ToggleNewTabButton) => {
 				editor.preferences.show_new_tab_button = !editor.preferences.show_new_tab_button

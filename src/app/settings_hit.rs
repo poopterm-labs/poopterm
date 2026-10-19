@@ -26,6 +26,7 @@ pub(super) enum SettingsTarget {
 	ToggleRestore,
 	ToggleTabs,
 	ToggleVerticalTabs,
+	ToggleCompactTabs,
 	ToggleNewTabButton,
 	ToggleSettingsButton,
 	ToggleBottomBar,
@@ -54,9 +55,10 @@ pub(super) fn font_list_rows(height: usize, scale: usize) -> usize {
 }
 
 /// Toggles on the Layout page.
-pub(super) const LAYOUT_TOGGLES: [(usize, SettingsTarget); 5] = [
+pub(super) const LAYOUT_TOGGLES: [(usize, SettingsTarget); 6] = [
 	(SHOW_TABS_ROW, SettingsTarget::ToggleTabs),
 	(VERTICAL_TABS_ROW, SettingsTarget::ToggleVerticalTabs),
+	(COMPACT_TABS_ROW, SettingsTarget::ToggleCompactTabs),
 	(NEW_TAB_BUTTON_ROW, SettingsTarget::ToggleNewTabButton),
 	(SETTINGS_BUTTON_ROW, SettingsTarget::ToggleSettingsButton),
 	(BOTTOM_BAR_ROW, SettingsTarget::ToggleBottomBar),

@@ -4,9 +4,12 @@ use crate::term::status::State;
 pub(crate) struct TabLayout {
 	pub(crate) start: usize,
 	pub(crate) width: usize,
+	pub(crate) compact_width: usize,
 	pub(crate) gap: usize,
 	pub(crate) first_visible: usize,
 	pub(crate) visible_count: usize,
+	active_tab: usize,
+	compact_tabs: bool,
 	pub(crate) left_arrow_x: usize,
 	pub(crate) right_arrow_x: usize,
 	pub(crate) arrow_w: usize,
@@ -17,12 +20,35 @@ pub(crate) struct TabLayout {
 	pub(crate) scale: usize,
 }
 
+impl TabLayout {
+	pub(crate) fn tab_width(&self, index: usize) -> usize {
+		if self.compact_tabs && index != self.active_tab {
+			self.compact_width
+		} else {
+			self.width
+		}
+	}
+
+	pub(crate) fn tab_x(&self, index: usize) -> usize {
+		let local = index.saturating_sub(self.first_visible);
+		let expanded_before =
+			self.compact_tabs && self.active_tab >= self.first_visible && self.active_tab < index;
+		self.start
+			+ local * (self.compact_width + self.gap)
+			+ usize::from(expanded_before) * self.width.saturating_sub(self.compact_width)
+	}
+}
+
 /// Geometry for tabs arranged in a left sidebar.
 pub(crate) struct VerticalTabLayout {
 	pub(crate) sidebar_width: usize,
 	pub(crate) tab_start_y: usize,
 	pub(crate) tab_width: usize,
 	pub(crate) row_height: usize,
+	compact_row_height: usize,
+	active_tab: usize,
+	compact_tabs: bool,
+	pub(crate) compact_rail: bool,
 	pub(crate) first_visible: usize,
 	pub(crate) visible_count: usize,
 	pub(crate) plus_x: usize,
@@ -34,19 +60,46 @@ pub(crate) struct VerticalTabLayout {
 	pub(crate) scale: usize,
 }
 
+impl VerticalTabLayout {
+	pub(crate) fn row_y(&self, index: usize) -> usize {
+		let local = index.saturating_sub(self.first_visible);
+		let active_before =
+			self.compact_tabs && self.active_tab >= self.first_visible && self.active_tab < index;
+		self.tab_start_y
+			+ local * self.compact_row_height
+			+ usize::from(active_before) * self.row_height.saturating_sub(self.compact_row_height)
+	}
+
+	pub(crate) fn row_height_for(&self, index: usize) -> usize {
+		if self.compact_tabs && index != self.active_tab {
+			self.compact_row_height
+		} else {
+			self.row_height
+		}
+	}
+}
+
 /// Width of the vertical tab sidebar, in pixels.
 pub(crate) fn sidebar_width(scale: usize) -> usize {
 	184 * scale.max(1)
+}
+
+/// Width of the icon rail used by compact vertical tabs, in pixels.
+pub(crate) fn compact_sidebar_width(scale: usize) -> usize {
+	64 * scale.max(1)
 }
 
 pub(crate) struct VerticalTabOptions {
 	pub(crate) top_reserve: usize,
 	pub(crate) status_height: usize,
 	pub(crate) scroll: usize,
+	pub(crate) active_tab: usize,
+	pub(crate) compact_tabs: bool,
 	pub(crate) show_plus: bool,
 	pub(crate) show_settings: bool,
 }
 
+#[cfg(test)]
 pub(crate) fn tab_layout(
 	width: usize,
 	count: usize,
@@ -55,6 +108,30 @@ pub(crate) fn tab_layout(
 	scroll: usize,
 	show_plus: bool,
 	show_settings: bool,
+) -> TabLayout {
+	tab_layout_with_compaction(
+		width,
+		count,
+		scale,
+		left_reserve,
+		scroll,
+		show_plus,
+		show_settings,
+		0,
+		false,
+	)
+}
+
+pub(crate) fn tab_layout_with_compaction(
+	width: usize,
+	count: usize,
+	scale: usize,
+	left_reserve: usize,
+	scroll: usize,
+	show_plus: bool,
+	show_settings: bool,
+	active_tab: usize,
+	compact_tabs: bool,
 ) -> TabLayout {
 	let scale = scale.max(1);
 	let arrow_w = 28 * scale;
@@ -81,20 +158,47 @@ pub(crate) fn tab_layout(
 	let viewport_end = right_arrow_x.saturating_sub(8 * scale);
 	let gap = 6 * scale;
 	let room = viewport_end.saturating_sub(start);
-	let slots = ((room + gap) / (170 * scale + gap)).max(1);
-	let tab_width = room
-		.saturating_sub(slots.saturating_sub(1) * gap)
-		.checked_div(slots)
-		.unwrap_or(0)
-		.min(220 * scale);
-	let visible_count = ((room + gap) / (tab_width.max(1) + gap)).max(1);
+	let (tab_width, compact_width, visible_count) = if compact_tabs && count > 1 {
+		let min_compact = 80 * scale;
+		let min_active = 144 * scale;
+		let slots = (room.saturating_sub(min_active) / (min_compact + gap) + 1).max(1);
+		let visible_count = slots.min(count).max(1);
+		let base_room = room.saturating_sub(visible_count.saturating_sub(1) * gap);
+		let first_visible = scroll.min(count.saturating_sub(visible_count));
+		let active_visible = (first_visible..first_visible + visible_count).contains(&active_tab);
+		if active_visible && visible_count > 1 {
+			let compact_width = (base_room.saturating_sub(min_active) / (visible_count - 1))
+				.clamp(min_compact, 180 * scale);
+			let active_width = base_room
+				.saturating_sub(compact_width * (visible_count - 1))
+				.min(320 * scale);
+			(active_width, compact_width, visible_count)
+		} else if active_visible {
+			(room.min(220 * scale), room.min(220 * scale), visible_count)
+		} else {
+			let compact_width = (base_room / visible_count).clamp(min_compact, 180 * scale);
+			(compact_width, compact_width, visible_count)
+		}
+	} else {
+		let slots = ((room + gap) / (170 * scale + gap)).max(1);
+		let tab_width = room
+			.saturating_sub(slots.saturating_sub(1) * gap)
+			.checked_div(slots)
+			.unwrap_or(0)
+			.min(220 * scale);
+		let visible_count = ((room + gap) / (tab_width.max(1) + gap)).max(1);
+		(tab_width, tab_width, visible_count)
+	};
 	let first_visible = scroll.min(count.saturating_sub(visible_count));
 	TabLayout {
 		start,
 		width: tab_width,
+		compact_width,
 		gap,
 		first_visible,
 		visible_count,
+		active_tab,
+		compact_tabs,
 		left_arrow_x,
 		right_arrow_x,
 		arrow_w,
@@ -117,16 +221,24 @@ pub(crate) fn vertical_tab_layout(
 		top_reserve,
 		status_height,
 		scroll,
+		active_tab,
+		compact_tabs,
 		show_plus,
 		show_settings,
 	} = options;
-	let sidebar_width = sidebar_width(scale);
-	let row_height = 32 * scale;
+	let compact_rail = compact_tabs;
+	let sidebar_width = if compact_rail {
+		compact_sidebar_width(scale)
+	} else {
+		sidebar_width(scale)
+	};
+	let button_height = if compact_rail { 24 } else { 28 } * scale;
+	let button_width = if compact_rail { 24 } else { 32 } * scale;
+	let row_height = if compact_rail { 40 } else { 32 } * scale;
+	let compact_row_height = if compact_rail { row_height } else { 24 * scale };
 	let tab_start_y = top_reserve + 8 * scale;
-	let button_height = 28 * scale;
-	let button_width = 32 * scale;
-	let has_buttons = show_plus || show_settings;
-	let button_y = has_buttons.then(|| {
+	let bottom_buttons = show_plus || show_settings;
+	let button_y = bottom_buttons.then(|| {
 		height
 			.saturating_sub(status_height)
 			.saturating_sub(10 * scale)
@@ -136,9 +248,16 @@ pub(crate) fn vertical_tab_layout(
 		|| height.saturating_sub(status_height + 10 * scale),
 		|y| y.saturating_sub(6 * scale),
 	);
-	let visible_count = ((tab_end_y.saturating_sub(tab_start_y)) / row_height).max(1);
+	let available = tab_end_y.saturating_sub(tab_start_y);
+	let visible_count = if compact_rail {
+		(available / row_height).max(1)
+	} else if compact_tabs && count > 1 {
+		(available.saturating_sub(row_height - compact_row_height) / compact_row_height).max(1)
+	} else {
+		(available / row_height).max(1)
+	};
 	let first_visible = scroll.min(count.saturating_sub(visible_count));
-	let button_gap = 6 * scale;
+	let button_gap = if compact_rail { 4 } else { 6 } * scale;
 	let buttons_width = usize::from(show_plus) * button_width
 		+ usize::from(show_settings) * button_width
 		+ usize::from(show_plus && show_settings) * button_gap;
@@ -149,17 +268,23 @@ pub(crate) fn vertical_tab_layout(
 	} else {
 		controls_start_x
 	};
+	let plus_y = if show_plus { button_y } else { None };
+	let settings_y = if show_settings { button_y } else { None };
 	VerticalTabLayout {
 		sidebar_width,
 		tab_start_y,
 		tab_width: sidebar_width.saturating_sub(12 * scale),
 		row_height,
+		compact_row_height,
+		active_tab,
+		compact_tabs,
+		compact_rail,
 		first_visible,
 		visible_count,
 		plus_x,
-		plus_y: show_plus.then_some(button_y.unwrap_or(0)),
+		plus_y,
 		settings_x,
-		settings_y: show_settings.then_some(button_y.unwrap_or(0)),
+		settings_y,
 		button_width,
 		button_height,
 		scale,
@@ -209,6 +334,8 @@ mod tests {
 				top_reserve: 52,
 				status_height: 26,
 				scroll: 19,
+				active_tab: 0,
+				compact_tabs: false,
 				show_plus: true,
 				show_settings: false,
 			},
@@ -232,6 +359,8 @@ mod tests {
 				top_reserve: 52,
 				status_height: 26,
 				scroll: 0,
+				active_tab: 0,
+				compact_tabs: false,
 				show_plus: true,
 				show_settings: true,
 			},

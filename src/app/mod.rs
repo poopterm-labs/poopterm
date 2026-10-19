@@ -48,8 +48,8 @@ use crate::{
 		search::find_matches,
 		selection::{CellPoint, Selection},
 		tabs::{
-			TabLayout, VerticalTabLayout, VerticalTabOptions, sidebar_width, tab_layout,
-			vertical_tab_layout,
+			TabLayout, VerticalTabLayout, VerticalTabOptions, compact_sidebar_width, sidebar_width,
+			tab_layout_with_compaction, vertical_tab_layout,
 		},
 	},
 	wallpaper::Wallpaper,
@@ -206,7 +206,11 @@ impl App {
 	/// Width of the vertical tab sidebar, or 0 when it is not shown.
 	pub(super) fn sidebar_width(&self) -> usize {
 		if self.preferences.show_tabs && self.preferences.vertical_tabs {
-			sidebar_width(self.scale())
+			if self.preferences.compact_tabs {
+				compact_sidebar_width(self.scale())
+			} else {
+				sidebar_width(self.scale())
+			}
 		} else {
 			0
 		}
