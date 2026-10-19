@@ -107,8 +107,16 @@ Details: [`docs/architecture.md`](docs/architecture.md).
 ## Commits and releases
 
 - Work lands directly on `main` as small, focused commits; there are no pull
-  requests. Write messages that explain *why*, prefixed `fix:`, `perf:`,
-  `feat:`, `refactor:`, `docs:`, `bench:` or `chore:`.
+  requests.
+- **Messages follow [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/):**
+  `type(scope)!: summary`, with the scope optional, and the summary in lower
+  case, imperative mood, and without a final period. Types: `feat`, `fix`,
+  `perf`, `refactor`, `docs`, `test`, `bench`, `build`, `ci`, `style`,
+  `chore`, `revert`. Scopes name the area touched, usually a module
+  (`parser`, `vt`, `kitty`, `render`, `pty`, `input`, `bench`, `release`).
+  Breaking changes get `!` and a `BREAKING CHANGE:` footer. The body explains
+  *why*. Add no session links or other tool trailers; a `Co-Authored-By:`
+  footer is fine.
 - **Versioning:** `YEAR.MONTH.PATCH` (two-digit year, month without a leading zero, e.g. 26.1.0 for January), plus a random
   codename per release (26.10.0 is "Giga Fly"). Put the codename in
   `[package.metadata.poopterm] codename` in `Cargo.toml` and in the
