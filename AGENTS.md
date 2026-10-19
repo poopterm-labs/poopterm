@@ -31,7 +31,7 @@ cargo test --release -- --ignored --nocapture parser_throughput   # parser bench
   `rustup target add aarch64-apple-darwin x86_64-unknown-freebsd`, then
   `cargo clippy --target <triple> --all-targets -- -D warnings` for each.
 
-## Workflow: test-driven development
+## Workflow: 3:1 test-driven development
 
 Every behavior change and bug fix follows red → green → refactor:
 
@@ -40,13 +40,34 @@ Every behavior change and bug fix follows red → green → refactor:
    existing yet), not because of a typo.
 2. **Green.** Write the smallest change that makes it pass.
 3. **Refactor.** Clean up while the whole suite stays green.
-4. Run the full checks (test, clippy, fmt) before committing.
+4. Run the full checks (test, clippy, fmt) before pushing.
 
 A test that passes the first time you run it proves nothing; adjust it until
 you have seen it fail. Pure refactors keep existing tests green and add
 characterization tests for code that had none. See
 [`docs/testing.md`](docs/testing.md) for where tests live and how to write
 emulation tests.
+
+**The 3:1 rule.** Every pull request adds at least **three lines of tests
+for each line of production code**. `scripts/pr_check.py` enforces it in CI
+and fails the pull request otherwise; run it locally before you open one:
+
+```sh
+python3 scripts/pr_check.py --base origin/main --title "fix(render): close the arc gap"
+```
+
+- It counts added lines that are neither blank nor comments. Test lines are
+  those in `tests.rs`, `*_tests.rs`, `*_bench.rs`, anything under a
+  `tests/` directory (including `tests/test_*.py`), and the inline
+  `#[cfg(test)] mod … { }` that closes a source file. Everything else in
+  `.rs` and `.py` files is production code; other files are not counted.
+- Pull requests without production code (docs, CI, dependency bumps) pass.
+- There are no exemptions. Meet the ratio with tests that pin real
+  behavior: edge cases, bounds, failure paths, regressions, differential
+  cases. Never pad (duplicate assertions, filler, or loops that only add
+  lines); reviewers reject padding like any other bad test.
+- When a change cannot meet the ratio cheaply, that usually means it is too
+  big or too hard to test. Split it, or make the logic pure and testable.
 
 Performance work is measured, not guessed: benchmark before and after (see
 [`docs/performance.md`](docs/performance.md)) and drop changes that do not
@@ -123,11 +144,36 @@ Details: [`docs/architecture.md`](docs/architecture.md).
   including queries and replies, with the bounds above. Unsupported or
   unknown sequences are ignored silently, never echoed.
 
-## Commits and releases
+## Branches, pull requests and commits
 
-- Work lands directly on `main` as small, focused commits; there are no pull
-  requests.
-- **Messages follow [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/):**
+`main` is protected: no direct pushes, force-pushes or deletion. Every
+change, however small, goes through a branch and a pull request.
+
+1. **Branch from an up-to-date `main`:**
+   `git switch main && git pull --rebase && git switch -c fix/arc-gap`.
+   Name branches `type/short-topic` after the Conventional Commits type.
+2. **Commit in small steps** on the branch (the red and green steps may be
+   separate commits). To pick up new work from `main`, rebase:
+   `git pull --rebase origin main`, then `git push --force-with-lease`.
+   Force-push only to your own branch.
+3. **Open a pull request** with `gh pr create`. One concern per pull
+   request; keep it small. The **title is a Conventional Commit** (see
+   below): it becomes the squashed commit on `main` and its changelog line.
+   The body explains *why*, links the issue, and carries the evidence:
+   benchmark numbers for performance work, screenshots for rendering
+   changes.
+4. **Required checks** must all pass: CI (Linux, macOS, FreeBSD, Debian
+   package), CodeQL, and the pull request rules (title and 3:1 ratio). No
+   approval is required; ask for review when a second pair of eyes helps.
+5. **Merge by squashing** once green: `gh pr merge --squash --delete-branch`.
+   Squash is the only merge method; history on `main` stays linear, one
+   commit per pull request.
+
+CI runs only for pull requests and for `main`; pushes to other branches run
+nothing until they have a pull request. Releases run only on `main`, after
+a merge.
+
+- **Titles and commits follow [Conventional Commits 1.0](https://www.conventionalcommits.org/en/v1.0.0/):**
   `type(scope)!: summary`, with the scope optional, and the summary in lower
   case, imperative mood, and without a final period. Types: `feat`, `fix`,
   `perf`, `refactor`, `docs`, `test`, `bench`, `build`, `ci`, `style`,
@@ -135,7 +181,8 @@ Details: [`docs/architecture.md`](docs/architecture.md).
   (`parser`, `vt`, `kitty`, `render`, `pty`, `input`, `bench`, `release`).
   Breaking changes get `!` and a `BREAKING CHANGE:` footer. The body explains
   *why*. Add no session links or other tool trailers; a `Co-Authored-By:`
-  footer is fine.
+  footer is fine. CI checks pull request titles; branch commits should
+  follow the same form.
 - **Versioning:** `YEAR.MONTH.PATCH` (two-digit year, month without a leading zero, e.g. 26.1.0 for January), plus a random
   codename per release (26.10.0 is "Giga Fly"). Put the codename in
   `[package.metadata.poopterm] codename` in `Cargo.toml` and in the
@@ -148,9 +195,10 @@ Details: [`docs/architecture.md`](docs/architecture.md).
   and then updates `Formula/poopterm.rb`. The changelog entry is built from
   the Conventional Commits since the last tag (`feat` → Added, `fix` → Fixed,
   `perf` → Performance, breaking changes first, the rest under Maintenance),
-  so write summaries that read well there. `GITHUB_TOKEN` pushes do not retrigger
-  CI. Do not bump versions manually for normal work; `git pull --rebase`
-  before pushing. Release logic lives in `scripts/release.py` and
+  so write pull request titles that read well there. GitHub Actions is the
+  only actor allowed to bypass the protection of `main`, for these release
+  commits; `GITHUB_TOKEN` pushes do not retrigger CI. Do not bump versions
+  manually for normal work. Release logic lives in `scripts/release.py` and
   `scripts/release.sh`; test it with `python3 -m unittest discover -s tests`.
 
 ## Verifying UI changes

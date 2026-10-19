@@ -506,4 +506,5 @@ codename. It updates `Cargo.toml`, `Cargo.lock`, and `CHANGELOG.md` together,
 publishes the tag and release, then updates the Homebrew formula. It skips
 stale CI runs and atomically rejects a push if `main` moved in the meantime.
 Published tags never move. These commits use `GITHUB_TOKEN` and do not trigger
-another workflow. Run `git pull --rebase` before pushing work to `main`.
+another workflow. Changes reach `main` only through pull requests, squashed
+after CI passes; see [AGENTS.md](AGENTS.md#branches-pull-requests-and-commits).

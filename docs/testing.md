@@ -1,8 +1,10 @@
 # Testing
 
-Poopterm is developed test-first (see the workflow in
-[`AGENTS.md`](../AGENTS.md#workflow-test-driven-development)). This page
-covers where tests live and how to write them.
+Poopterm is developed test-first, with at least three lines of tests for
+every line of production code in each pull request (see the workflow in
+[`AGENTS.md`](../AGENTS.md#workflow-31-test-driven-development)). This page
+covers where tests live and how to write them; the 3:1 check counts the
+places listed under [Where tests go](#where-tests-go) as tests.
 
 ## Running
 
