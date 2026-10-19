@@ -226,8 +226,7 @@ for Wayland (`wl-copy` and `wl-paste`), or `xclip`/`xsel` for X11.
 ### Shell integration
 
 Poopterm's hooks report command start/exit and the current working directory.
-They power prompt jumps, "Copy last command output", the exit-status marks
-beside prompts, and a tab marker (plus a window attention request) when a
+They power prompt jumps, "Copy last command output", and a tab marker (plus a window attention request) when a
 command of 10 s or more finishes while you are not looking.
 
 **zsh, fish, and bash load them automatically**, without editing your startup files

@@ -23,8 +23,6 @@ pub(crate) struct Frame {
 	pub cursor_shape: CursorShape,
 	pub scroll_offset: usize,
 	pub images: Vec<Placement>,
-	/// Visible rows holding a shell prompt, with their command's exit status.
-	pub prompt_marks: Vec<(usize, Option<i32>)>,
 	/// Frame-local extras: `cell.extra` indexes this; 0 means none.
 	extras: Vec<(bool, Box<[char]>)>,
 }
@@ -57,15 +55,6 @@ impl Frame {
 		})
 	}
 
-	/// The prompt mark on visible row `row`: `Some(exit status)` if it has one.
-	pub(crate) fn prompt_mark(&self, row: usize) -> Option<Option<i32>> {
-		self
-			.prompt_marks
-			.iter()
-			.find(|&&(mark_row, _)| mark_row == row)
-			.map(|&(_, exit)| exit)
-	}
-
 	/// Whether `cell` is part of an OSC 8 hyperlink.
 	pub(crate) fn is_link(&self, cell: &Cell) -> bool {
 		self
@@ -89,14 +78,6 @@ impl Term {
 		frame.cursor = (self.cursor_visible && self.scroll_offset == 0 && self.cx < cols)
 			.then_some((self.cx, self.cy));
 		frame.images.clone_from(&self.images);
-		let top = self.history_base + first_row;
-		frame.prompt_marks.clear();
-		frame.prompt_marks.extend(
-			self
-				.shell
-				.prompt_marks(top..top + rows)
-				.map(|(row, exit)| (row - top, exit)),
-		);
 
 		frame.cells.clear();
 		let blank = self.blank();

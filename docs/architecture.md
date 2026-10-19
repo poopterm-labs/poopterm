@@ -103,7 +103,7 @@ results.
 
 **Damage tracking.** `app::canvas::Canvas` keeps a back buffer holding the
 last frame and the `Frame` it shows. `render::damage::grid_damage` compares
-the new `Frame` with it row by row (cells, marks, links, prompt marks, cursor).
+the new `Frame` with it row by row (cells, marks, links, cursor).
 When lines scrolled into history (`Frame::top_line` grew), the old pixels are
 shifted up and only the new rows are drawn; with a wallpaper, rows are
 redrawn instead, because the wallpaper does not scroll. `app/repaint.rs`

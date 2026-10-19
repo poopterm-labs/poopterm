@@ -152,11 +152,6 @@ impl App {
 				.get(self.search_match_index)
 				.map(|selection| selection.ordered()),
 			focused: self.focused,
-			mark_colors: [
-				self.theme.palette[2],
-				self.theme.palette[1],
-				blend(self.theme.bg, self.theme.border, 160),
-			],
 		};
 		draw_grid(p, &mut self.fonts, &view, rows);
 	}

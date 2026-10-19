@@ -37,9 +37,7 @@ pub(crate) fn grid_damage(prev: &Frame, next: &Frame, allow_scroll: bool) -> Opt
 	let mut damaged: Vec<bool> = (0..rows)
 		.map(|row| {
 			let old = row + scroll;
-			old >= rows
-				|| !next.row_matches(row, prev, old)
-				|| next.prompt_mark(row) != prev.prompt_mark(old)
+			old >= rows || !next.row_matches(row, prev, old)
 		})
 		.collect();
 	// The cursor is drawn over its cell: erase it where it was (after the
@@ -156,13 +154,14 @@ mod tests {
 	}
 
 	#[test]
-	fn prompt_marks_damage_their_row() {
+	fn prompt_markers_draw_nothing() {
+		// Exit status is the shell's to show; markers only drive prompt jumps.
 		let mut screen = Screen::new(3, 2);
 		screen.feed("\x1b[?25l");
 		let before = screen.frame();
 		screen.feed("\x1b]133;A\x07");
 		let damage = grid_damage(&before, &screen.frame(), true).unwrap();
-		assert_eq!(damaged(&damage), [0]);
+		assert_eq!(damaged(&damage), [0usize; 0]);
 	}
 
 	#[test]

@@ -82,8 +82,7 @@ Notes:
   arrives, so a shell that prints before the window has its final size lays
   text out at the initial 80 columns, and the screenshot depends on timing.
 - **Damage tracking.** Most frames redraw only changed rows. To check partial
-  redraws, make the fake shell print in steps (scrolling, cursor moves,
-  prompt marks), screenshot the same build with and without
+  redraws, make the fake shell print in steps (scrolling, cursor moves), screenshot the same build with and without
   `POOPTERM_FULL_REDRAW=1`, and compare. That variable disables partial
   redraws.
 - Debug builds panic if a thread locks a terminal it already holds, so run

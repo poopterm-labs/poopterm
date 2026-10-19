@@ -1,7 +1,6 @@
 //! OSC 133 semantic prompt markers.
 use std::{
 	collections::VecDeque,
-	ops::Range,
 	time::{Duration, Instant},
 };
 
@@ -90,28 +89,6 @@ impl ShellIntegration {
 		self.prompts().map(|m| m.row).find(|&r| r > row)
 	}
 
-	/// Prompt rows within `rows`, each with the exit status of the command
-	/// entered at it (`None` while running or when unknown).
-	pub fn prompt_marks(&self, rows: Range<usize>) -> impl Iterator<Item = (usize, Option<i32>)> {
-		self
-			.markers
-			.iter()
-			.enumerate()
-			.filter_map(move |(index, marker)| {
-				if marker.phase != Phase::Prompt || !rows.contains(&marker.row) {
-					return None;
-				}
-				let exit = self
-					.markers
-					.iter()
-					.skip(index + 1)
-					.take_while(|m| m.phase != Phase::Prompt)
-					.find(|m| m.phase == Phase::Finished)
-					.and_then(|m| m.exit_code);
-				Some((marker.row, exit))
-			})
-	}
-
 	/// The most recent finished command's output: its start `(row, col)` and
 	/// the row where it ended (exclusive).
 	pub fn last_output(&self) -> Option<((usize, usize), usize)> {
@@ -174,14 +151,6 @@ mod tests {
 		assert_eq!(shell.next_prompt(0), Some(4));
 		assert_eq!(shell.next_prompt(5), Some(8));
 		assert_eq!(shell.next_prompt(8), None);
-	}
-
-	#[test]
-	fn prompts_report_the_exit_status_of_their_command() {
-		let shell = history(Instant::now());
-		let marks: Vec<_> = shell.prompt_marks(0..9).collect();
-		assert_eq!(marks, [(0, Some(0)), (4, Some(2)), (8, None)]);
-		assert_eq!(shell.prompt_marks(3..5).collect::<Vec<_>>(), [(4, Some(2))]);
 	}
 
 	#[test]

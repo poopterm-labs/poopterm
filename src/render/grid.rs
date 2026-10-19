@@ -28,8 +28,6 @@ pub(crate) struct GridView<'a> {
 	pub search_match: Option<(CellPoint, CellPoint)>,
 	/// Unfocused windows draw a hollow block cursor.
 	pub focused: bool,
-	/// Mark colors: succeeded, failed, running or unknown.
-	pub mark_colors: [u32; 3],
 }
 
 fn contains(range: Option<(CellPoint, CellPoint)>, point: CellPoint) -> bool {
@@ -73,27 +71,6 @@ pub(crate) fn draw_grid(
 		}
 	}
 	draw_images(p, view);
-	draw_prompt_marks(p, view, &wanted);
-}
-
-/// A thin bar in the left margin beside each prompt, colored by exit status.
-fn draw_prompt_marks(p: &mut Painter, view: &GridView, wanted: &impl Fn(usize) -> bool) {
-	let (left, top) = view.origin;
-	let width = (left / 3).max(1);
-	let x = left.saturating_sub(width) / 2;
-	for &(row, exit) in view
-		.frame
-		.prompt_marks
-		.iter()
-		.filter(|(row, _)| wanted(*row))
-	{
-		let color = match exit {
-			Some(0) => view.mark_colors[0],
-			Some(_) => view.mark_colors[1],
-			None => view.mark_colors[2],
-		};
-		p.rect(x, top + row * view.cell.1, width, view.cell.1, color);
-	}
 }
 
 fn draw_cell(
