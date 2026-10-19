@@ -1,7 +1,44 @@
 //! Terminal font loading with bundled and system symbol-font fallbacks.
+#[allow(
+	dead_code,
+	reason = "the renderer switches to this engine in a later commit"
+)]
+mod cff;
+#[allow(
+	dead_code,
+	reason = "the renderer switches to this engine in a later commit"
+)]
+mod cmap;
 pub(crate) mod db;
 #[cfg(test)]
 mod db_tests;
+#[allow(
+	dead_code,
+	reason = "the renderer switches to this engine in a later commit"
+)]
+mod face;
+#[allow(
+	dead_code,
+	reason = "the renderer switches to this engine in a later commit"
+)]
+mod font;
+#[cfg(test)]
+mod font_tests;
+#[allow(
+	dead_code,
+	reason = "the renderer switches to this engine in a later commit"
+)]
+mod glyf;
+#[allow(
+	dead_code,
+	reason = "the renderer switches to this engine in a later commit"
+)]
+mod raster;
+#[allow(
+	dead_code,
+	reason = "the renderer switches to this engine in a later commit"
+)]
+mod read;
 mod sfnt;
 #[cfg(test)]
 mod sfnt_tests;
