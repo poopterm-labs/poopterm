@@ -87,13 +87,19 @@ fn fonts() -> FontSet {
 	FontSet::new(font, Vec::new())
 }
 
-/// Feeds `data` to a fresh terminal; draws a frame every [`FRAME_EVERY`]
-/// bytes when `fonts` is given. Returns MB/s.
+/// Feeds `data` to a terminal whose history is full, as after real use;
+/// draws a frame every [`FRAME_EVERY`] bytes when `fonts` is given. Returns
+/// MB/s.
 pub(crate) fn measure(data: &[u8], size: Size, mut fonts: Option<&mut FontSet>) -> f64 {
 	let theme = Theme::from_kind(ThemeKind::Poop);
 	let mut term = Term::new(size.cols, size.rows, theme, "/".into());
 	(term.cell_width, term.cell_height) = CELL;
 	let mut parser = Parser::new();
+	// Costs that grow with history (copying it, say) show up only when there is some.
+	let line = format!("{}\r\n", "x".repeat(size.cols / 2));
+	let lines = term.scrollback_limit + size.rows;
+	parser.advance(&mut term, line.repeat(lines).as_bytes());
+	term.responses.clear();
 	let mut frame = Frame::default();
 	let mut pixels = vec![0u32; size.cols * CELL.0 * size.rows * CELL.1];
 	let mut since_frame = 0;

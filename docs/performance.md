@@ -13,7 +13,9 @@ kitty graphics (raw RGBA, PNG, zlib). Results are per workload plus an
 overall figure (total bytes over total time), so a regression in one use
 case cannot hide behind another.
 
-**Headless**, parser and terminal, then with a frame rendered every MiB:
+**Headless**, parser and terminal, then with a frame rendered every MiB.
+Each run starts with a full scrollback, as after real use, so costs that grow
+with history show up:
 
 ```sh
 cargo build --release
