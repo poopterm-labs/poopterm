@@ -68,6 +68,32 @@ which is why floods are capped at 30 fps. Parse throughput stays CPU work.
 - Measure frame time, input latency and flood throughput before and after
   on every platform, as for any performance work.
 
+## Resource management and memory
+
+- **cgroups v2 per tab, fully automatic (Linux).** Like Ghostty, put
+  each shell in its own cgroup, so a runaway program in one tab cannot
+  starve the terminal or the other tabs. The terminal process keeps its
+  own group. No configuration: at startup, check that `/sys/fs/cgroup` is
+  a cgroup2 mount (`cgroup.controllers` exists) and that we may create
+  groups there. Do that either through a delegated subtree we can write
+  (our own cgroup's directory) or by asking systemd for a transient user
+  scope over D-Bus. If neither works, run exactly as today with no
+  errors. Start with per-tab groups (memory and pids accounting, a
+  `memory.high` so one tab is throttled before the OOM killer picks the
+  terminal), then consider CPU weight so the UI and parser threads stay
+  responsive while a tab floods. Test in CI: available, read-only and
+  missing cgroupfs all behave correctly.
+- **Transparent huge pages for large buffers.** Large, long-lived
+  allocations (scrollback rows, image bitmaps, the frame buffer, PTY
+  queues) could cause fewer TLB misses on huge pages. Check once at
+  startup by reading `/sys/kernel/mm/transparent_hugepage/enabled`
+  (`always` or `madvise`, cached). Then `madvise(MADV_HUGEPAGE)` only
+  allocations of at least 2 MiB, aligned so they can actually use huge
+  pages. FreeBSD promotes superpages by itself, and macOS has no
+  equivalent, so it is Linux-only and does nothing elsewhere. Measure RSS
+  and throughput before and after, and keep it only for buffers where it
+  helps reproducibly.
+
 ## Replacing dependencies with our own code
 
 Chosen to replace with our own implementations, built around this
