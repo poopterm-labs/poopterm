@@ -1,12 +1,12 @@
 //! Select Graphic Rendition (`CSI … m`): colors and text attributes.
+use super::params::ParamList;
 use crate::{
 	term::{Term, attr::*},
 	theme::xterm_color,
 };
-use vte::Params;
 
 impl Term {
-	pub(crate) fn sgr(&mut self, params: &Params) {
+	pub(crate) fn sgr(&mut self, params: &(impl ParamList + ?Sized)) {
 		// vte stores at most 32 parameters/subparameters in its parser state.
 		// Keep group slices on the stack instead of allocating nested Vecs for
 		// every SGR sequence (which is common in full-screen terminal apps).

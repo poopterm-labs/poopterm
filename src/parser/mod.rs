@@ -5,11 +5,15 @@
 //! (`?2026`) is active, everything except the mode switch itself goes to the
 //! pending snapshot returned by [`Term::pending`].
 mod csi;
+mod erase;
 mod esc;
+mod fast_csi;
 mod osc;
+mod params;
 mod print;
 mod scan;
 mod sgr;
+mod utf8;
 
 use crate::term::Term;
 use vte::{Params, Perform};
@@ -103,6 +107,20 @@ impl<'a> Batch<'a> {
 				Some(&byte) if byte < 0x20 && byte != 0x1b => {
 					term.apply_execute(byte);
 					bytes = &bytes[1..];
+				}
+				Some(0x1b) => {
+					if let Some(used) = fast_csi::apply(term, bytes) {
+						bytes = &bytes[used..];
+					} else {
+						return bytes;
+					}
+				}
+				Some(0x80..=0xff) => {
+					let used = term.print_utf8(bytes);
+					if used == 0 {
+						return bytes;
+					}
+					bytes = &bytes[used..];
 				}
 				_ => return bytes,
 			}
@@ -336,6 +354,14 @@ mod bench {
 					}
 					out.extend_from_slice(b"\r\n");
 				}
+				"cursor" => out.extend_from_slice(
+					format!(
+						"\x1b[{};{}Htext\x1b[K\x1b[2A\x1b[3C",
+						1 + next() % 24,
+						1 + next() % 80
+					)
+					.as_bytes(),
+				),
 				"unicode" => out.extend_from_slice("héllo wörld 日本語 → λ 🙂 naïve ─┼─\r\n".as_bytes()),
 				_ => out.extend_from_slice(
 					format!(
@@ -356,7 +382,7 @@ mod bench {
 	#[test]
 	#[ignore = "benchmark; run explicitly in release mode"]
 	fn parser_throughput() {
-		for kind in ["ascii", "unicode", "csi"] {
+		for kind in ["ascii", "unicode", "csi", "cursor"] {
 			let data = payload(kind);
 			let mut term = Term::new(200, 50, Theme::from_kind(ThemeKind::Poop), "/".into());
 			let mut parser = Parser::new();

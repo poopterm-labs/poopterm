@@ -521,6 +521,15 @@ fn cells_stay_compact() {
 fn batched_printing_matches_per_character_printing() {
 	let fragments: &[&[u8]] = &[
 		b"hello world ",
+		"🙂猫e\u{301}日本語".as_bytes(),
+		b"\xff\xe7x\xab",
+		b"\xc0\x80\xed\xa0\x80",
+		b"\xf4\x90\x80\x80",
+		b"\x1b[9G\xe7\x8c\xab",
+		b"\x1b[38;2;1;2;3m",
+		b"\x1b[1;2;3;4;5;6m",
+		b"\x1b[0;0H\x1b[65535A\x1b[0D",
+		b"\x1b[?6h\x1b[2;2H\x1b[?6l",
 		b"x",
 		b"\r\n",
 		b"\n",
@@ -730,4 +739,66 @@ fn prompt_jumps_scroll_the_view_to_the_prompt() {
 	assert!(!t.jump_to_prompt(-1), "no earlier prompt");
 	assert!(t.jump_to_prompt(1));
 	assert_eq!(view_row(&t, 0).trim_end(), "$ b");
+}
+
+#[test]
+fn recycling_scrollback_keeps_shared_rows_immutable() {
+	let mut t = terminal(4, 1);
+	t.scrollback_limit = 1;
+	feed(&mut t, b"old\r\n");
+	let shared = t.scrollback[0].clone();
+	feed(&mut t, b"new\r\nlast\r\n");
+	assert_eq!(shared.iter().map(|c| c.ch).collect::<String>(), "old ");
+	assert_eq!(
+		t.scrollback[0].iter().map(|c| c.ch).collect::<String>(),
+		"last"
+	);
+	assert_eq!(t.history_base, 2);
+}
+
+#[test]
+fn utf8_and_common_csi_match_vte_at_every_read_boundary() {
+	let stream = concat!(
+		"héllo wörld 日本語 → λ 🙂 naïve ─┼─\r\n",
+		"\x1b[1;31mabc\x1b[0m\x1b[2;3H猫\x1b[K",
+		"\x1b[2A\x1b[0B\x1b[999999C\x1b[2D",
+		"e\u{301}👨\u{200d}👩\r\n",
+		"\x1b[38:2::1:2:3mx\x1b[0mend"
+	)
+	.as_bytes();
+	let mut reference = terminal(9, 5);
+	vte::Parser::new().advance(&mut reference, stream);
+	let mut expected = super::Frame::default();
+	reference.snapshot(&mut expected);
+	for boundary in 0..=stream.len() {
+		let mut actual = terminal(9, 5);
+		let mut parser = Parser::new();
+		parser.advance(&mut actual, &stream[..boundary]);
+		parser.advance(&mut actual, &stream[boundary..]);
+		let mut frame = super::Frame::default();
+		actual.snapshot(&mut frame);
+		assert_eq!(frame.cursor, expected.cursor, "boundary {boundary}");
+		assert_eq!(actual.responses, reference.responses, "boundary {boundary}");
+		for row in 0..frame.rows {
+			assert!(
+				frame.row_matches(row, &expected, row),
+				"boundary {boundary}, row {row}"
+			);
+		}
+	}
+}
+
+#[test]
+fn erasing_either_half_of_a_wide_character_repairs_only_its_boundary() {
+	for (sequence, expected) in [
+		("\x1b[2G\x1b[K", "      "),
+		("\x1b[1G\x1b[1K", "  xy  "),
+		("\x1b[2K", "      "),
+	] {
+		let mut t = terminal(6, 1);
+		feed(&mut t, "猫xy".as_bytes());
+		feed(&mut t, sequence.as_bytes());
+		assert_eq!(row(&t, 0), expected);
+		assert!(t.grid[0].iter().all(|cell| cell.width == 1));
+	}
 }

@@ -106,3 +106,23 @@ queue stays near full. On Unicode output, vte's `ground_dispatch` plus UTF-8
 validation take ~55% of parser time; on ASCII output, line feeds
 (`scroll_region_up`: scrollback `Arc` allocation and row blanking) take ~20%.
 The plan toward 200 MB/s is in [`TODO.md`](../TODO.md).
+
+## Follow-up work (26.10)
+
+The TODO throughput work was implemented and validated with the parser and
+terminal equivalence tests: UTF-8 decoding and width handling for common
+ranges, scrollback row reuse, the empty-image fast path, and bounded parsing
+for common CSI sequences. Poopterm preserves incomplete UTF-8 input across
+feeds, including when a multibyte character is split between reads.
+
+The PTY producer ceiling was measured on an Apple M4 with the discard-reader
+benchmark in `scripts/bench-pty.py` (64 MiB ×3): ASCII 320, Unicode 323,
+CSI-heavy 325, and cursor movement 305 MB/s. This confirms that the producer
+path can exceed the 200 MB/s end-to-end goal on this host.
+
+An owned-buffer queue prototype varied by payload in a 64 MiB ×5 comparison
+(ASCII 213→266 MB/s, Unicode 242→225, CSI 189→194, cursor 162→165). A second
+paired run did not complete, so the optimization was removed instead of
+claiming an unproven gain. Selection and search row damage is checked by
+pixel-equivalence tests; an ignored 300-frame test measured 25.6 ms for full
+redraw and 3.39 ms for partial redraw at 100×30 cells and a 1000×600 surface.

@@ -1,11 +1,11 @@
 //! Control Sequence Introducer (`CSI`) dispatch: cursor, erase, scroll and modes.
+use super::params::ParamList;
 use crate::term::{CursorShape, Term};
-use vte::Params;
 
 impl Term {
 	pub(super) fn apply_csi_dispatch(
 		&mut self,
-		params: &Params,
+		params: &(impl ParamList + ?Sized),
 		intermediates: &[u8],
 		ignore: bool,
 		action: char,
@@ -212,16 +212,7 @@ impl Term {
 				}
 				_ => {}
 			},
-			'K' => {
-				let row_start = self.idx(0, self.cy);
-				let row_end = row_start + self.cols;
-				match raw0 {
-					0 => self.clear_range(self.idx(self.cx, self.cy), row_end),
-					1 => self.clear_range(row_start, self.idx(self.cx + 1, self.cy)),
-					2 => self.clear_range(row_start, row_end),
-					_ => {}
-				}
-			}
+			'K' => self.erase_line(raw0),
 			'@' => {
 				self.erase_images(self.cy * self.cols, (self.cy + 1) * self.cols);
 				let count = p(0, 1).min(self.cols - self.cx);
@@ -273,7 +264,7 @@ impl Term {
 		}
 		// Erasing or shifting can split a wide character from its spacer.
 		match action {
-			'@' | 'P' | 'X' | 'K' => self.repair_wide_rows(self.cy, self.cy + 1),
+			'@' | 'P' | 'X' => self.repair_wide_rows(self.cy, self.cy + 1),
 			// Rows other than the cursor's are erased completely.
 			'J' if raw0 <= 1 => self.repair_wide_rows(self.cy, self.cy + 1),
 			_ => {}

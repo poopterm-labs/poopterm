@@ -22,7 +22,7 @@ cargo test --release -- --ignored --nocapture parser_throughput   # parser bench
 - Formatting: hard tabs, width 100 (`rustfmt.toml`). Always run `cargo fmt`.
 - Linux build deps: `pkg-config libx11-dev libxkbcommon-dev libwayland-dev`.
 - CI (`.github/workflows/ci.yml`) runs fmt, test, clippy and a release build
-  on Linux and macOS (plus a FreeBSD clippy check). All must pass.
+  on Linux, macOS, and a FreeBSD VM. All must pass.
 - **Platform-gated code** (`#[cfg(target_os = ...)]`) is not compiled on your
   host. Before committing such changes, check the other targets too:
   `rustup target add aarch64-apple-darwin x86_64-unknown-freebsd`, then
@@ -114,10 +114,14 @@ Details: [`docs/architecture.md`](docs/architecture.md).
   `[package.metadata.poopterm] codename` in `Cargo.toml` and in the
   changelog heading (`## 26.10.0 "Giga Fly" — date`); CI uses it in the
   release title. Patch releases keep their release's codename.
-- CI on `main` creates a `vX.Y.Z` tag and GitHub release when `Cargo.toml`'s
-  version has no tag yet. A version bump is therefore a release: update
-  `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md` together, and update
-  `Formula/poopterm.rb` only after the tag exists.
+- After fully green CI on `main`, CI increments the patch or starts a new
+  month at `YY.M.0` with a new random codename. It commits `Cargo.toml`,
+  `Cargo.lock`, and `CHANGELOG.md` together, atomically pushes the commit and
+  tag only if `main` still matches the checked revision, publishes the release,
+  and then updates `Formula/poopterm.rb`. `GITHUB_TOKEN` pushes do not retrigger
+  CI. Do not bump versions manually for normal work; `git pull --rebase`
+  before pushing. Release logic lives in `scripts/release.py` and
+  `scripts/release.sh`; test it with `python3 -m unittest discover -s tests`.
 
 ## Verifying UI changes
 

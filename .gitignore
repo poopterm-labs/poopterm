@@ -60,3 +60,7 @@ rust-project.json
 
 # Deferred Android package-environment and parity experiment
 /android/deferred/
+
+# Python benchmark and release-tool bytecode
+__pycache__/
+*.pyc

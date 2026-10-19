@@ -230,14 +230,17 @@ They power prompt jumps, "Copy last command output", the exit-status marks
 beside prompts, and a tab marker (plus a window attention request) when a
 command of 10 s or more finishes while you are not looking.
 
-**zsh and fish load them automatically**, without editing your startup files
+**zsh, fish, and bash load them automatically**, without editing your startup files
 (zsh through a temporary `ZDOTDIR` that then restores yours, fish through
-`XDG_DATA_DIRS`). Set `shell_integration = "off"` in `config.toml` to disable
+`XDG_DATA_DIRS`, bash through `--rcfile`). Bash's loader reads `/etc/profile`
+and the first available login profile before installing hooks, or `.bashrc`
+when no login profile exists. Bash ignores `--rcfile` with `-l`, so this shell
+is interactive but does not set bash's `login_shell` flag. Set `shell_integration = "off"` in `config.toml` to disable
 this. The hooks also make `ssh` connect with `TERM=xterm-256color`, since
 remote hosts rarely have poopterm's terminfo entry; set
 `POOPTERM_SSH_KEEP_TERM=1` to keep it.
 
-For bash, or to install the hooks by hand, review the output and append it to
+To install the hooks by hand, review the output and append it to
 the startup file for the shell you use:
 
 ```sh
@@ -376,14 +379,12 @@ cargo build --release --locked
 Development is test-driven. Start with [`AGENTS.md`](AGENTS.md) (for humans
 and AI coding agents alike), then see [architecture](docs/architecture.md),
 [testing](docs/testing.md) and [performance](docs/performance.md).
-CI builds and checks macOS and Linux; BSD still needs testing on real systems.
+CI builds and checks macOS, Linux, and a real FreeBSD VM.
 
-
-Releases are numbered `YEAR.MONTH.PATCH` (two-digit year) and each gets a
-random codename; 26.10.0 is "Giga Fly". The codename lives in
-`[package.metadata.poopterm]` in `Cargo.toml` and in the changelog heading.
-Update `Cargo.toml`, the Poopterm entry in `Cargo.lock`, and the changelog together.
-Successful CI on `main` creates the matching `vX.Y.Z` tag and GitHub release only
-when the tag does not already exist. Prerelease versions such as `0.4.0-1` are
-published as GitHub prereleases. Published tags are never moved. Update the
-Homebrew formula after that tag exists, so installs never point at missing source.
+Releases are numbered `YY.M.PATCH`. After all checks pass on `main`, CI
+increments the patch, or starts a new month at `YY.M.0` with a new random
+codename. It updates `Cargo.toml`, `Cargo.lock`, and `CHANGELOG.md` together,
+publishes the tag and release, then updates the Homebrew formula. It skips
+stale CI runs and atomically rejects a push if `main` moved in the meantime.
+Published tags never move. These commits use `GITHUB_TOKEN` and do not trigger
+another workflow. Run `git pull --rebase` before pushing work to `main`.

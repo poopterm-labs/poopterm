@@ -6,8 +6,8 @@ use crate::{
 	ui::selection::CellPoint,
 };
 
-/// Drawing inputs besides the grid that change how the grid looks. Any
-/// change redraws everything.
+/// Drawing inputs besides the grid. Session, focus, and overlays need a full
+/// frame; highlights only damage rows where their coverage changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct DrawKey {
 	pub session: u64,
@@ -68,12 +68,22 @@ impl Canvas {
 		}
 		let partial = match &self.shown {
 			Some((shown, shown_key))
-				if *shown_key == key
-					&& !key.overlay
-					&& key.selection.is_none()
-					&& key.search_match.is_none() =>
+				if shown_key.session == key.session
+					&& shown_key.focused == key.focused
+					&& !shown_key.overlay
+					&& !key.overlay =>
 			{
-				grid_damage(shown, frame, allow_scroll)
+				grid_damage(shown, frame, allow_scroll).map(|mut damage| {
+					for (row, damaged) in damage.rows.iter_mut().enumerate() {
+						let old = shown.first_row + row + damage.scroll;
+						let new = frame.first_row + row;
+						*damaged |= coverage(shown_key.selection, old, frame.cols)
+							!= coverage(key.selection, new, frame.cols)
+							|| coverage(shown_key.search_match, old, frame.cols)
+								!= coverage(key.search_match, new, frame.cols);
+					}
+					damage
+				})
 			}
 			_ => None,
 		};
@@ -91,6 +101,25 @@ impl Canvas {
 			None => self.shown = Some((std::mem::take(frame), key)),
 		}
 	}
+}
+
+/// Inclusive highlighted columns of a visible row, clipped to the grid.
+fn coverage(
+	range: Option<(CellPoint, CellPoint)>,
+	row: usize,
+	cols: usize,
+) -> Option<(usize, usize)> {
+	let (start, end) = range?;
+	if row < start.row || row > end.row || cols == 0 {
+		return None;
+	}
+	let left = if row == start.row { start.col } else { 0 };
+	let right = if row == end.row {
+		end.col.min(cols - 1)
+	} else {
+		cols - 1
+	};
+	(left <= right).then_some((left, right))
 }
 
 /// Merges sorted, possibly adjacent pixel-row ranges.
@@ -173,9 +202,54 @@ mod tests {
 	}
 
 	#[test]
+	fn highlight_changes_damage_only_rows_with_different_coverage() {
+		let mut canvas = Canvas::new();
+		let first = frame("\x1b[?25l");
+		canvas.plan(&first, KEY, (10, 10), true);
+		canvas.remember(&mut first.clone(), KEY);
+		let selected = DrawKey {
+			selection: Some((CellPoint { row: 1, col: 0 }, CellPoint { row: 1, col: 1 })),
+			..KEY
+		};
+		assert_eq!(
+			canvas.plan(&first, selected, (10, 10), true),
+			Plan::Partial(GridDamage {
+				scroll: 0,
+				rows: vec![false, true]
+			})
+		);
+		canvas.remember(&mut first.clone(), selected);
+		assert!(
+			matches!(canvas.plan(&first, selected, (10, 10), true), Plan::Partial(d) if d.is_empty())
+		);
+		assert_eq!(
+			canvas.plan(&first, KEY, (10, 10), true),
+			Plan::Partial(GridDamage {
+				scroll: 0,
+				rows: vec![false, true]
+			})
+		);
+		let found = DrawKey {
+			search_match: selected.selection,
+			..KEY
+		};
+		assert_eq!(
+			canvas.plan(&first, found, (10, 10), true),
+			Plan::Partial(GridDamage {
+				scroll: 0,
+				rows: vec![false, true]
+			})
+		);
+	}
+
+	#[test]
 	fn bands_are_merged() {
 		let mut bands = vec![(10, 20), (0, 5), (20, 30), (25, 26), (40, 41)];
 		merge_bands(&mut bands);
 		assert_eq!(bands, [(0, 5), (10, 30), (40, 41)]);
 	}
 }
+
+#[cfg(test)]
+#[path = "canvas_pixels.rs"]
+mod pixels;

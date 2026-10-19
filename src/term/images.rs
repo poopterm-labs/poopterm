@@ -23,7 +23,7 @@ impl Term {
 	}
 
 	pub(crate) fn erase_images(&mut self, from: usize, to: usize) {
-		if from >= to {
+		if self.images.is_empty() || from >= to {
 			return;
 		}
 		let cols = self.cols;

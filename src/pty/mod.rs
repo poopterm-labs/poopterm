@@ -4,7 +4,6 @@ mod queue;
 mod writer;
 
 use std::{
-	env,
 	error::Error,
 	io::Read,
 	path::PathBuf,
@@ -126,8 +125,8 @@ pub(crate) fn spawn_session(
 		pixel_width: 0,
 		pixel_height: 0,
 	})?;
-	let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-	let mut cmd = CommandBuilder::new(shell);
+	let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+	let mut cmd = CommandBuilder::new(&shell);
 	cmd.env("TERM", &term_env.term);
 	if let Some(dirs) = &term_env.terminfo_dirs {
 		cmd.env("TERMINFO_DIRS", dirs);
@@ -138,7 +137,10 @@ pub(crate) fn spawn_session(
 	cmd.env("COLORTERM", "truecolor");
 	cmd.env("TERM_PROGRAM", "poopterm");
 	cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-	cmd.arg("-l");
+	cmd.args(crate::shell_integration::inject::shell_args(
+		crate::shell_integration::inject::Shell::from_path(&shell),
+		&term_env.extra,
+	));
 	cmd.cwd(&cwd);
 	let child = pair.slave.spawn_command(cmd)?;
 	drop(pair.slave);

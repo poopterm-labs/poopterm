@@ -228,3 +228,40 @@ fn zsh_injection_loads_hooks_and_restores_the_users_startup_files() {
 		);
 	}
 }
+
+#[test]
+fn bash_injection_loads_profiles_and_hooks_once_and_respects_off() {
+	use super::inject::{Shell, injection_env, install_scripts, shell_args};
+	if Command::new("bash").arg("--version").output().is_err() {
+		return;
+	}
+	let scratch = Scratch::new("bash-auto");
+	let scripts = scratch.0.join("scripts with spaces");
+	let home = scratch.0.join("home");
+	std::fs::create_dir_all(&home).unwrap();
+	std::fs::write(
+		home.join(".bash_profile"),
+		"PROFILE=yes; source ~/.bashrc\n",
+	)
+	.unwrap();
+	std::fs::write(
+		home.join(".bashrc"),
+		"RC_COUNT=$(( ${RC_COUNT:-0} + 1 )); PS1='P> '\n",
+	)
+	.unwrap();
+	install_scripts(&scripts).unwrap();
+	let env = injection_env(Shell::Bash, &scripts, |_| None);
+	let output = Command::new("bash")
+		.args(shell_args(Shell::Bash, &env))
+		.args(["-c", "printf 'probe=%s:%s:%s:%s' \"$PROFILE\" \"$RC_COUNT\" \"$__POOPTERM_INTEGRATION_LOADED\" \"${POOPTERM_BASH_RCFILE-unset}\""])
+		.env("HOME", &home)
+		.envs(env)
+		.output().unwrap();
+	let stdout = String::from_utf8_lossy(&output.stdout);
+	assert!(stdout.contains("probe=yes:1:1:unset"), "{stdout:?}");
+	assert_eq!(
+		shell_args(Shell::Bash, &[]),
+		[std::ffi::OsString::from("-l")]
+	);
+	assert!(super::inject::prepare("/bin/bash", Some("off")).is_empty());
+}

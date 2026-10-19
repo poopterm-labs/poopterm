@@ -13,6 +13,12 @@ impl Term {
 			c
 		};
 		let width = c.width().unwrap_or(0).min(self.cols);
+		let template = self.styled_cell();
+		self.print_styled(c, width, template);
+	}
+
+	#[inline(always)]
+	fn print_styled(&mut self, c: char, width: usize, template: Cell) {
 		if self.attach_to_previous(c, width) || width == 0 {
 			return;
 		}
@@ -46,7 +52,6 @@ impl Term {
 		if width == 2 && x + 2 < cols && row[x + 1].width == 2 {
 			row[x + 2] = blank;
 		}
-		let template = self.styled_cell();
 		let row = &mut self.grid[y];
 		row[x] = Cell {
 			ch: c,
@@ -62,6 +67,74 @@ impl Term {
 		self.wrap_pending = x + width >= cols;
 		self.cx = (x + width).min(cols - 1);
 		self.last_printed = Some(c);
+	}
+
+	/// Prints a validated ground-state run with one style lookup. Stops before
+	/// controls and malformed UTF-8, which the caller handles separately.
+	pub(super) fn print_utf8(&mut self, bytes: &[u8]) -> usize {
+		let template = self.styled_cell();
+		let blank = self.blank();
+		let general = self.charsets[self.active_charset] || self.insert_mode || !self.images.is_empty();
+		let mut used = 0;
+		while let Some((c, len)) = super::utf8::decode(&bytes[used..]) {
+			if c < ' ' || ('\u{80}'..='\u{9f}').contains(&c) {
+				break;
+			}
+			let width = super::utf8::width(c).min(self.cols);
+			if general {
+				self.apply_print(c);
+				used += len;
+				continue;
+			}
+			if width == 0 || self.wrap_pending || self.cx + width > self.cols {
+				self.print_styled(c, width, template);
+				used += len;
+				continue;
+			}
+			if self.attach_to_previous(c, width) {
+				used += len;
+				continue;
+			}
+			// Resolve the row and style once for the whole segment. Zero-width
+			// marks and margin handling return to the general path above.
+			let mut x = self.cx;
+			let row = &mut self.grid[self.cy];
+			while let Some((c, len)) = super::utf8::decode(&bytes[used..]) {
+				if c < ' ' || ('\u{80}'..='\u{9f}').contains(&c) {
+					break;
+				}
+				let width = super::utf8::width(c).min(self.cols);
+				if width == 0 || x + width > self.cols {
+					break;
+				}
+				if row[x].width == 0 && x > 0 {
+					row[x - 1] = blank;
+				}
+				if row[x].width == 2 && x + 1 < self.cols {
+					row[x + 1] = blank;
+				}
+				if width == 2 && x + 2 < self.cols && row[x + 1].width == 2 {
+					row[x + 2] = blank;
+				}
+				row[x] = Cell {
+					ch: c,
+					width: width as u8,
+					..template
+				};
+				if width == 2 && x + 1 < self.cols {
+					row[x + 1] = Cell {
+						width: 0,
+						..template
+					};
+				}
+				x += width;
+				used += len;
+				self.last_printed = Some(c);
+			}
+			self.wrap_pending = x >= self.cols;
+			self.cx = x.min(self.cols - 1);
+		}
+		used
 	}
 
 	/// Prints a run of printable ASCII (`0x20..=0x7e`). Equivalent to calling

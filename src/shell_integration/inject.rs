@@ -5,8 +5,7 @@
 //!   the user's `.zprofile` and `.zshrc` as usual.
 //! - fish: a `vendor_conf.d` script found through `XDG_DATA_DIRS`, which
 //!   removes its directory from `XDG_DATA_DIRS` again.
-//! - bash has no clean hook point, so it stays manual
-//!   (`poopterm --print-shell-integration bash`).
+//! - bash: `--rcfile` loads login startup files and then the hooks.
 use std::{ffi::OsString, fs, io, path::Path};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +42,11 @@ pub(crate) fn install_scripts(dir: &Path) -> io::Result<()> {
 			include_str!("../../shell-integration/zsh.zsh").to_owned(),
 		),
 		(dir.join("fish/fish/vendor_conf.d/poopterm.fish"), fish),
+		(
+			dir.join("bash/rcfile.sh"),
+			include_str!("../../shell-integration/bash-loader.sh").to_owned()
+				+ include_str!("../../shell-integration/bash.sh"),
+		),
 	] {
 		if fs::read_to_string(&path).is_ok_and(|current| current == contents) {
 			continue;
@@ -78,7 +82,11 @@ pub(crate) fn injection_env(
 				("POOPTERM_FISH_DATA_DIR".to_owned(), data),
 			]
 		}
-		Shell::Bash | Shell::Other => Vec::new(),
+		Shell::Bash => vec![(
+			"POOPTERM_BASH_RCFILE".to_owned(),
+			dir.join("bash/rcfile.sh").into_os_string(),
+		)],
+		Shell::Other => Vec::new(),
 	}
 }
 
@@ -92,8 +100,19 @@ pub(crate) fn prepare(shell_path: &str, setting: Option<&str>) -> Vec<(String, O
 	let Some(dir) = crate::config::data_dir().map(|dir| dir.join("shell-integration")) else {
 		return Vec::new();
 	};
-	if matches!(shell, Shell::Bash | Shell::Other) || install_scripts(&dir).is_err() {
+	if matches!(shell, Shell::Other) || install_scripts(&dir).is_err() {
 		return Vec::new();
 	}
 	injection_env(shell, &dir, |name| std::env::var_os(name))
+}
+
+/// Bash ignores --rcfile in login mode. The loader reads login startup files
+/// itself; other shells, and disabled integration, retain the normal -l path.
+pub(crate) fn shell_args(shell: Shell, env: &[(String, OsString)]) -> Vec<OsString> {
+	if shell == Shell::Bash
+		&& let Some((_, path)) = env.iter().find(|(key, _)| key == "POOPTERM_BASH_RCFILE")
+	{
+		return vec!["--rcfile".into(), path.clone(), "-i".into()];
+	}
+	vec!["-l".into()]
 }
