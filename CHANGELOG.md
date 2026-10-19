@@ -1,5 +1,15 @@
 # Changelog
 
+## 26.10.5 "Giga Fly" — 2026-10-19
+
+### Performance
+
+- Reuse the frozen frame's buffers across synchronized blocks (term).
+
+### Maintenance
+
+- Plan migrating the global allocator to mimalloc (todo).
+
 ## 26.10.4 "Giga Fly" — 2026-10-19
 
 ### Fixed
