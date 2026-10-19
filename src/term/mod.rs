@@ -25,6 +25,8 @@ mod iterm_images;
 mod iterm_tests;
 #[cfg(test)]
 mod key_options_tests;
+#[cfg(test)]
+mod keyboard_mode_tests;
 mod kitty;
 mod kitty_animation;
 #[cfg(test)]
@@ -208,6 +210,7 @@ pub(crate) struct Term {
 	pub(crate) kitty_keyboard: bool,
 	/// XTMODKEYS and XTFMTKEYS settings.
 	pub(crate) key_options: crate::input::modify::KeyOptions,
+	pub(crate) keyboard: crate::input::keyboard_modes::KeyboardModes,
 	pub(crate) cursor_shape: CursorShape,
 	/// `?1004`: report window focus changes as `CSI I` / `CSI O`.
 	pub(crate) focus_reporting: bool,
@@ -400,6 +403,7 @@ impl Term {
 			saved_modes: Vec::new(),
 			kitty_keyboard: false,
 			key_options: Default::default(),
+			keyboard: Default::default(),
 			cursor_shape: CursorShape::Block,
 			focus_reporting: false,
 			last_printed: None,

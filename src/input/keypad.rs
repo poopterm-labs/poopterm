@@ -37,6 +37,13 @@ pub(crate) fn encode_keypad(key: &Key, mods: Modifiers, modes: KeyModes) -> Opti
 			"-" => 'm',
 			"/" => 'o',
 			"=" => 'X',
+			// With NumLock ignored (?1035 reset), digits are keypad keys too.
+			"." if !modes.keyboard.numlock => 'n',
+			digit @ ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+				if !modes.keyboard.numlock =>
+			{
+				char::from(b'p' + (digit.as_bytes()[0] - b'0'))
+			}
 			_ => return None,
 		},
 		_ => return None,
@@ -59,6 +66,15 @@ mod tests {
 			modify: [0, 2, 2, 0, 0, 0, 0, 0],
 			format: [0; 8],
 			other_mask: 0,
+		},
+		keyboard: crate::input::keyboard_modes::KeyboardModes {
+			auto_repeat: true,
+			backarrow_bs: false,
+			eight_bit_meta: true,
+			numlock: true,
+			meta_escape: true,
+			delete_is_del: false,
+			alt_escape: false,
 		},
 	};
 
