@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.16 "Giga Fly" — 2026-10-19
+
+### Maintenance
+
+- Fix typo in Debian package description.
+
 ## 26.10.15 "Giga Fly" — 2026-10-19
 
 ### Added
