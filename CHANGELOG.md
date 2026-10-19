@@ -1,5 +1,15 @@
 # Changelog
 
+## 26.10.8 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Add a transparent huge page hint for large buffers (hugepages).
+
+### Maintenance
+
+- Drop the completed first-release item (todo).
+
 ## 26.10.7 "Giga Fly" — 2026-10-19
 
 ### Fixed
