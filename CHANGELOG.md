@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.23 "Giga Fly" — 2026-10-19
+
+### Fixed
+
+- Push each release to main once so merges cannot race it (#12) (release).
+
 ## 26.10.22 "Giga Fly" — 2026-10-19
 
 ### Maintenance
