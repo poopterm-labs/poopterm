@@ -44,6 +44,11 @@ cargo run --release
 
 To build without launching the app, run `cargo build --release`.
 
+For a faster binary, `make pgo` builds a profile-guided optimized one
+(about 6% faster), trained on the built-in benchmark; `make pgo-use`
+trains it further on your own sessions and `make pgo-install` installs it.
+See [`docs/performance.md`](docs/performance.md#profile-guided-optimization).
+
 ## Package managers
 
 The Homebrew formula is available from the Poopterm tap. Install it with:

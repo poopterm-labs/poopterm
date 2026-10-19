@@ -66,19 +66,28 @@ The profile includes generating the corpus; look at the costs under
 
 ### Profile-guided optimization
 
-`poopterm --benchmark` needs no window and covers every workload, the
-parser, terminal state, and rendering, so it is the PGO training run. With
-[`cargo-pgo`](https://github.com/Kobzol/cargo-pgo):
+`scripts/pgo.sh` (or the `make pgo*` targets) builds an instrumented
+binary, trains it, merges the profiles with the toolchain's own
+`llvm-profdata` (from the `llvm-tools` component, added if missing) and
+rebuilds with them. No other tools are needed.
 
 ```sh
-cargo pgo build
-./target/x86_64-unknown-linux-gnu/release/poopterm --benchmark --mib 8
-cargo pgo optimize
+make pgo             # instrument, train on the benchmark corpus, build optimized
+make pgo-use         # dogfood the instrumented terminal; closing it adds a profile
+make pgo-build       # rebuild from every profile collected so far
+make pgo-compare     # release vs PGO, same benchmark
+make pgo-install     # install the optimized binary system-wide
+make pgo-clean       # forget the profiles
 ```
 
-Train on the whole corpus, not one workload, or the profile will favor it.
-Compare the optimized build against a plain release build with the same
-`--benchmark` arguments.
+`poopterm --benchmark` needs no window and covers every workload, the
+parser, terminal state and rendering, so it is the base training run
+(`PGO_MIB`, default 8, sets its size). Sessions with `make pgo-use` add the
+paths only a window exercises: input, tabs, the UI and real programs.
+Profiles accumulate under `target/pgo/profiles` until `make pgo-clean`;
+after large code changes, clean and retrain. On an i3-N305 the
+benchmark-trained build is about 6% faster overall (up to 17% on shell
+prompts, 10% on emoji).
 
 ## Results
 
