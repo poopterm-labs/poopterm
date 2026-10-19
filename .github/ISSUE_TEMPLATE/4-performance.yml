@@ -1,0 +1,102 @@
+name: Performance problem
+description: Slow output, lag, high CPU or memory use, or dropped frames.
+labels: [performance, needs triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Poopterm aims to be as fast as possible. Numbers make performance problems fixable: please measure, and compare with another terminal on the same machine if you can.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you report
+      options:
+        - label: I searched the [existing issues](https://github.com/poopterm-labs/poopterm/issues?q=is%3Aissue+label%3Aperformance) and this is not a duplicate.
+          required: true
+        - label: I can reproduce this on the [latest release](https://github.com/poopterm-labs/poopterm/releases/latest) or on `main`, built in release mode.
+          required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is slow?
+      multiple: true
+      options:
+        - Throughput (large output takes long)
+        - Input latency (typing or scrolling feels delayed)
+        - Frame rate or stutter while resizing or scrolling
+        - Startup time
+        - High CPU use while idle
+        - High memory use
+        - Images or animations
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload
+      description: A command that shows the problem, and how you measured it.
+      placeholder: |
+        time cat big.log    # 1 GB of mixed text
+        Poopterm: 14.2 s, other terminal: 3.1 s
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Measurements
+      description: Timings, CPU percentage (`top`, Activity Monitor), memory (resident size), and the same numbers from another terminal if you have them.
+    validations:
+      required: true
+
+  - type: input
+    id: window
+    attributes:
+      label: Window size, font size and display scale
+      description: Columns × rows (`stty size` prints rows and columns), and the display.
+      placeholder: 200x60 cells, font_size = 18, 4K at 200%
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: CPU and memory
+      placeholder: Intel N100, 16 GB
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Poopterm version
+      description: Settings → About, or the output of `poopterm --version`; the commit if you built from source.
+      placeholder: poopterm 26.10.19
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: Operating system, display server and desktop
+      placeholder: Arch Linux, Wayland, Hyprland
+    validations:
+      required: true
+
+  - type: textarea
+    id: profile
+    attributes:
+      label: Profile
+      description: |
+        Optional, but very helpful: build with `cargo build --profile profiling`, record the workload with `perf record -g target/profiling/poopterm`, and paste the top of `perf report --no-children`, or attach a flame graph.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?

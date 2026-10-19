@@ -1,0 +1,174 @@
+name: Bug report
+description: Something is broken, crashes, hangs or behaves wrongly.
+labels: [bug, needs triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. A precise report gets fixed much faster.
+
+        - **Security problems** (code execution, file access, leaking data through escape sequences): do not file them here, use [private reporting](https://github.com/poopterm-labs/poopterm/security/advisories/new).
+        - **Wrong drawing** (glyphs, colors, box lines, images): the *Rendering problem* form asks for what helps there.
+        - **A program misbehaving** inside Poopterm (vim, tmux, htop…) or an escape sequence: use *Terminal compatibility*.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you report
+      options:
+        - label: I searched the [existing issues](https://github.com/poopterm-labs/poopterm/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: I can reproduce this on the [latest release](https://github.com/poopterm-labs/poopterm/releases/latest) or on `main`.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A clear, short description of the bug.
+      placeholder: Closing a tab while a command prints output freezes the window.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Start from a fresh window. The fewer steps, the better.
+      placeholder: |
+        1. Open Poopterm
+        2. Run `yes | head -c 100M`
+        3. Press Ctrl+Shift+W while it prints
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: The tab closes and the other tabs keep working.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include exact error messages. Screenshots or recordings can be dropped here.
+      placeholder: The window stops responding and has to be killed.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Often
+        - Sometimes
+        - Once so far
+    validations:
+      required: true
+
+  - type: input
+    id: regression
+    attributes:
+      label: Last version that worked
+      description: If this used to work, the last version where it did. Leave empty if it never worked or you do not know.
+      placeholder: "26.10.12"
+
+  - type: input
+    id: version
+    attributes:
+      label: Poopterm version
+      description: Settings → About, or the output of `poopterm --version`; the commit if you built from source.
+      placeholder: poopterm 26.10.19
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - APT repository (Debian package)
+        - Homebrew
+        - Built from source (scripts/install.sh, make or cargo)
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - FreeBSD
+        - Other BSD
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version or distribution
+      placeholder: Fedora 46, Debian 13, macOS 26.1, FreeBSD 15.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: display
+    attributes:
+      label: Display server
+      options:
+        - Wayland
+        - X11
+        - XWayland
+        - macOS (Quartz)
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop environment or compositor
+      placeholder: GNOME 50, KDE Plasma 6.5, Sway, Hyprland, i3
+  - type: input
+    id: shell
+    attributes:
+      label: Shell and version
+      description: Run `echo $SHELL` and `$SHELL --version`.
+      placeholder: zsh 5.9
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: |
+        Your `config.toml` (from `$POOPTERM_CONFIG`, or `~/.config/poopterm/config.toml`), and any `POOPTERM_*` environment variables you set. Remove anything private. Write "default" if you never changed it.
+      render: toml
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal output and crash logs
+      description: |
+        Start Poopterm from another terminal (`poopterm`) and paste what it prints, including any panic message. Release builds carry no symbols; if you can build from source, a crash in `cargo build --profile debugging` run as `RUST_BACKTRACE=1 target/debugging/poopterm` gives a full backtrace, and also checks for locking and overflow bugs. On macOS, crash reports are in Console → Crash Reports.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Workarounds you found, whether other terminals behave the same, related issues.

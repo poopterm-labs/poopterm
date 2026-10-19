@@ -1,0 +1,127 @@
+name: Terminal compatibility
+description: A program misbehaves in Poopterm, or an escape sequence, key or protocol is missing or wrong.
+labels: [compatibility, needs triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Poopterm implements escape sequences from their specifications (xterm ctlseqs, ECMA-48, kitty, iTerm2, OSC 133 and others). Tell us what the program sends or expects, and what the specification or other terminals do.
+
+        Please describe behavior; do not paste source code from other terminal emulators, since Poopterm is written clean room from the specifications.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you report
+      options:
+        - label: I searched the [existing issues](https://github.com/poopterm-labs/poopterm/issues?q=is%3Aissue+label%3Acompatibility) and this is not a duplicate.
+          required: true
+        - label: I can reproduce this on the [latest release](https://github.com/poopterm-labs/poopterm/releases/latest) or on `main`.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - A full-screen program (editor, multiplexer, monitor…)
+        - Escape sequence (CSI, OSC, DCS, ESC)
+        - Keyboard input or key encoding (including the kitty keyboard protocol)
+        - Mouse reporting
+        - Clipboard (OSC 52) or bracketed paste
+        - Shell integration (OSC 133, OSC 7, prompts, working directory)
+        - Hyperlinks (OSC 8)
+        - Images (Sixel, kitty graphics, iTerm2)
+        - Terminfo or TERM
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: program
+    attributes:
+      label: Program and version
+      description: The program that misbehaves, with its version.
+      placeholder: neovim 0.12.1, tmux 3.6, htop 3.5
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What goes wrong?
+      placeholder: Undercurls in neovim show as straight underlines.
+    validations:
+      required: true
+
+  - type: textarea
+    id: sequence
+    attributes:
+      label: Sequence or reproducer
+      description: |
+        The bytes involved, if you know them, as a `printf` command. To capture what a program sends, run it under `script -q /tmp/log` and look at the log with `cat -v /tmp/log`.
+      placeholder: printf '\e[4:3mcurly\e[0m\n'
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What the specification says, or what other terminals do (name them and their versions). Links to the specification help a lot.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What Poopterm does instead. Screenshots welcome.
+    validations:
+      required: true
+
+  - type: input
+    id: term
+    attributes:
+      label: TERM inside Poopterm
+      description: Output of `echo $TERM` in Poopterm, and inside tmux or screen if you use them.
+      placeholder: xterm-poopterm
+    validations:
+      required: true
+
+  - type: dropdown
+    id: terminfo
+    attributes:
+      label: Is the xterm-poopterm terminfo entry installed system-wide?
+      description: "`infocmp xterm-poopterm` succeeds if it is. Without it, shells get `TERM=xterm-256color`."
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Poopterm version
+      description: Settings → About, or the output of `poopterm --version`; the commit if you built from source.
+      placeholder: poopterm 26.10.19
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: Operating system, display server and shell
+      placeholder: Debian 13, X11, bash 5.2
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Does it work over SSH, inside tmux, or with `TERM=xterm-256color`?
