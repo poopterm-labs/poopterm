@@ -1,0 +1,21 @@
+# CodeQL configuration for poopterm (used by .github/workflows/codeql.yml).
+#
+# Poopterm is a desktop application: paths from $HOME, XDG variables, the
+# config file and the command line are chosen by the person running it and
+# are not an attack surface. Untrusted input is what programs write to the
+# terminal (escape sequences, kitty and iTerm2 file transfers, hyperlinks);
+# keep those findings visible.
+name: poopterm CodeQL config
+
+queries:
+  - uses: security-extended
+
+paths-ignore:
+  # Test-only files: fixtures write and read temporary files and run tools
+  # such as tic and infocmp on purpose. Inline #[cfg(test)] modules cannot
+  # be excluded by path; their alerts are dismissed as "used in tests".
+  - "**/tests.rs"
+  - "**/*_tests.rs"
+  - src/dbus/test_bus.rs
+  - tests/**
+  - target/**
