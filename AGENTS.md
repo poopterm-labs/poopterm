@@ -115,6 +115,8 @@ Details: [`docs/architecture.md`](docs/architecture.md).
   clipboard formats) and decoders alike. Existing dependencies are being
   replaced over time (see `TODO.md`); never add one, and test each
   replacement differentially against the crate it replaces.
+  The one deliberate exception is `mimalloc`, the global allocator
+  (`src/main.rs`): system allocators, musl's above all, cost throughput.
 - **Standards compliance.** Implement escape sequences completely, as their
   specifications define them (xterm ctlseqs, kitty, iTerm2, OSC 133/7501…),
   including queries and replies, with the bounds above. Unsupported or

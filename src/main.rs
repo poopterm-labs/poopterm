@@ -7,6 +7,9 @@
 //! - `app`: winit event loop, input handling and frame composition.
 //! - `render`, `ui`, `input`: pure helpers for pixels, layout and key encoding.
 
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod app;
 mod bench;
 mod clipboard;
