@@ -68,6 +68,42 @@ which is why floods are capped at 30 fps. Parse throughput stays CPU work.
 - Measure frame time, input latency and flood throughput before and after
   on every platform, as for any performance work.
 
+## Replacing dependencies with our own code
+
+Chosen to replace with our own implementations, built around this
+project's needs and optimizations. Each replacement is tested against the
+crate it replaces as an oracle (differential tests, and fuzzing for parsers
+of untrusted input), and lands only once it matches it and measures at
+least as fast.
+
+- **`portable-pty` → our own PTY layer** (libc: `posix_openpt`/`openpty`,
+  `fork` + `setsid` + `TIOCSCTTY`, `exec`, `TIOCSWINSZ`, non-blocking fds).
+  It gives us control of read sizes and polling, and drops
+  Windows-oriented abstractions we do not use. Must pass CI on Linux, macOS
+  and FreeBSD.
+- **`unicode-width` → generated width tables:** a build-time generator from
+  the Unicode data files, emitting a two-level lookup table, combined with
+  the fast ranges in `parser/utf8.rs`. An exhaustive test checks every
+  code point against the crate. Regenerate it for each Unicode release.
+- **`miniz_oxide` → our own inflate (RFC 1950/1951)** for kitty `o=z` and
+  PNG. **Safety and security come first:** this parses untrusted input, so
+  no `unsafe` unless it is proven necessary and justified,
+  output sizes are bounded before allocating, and the decoder is
+  fuzzed against `miniz_oxide`. Faster decoding (streaming fused with
+  base64, wide Huffman tables, SIMD copies) is kept only where it is
+  safe. Otherwise we keep matching miniz rather than taking risks.
+- **`fontdue` → our own rasterizer:** TrueType/OpenType parsing (cmap,
+  glyf, CFF, kerning) and a SIMD coverage rasterizer, designed to feed the
+  GPU glyph atlas. Compare glyph coverage against fontdue during the
+  transition. Color emoji (COLR/CBDT/sbix) is a separate step.
+- **`softbuffer` → our own present path** (X11 MIT-SHM, Wayland `wl_shm`,
+  macOS CALayer) for the software renderer, which becomes the fallback
+  beside Vulkan/Metal. Do it together with the GPU work so presentation and
+  damage handling are designed once.
+
+Kept for now: `winit` (windowing, IME and DPI are too much risk for the
+gain), `image` (wallpapers need JPEG and WebP), and `rfd`.
+
 ## CI and platforms
 
 - **First automatic release.** The release job (version bump, GitHub
