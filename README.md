@@ -77,6 +77,15 @@ package includes the desktop launcher, application icons, and terminfo entry;
 APT installs required system libraries automatically. The current package is
 built for `amd64` and requires Debian 12 or newer.
 
+Each package attached to a [release](https://github.com/poopterm-labs/poopterm/releases)
+carries a signed build provenance attestation, which proves that the release
+workflow built it from the tagged commit. Check a downloaded package with the
+GitHub CLI:
+
+```sh
+gh attestation verify poopterm_26.10.24-1_amd64.deb --repo poopterm-labs/poopterm
+```
+
 On macOS, Homebrew builds both the `poopterm` command and a `Poopterm.app`
 bundle containing the `.icns` app icon. The bundle lives in Homebrew's managed
 prefix. Open it directly with:
