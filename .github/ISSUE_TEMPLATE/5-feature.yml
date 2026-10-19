@@ -1,0 +1,82 @@
+name: Feature request
+description: Suggest a new feature or an improvement.
+labels: [enhancement, needs triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Good requests start from the problem, not the solution. For open-ended ideas, [Discussions](https://github.com/poopterm-labs/poopterm/discussions) are a better place to start.
+
+        Poopterm writes its own code from specifications instead of adding dependencies, so a request for "use library X" will become "implement what X does".
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you request
+      options:
+        - label: I searched the [existing issues](https://github.com/poopterm-labs/poopterm/issues?q=is%3Aissue) and [TODO.md](https://github.com/poopterm-labs/poopterm/blob/main/TODO.md), and this is not already planned or requested.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Rendering, fonts and themes
+        - Tabs, windows and layout
+        - Keyboard shortcuts and input
+        - Mouse, selection and clipboard
+        - Search and scrollback
+        - Shell integration and sessions
+        - Terminal protocols and escape sequences
+        - Images and graphics
+        - Configuration and settings
+        - Packaging and installation
+        - Performance
+        - Accessibility
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what makes it hard today?
+      placeholder: I keep several SSH sessions open and cannot tell their tabs apart.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How it could work, from the user's side. Shortcuts, settings and config keys you imagine.
+      placeholder: Let OSC 0/2 titles or a config rule give each tab a color.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds
+      description: Other ways to solve it, and what you do today.
+
+  - type: textarea
+    id: prior-art
+    attributes:
+      label: Specifications and prior art
+      description: Links to the specification, or how other terminals behave (describe it; do not paste their source code).
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to work on it?
+      description: Contributions follow CONTRIBUTING.md, including test-driven development with three lines of tests for each line of code.
+      options:
+        - "No"
+        - Yes, with some guidance
+        - "Yes"
+    validations:
+      required: true

@@ -113,13 +113,14 @@ branch and a pull request.
 
 ## Reporting bugs
 
-Open an issue with:
-
-- your OS and version, display server (X11 or Wayland) and Poopterm version
-  (Settings → About, or `poopterm --version`);
-- what you did, what you expected, and what happened;
-- for rendering or escape-sequence bugs, the exact bytes that trigger it
-  (for example captured with `script`), and a screenshot if it is visual.
+[Open an issue](https://github.com/poopterm-labs/poopterm/issues/new/choose)
+and pick the form that fits: bug report, rendering problem, terminal
+compatibility, performance problem or feature request. Each form asks for
+what that kind of report needs: your Poopterm version (Settings → About, or
+`poopterm --version`), OS, display server and shell; steps to reproduce;
+for rendering and escape-sequence bugs, the exact bytes that trigger it (for
+example captured with `script`) and a screenshot; for performance, numbers.
+Questions go to [Discussions](https://github.com/poopterm-labs/poopterm/discussions).
 
 ## License
 

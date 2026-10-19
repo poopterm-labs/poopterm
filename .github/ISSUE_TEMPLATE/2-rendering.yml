@@ -1,0 +1,151 @@
+name: Rendering problem
+description: Text, glyphs, colors, box drawing, images or redraws look wrong.
+labels: [bug, rendering, needs triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Poopterm draws everything itself: its own font engine, box drawing and block elements drawn in code, and Sixel and kitty images. Screenshots are the most useful thing you can give us; a side-by-side with another terminal is even better.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you report
+      options:
+        - label: I searched the [existing issues](https://github.com/poopterm-labs/poopterm/issues?q=is%3Aissue+label%3Arendering) and this is not a duplicate.
+          required: true
+        - label: I can reproduce this on the [latest release](https://github.com/poopterm-labs/poopterm/releases/latest) or on `main`.
+          required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What looks wrong?
+      multiple: true
+      options:
+        - Glyphs cut off, clipped or overlapping
+        - Wrong or missing glyphs (tofu boxes, fallback, emoji, CJK, icons)
+        - Box drawing, block or Braille characters with gaps or misaligned
+        - Colors or themes
+        - Underlines, bold, italic or other text styles
+        - Cursor
+        - Images (Sixel, kitty graphics, iTerm2)
+        - Leftover or stale content after redraws
+        - Window, tabs, scrollbar or settings
+        - Blurry, scaled or misplaced content (HiDPI)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Description
+      description: What is drawn wrong, and where.
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Drag images here. Zoom in on the problem if it is small, and add how another terminal draws the same output if you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: |
+        Ideally a command that prints the problem, such as `printf '\e[4:3m curly \e[0m\n'` or `printf '╭─╮\n'`, or a file to `cat`. Otherwise the program and what to do in it.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: full-redraw
+    attributes:
+      label: Does it also happen with full redraws?
+      description: |
+        Start Poopterm with `POOPTERM_FULL_REDRAW=1 poopterm`, which redraws the whole window every frame. If the problem goes away, it is a damage-tracking bug.
+      options:
+        - It also happens with POOPTERM_FULL_REDRAW=1
+        - It goes away with POOPTERM_FULL_REDRAW=1
+        - I did not try
+    validations:
+      required: true
+
+  - type: input
+    id: font
+    attributes:
+      label: Font
+      description: The font file from `font_path` in `config.toml` or `POOPTERM_FONT`, or "bundled".
+      placeholder: Iosevka Nerd Font Mono, /usr/share/fonts/iosevka/IosevkaNerdFontMono-Regular.ttf
+    validations:
+      required: true
+
+  - type: input
+    id: font-size
+    attributes:
+      label: Font size and display scale
+      placeholder: font_size = 18, 150% scaling on a 4K monitor
+    validations:
+      required: true
+
+  - type: input
+    id: theme
+    attributes:
+      label: Theme
+      placeholder: poop, darkmode, light-mode, catppuccin-mocha, amoled-black, custom
+
+  - type: input
+    id: term
+    attributes:
+      label: TERM inside Poopterm
+      description: Output of `echo $TERM` in Poopterm, and inside tmux or screen if you use them.
+      placeholder: xterm-poopterm
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Poopterm version
+      description: Settings → About, or the output of `poopterm --version`; the commit if you built from source.
+      placeholder: poopterm 26.10.19
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - FreeBSD
+        - Other BSD
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: OS version, display server and desktop
+      placeholder: Fedora 46, Wayland, GNOME 50
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Your `config.toml` and any `POOPTERM_*` environment variables. Remove anything private. Write "default" if you never changed it.
+      render: toml
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
