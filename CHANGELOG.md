@@ -2,15 +2,87 @@
 
 ## 26.10.3 "Giga Fly" — 2026-10-19
 
-- Includes the changes verified by CI on main.
+### Maintenance
+
+- Add profile-guided optimization to the Makefile.
 
 ## 26.10.2 "Giga Fly" — 2026-10-19
 
-- Includes the changes verified by CI on main.
+### Breaking changes
+
+- Install system-wide only (install). scripts/install.sh no longer installs to ~/.local or honors XDG_DATA_HOME; remove an earlier per-user copy by hand.
+
+### Added
+
+- Support every xterm and kitty color sequence (parser).
+- Support kitty's clipboard protocol and every OSC 52 selection (parser).
+- Show OSC 9, OSC 777 and kitty OSC 99 desktop notifications (notifier).
+- Track OSC 7501 program status and OSC 9;4 progress on tabs (parser).
+- Support OSC 22 pointer shapes (parser).
+- Support every OSC 133 marker and option (shell_integration).
+- Support VS Code's OSC 633 and OSC 3008 contexts (parser).
+- Support iTerm2's OSC 1337 commands besides images (parser).
+- Support ConEmu's OSC 9 commands and xterm's icon name (parser).
+- Support iTerm2's tab color and session status (parser).
+- Show iTerm2 inline images (parser).
+- Answer XTWINOPS size reports and keep a title stack (parser).
+- Answer DECRQSS (parser).
+- Answer XTGETTCAP from poopterm's terminfo entry (parser).
+- Support kitty's text sizing protocol (parser).
+
+### Performance
+
+- Intern cell extras with one hash write and one lookup (term).
+- Copy short ASCII titles without filtering each character (parser).
+
+### Maintenance
+
+- Forbid new crates and require complete escape sequence support.
+- Describe the new escape sequences and the modules behind them.
+- Add debugging and profiling profiles on top of release.
 
 ## 26.10.1 "Giga Fly" — 2026-10-19
 
-- Includes the changes verified by CI on main.
+### Added
+
+- Finish desktop TODO follow-ups.
+- XDG install and desktop integration.
+- Replace vte with an in-house SIMD tokenizer (vt).
+- Implement the kitty graphics protocol core (kitty).
+- Layer images by z-index and keep partial redraws with images (render).
+- Support unicode placeholders (kitty).
+- Support animation frames, composition and playback (kitty).
+
+### Fixed
+
+- Leave exit-status colors to the shell.
+- Use TERM=xterm-poopterm only when installed system-wide.
+- Stop shell tests hanging the FreeBSD job (ci).
+- Skip underline color arguments instead of applying them (sgr).
+- Abort a chunked transmission when a delete command arrives (kitty).
+- Keep images in the scrollback when text is written on screen (sixel).
+
+### Performance
+
+- Repair wide characters only at text segment edges (parser).
+- Decode base64 payloads 16 characters at a time with SIMD (kitty).
+- Append DCS payloads in bulk (sixel).
+
+### Maintenance
+
+- Keep kitty runs valid and name terminals reliably.
+- TODO for 200 MB/s text, gigabit images and an own parser.
+- Design for replacing vte with an in-house SIMD parser.
+- One corpus of real-world workloads, headless and end to end.
+- Adopt conventional commits.
+- Make 200 MB/s a floor and images unbounded.
+- Share bitmaps and placements between image protocols (graphics).
+- Plan hand-written Vulkan and Metal renderers (todo).
+- Plan replacing pty, width, inflate, font and present crates (todo).
+- Plan automatic cgroups v2 per tab and huge pages (todo).
+- Describe kitty graphics support, image tests and numbers.
+- Keep interactive bash from stopping itself on FreeBSD (shell).
+- Fill shared memory through a mapping (kitty).
 
 ## 26.10.0 "Giga Fly" — 2026-10-18
 
