@@ -29,7 +29,6 @@ from collections import namedtuple
 import json
 import os
 from pathlib import Path
-import re
 import select
 import shutil
 import statistics
@@ -73,8 +72,13 @@ def wait_for_terminal(fd, timeout, query=b""):
 
 def parse_xtversion(reply):
     """The name in an XTVERSION reply (`DCS > | name ST`), if any."""
-    match = re.search(rb"\x1bP>\|(.*?)\x1b\\", reply, re.S)
-    return match.group(1).decode(errors="replace") if match else None
+    # A linear scan: a regex search restarts at every opener, which is
+    # quadratic on a reply full of openers and no terminator.
+    start = reply.find(b"\x1bP>|")
+    if start < 0:
+        return None
+    end = reply.find(b"\x1b\\", start + 4)
+    return reply[start + 4:end].decode(errors="replace") if end >= 0 else None
 
 
 def poopterm_binary():

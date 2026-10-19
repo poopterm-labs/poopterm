@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -38,6 +39,15 @@ class Payloads(unittest.TestCase):
         reply = b'\x1bP>|kitty(0.49.2)\x1b\\\x1b[?62;c'
         self.assertEqual(throughput.parse_xtversion(reply), 'kitty(0.49.2)')
         self.assertIsNone(throughput.parse_xtversion(b'\x1b[?62;c'))
+
+    def test_an_unterminated_xtversion_reply_is_rejected_in_linear_time(self):
+        # A reply is untrusted: many openers without a terminator must not
+        # rescan the rest of the reply from every opener.
+        reply = b'\x1bP>|' * 200_000
+        started = time.perf_counter()
+        self.assertIsNone(throughput.parse_xtversion(reply))
+        self.assertLess(time.perf_counter() - started, 0.5)
+        self.assertEqual(throughput.parse_xtversion(b'x\x1bP>|a\x1bP>|b\x1b\\'), 'a\x1bP>|b')
 
 
 class BinaryResolution(unittest.TestCase):
