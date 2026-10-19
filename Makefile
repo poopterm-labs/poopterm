@@ -1,4 +1,4 @@
-# System-wide install; for a per-user install run scripts/install.sh directly.
+# Builds and installs system-wide through scripts/install.sh.
 PREFIX ?= /usr/local
 DESTDIR ?=
 

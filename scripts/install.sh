@@ -1,14 +1,13 @@
 #!/bin/sh
-# Installs poopterm following the XDG layout so GNOME, KDE, and other
-# desktops list it: binary, desktop entry, hicolor icons, and (system-wide
-# only) the terminfo entry.
+# Installs poopterm system-wide, so every user, desktop, and sudo session
+# finds it: binary, desktop entry, hicolor icons, and the terminfo entry.
 #
-#   scripts/install.sh               # per user: ~/.local/bin, $XDG_DATA_HOME
-#   PREFIX=/usr/local sudo -E scripts/install.sh
-#   scripts/install.sh --uninstall   # same variables, removes the files
+#   scripts/install.sh               # builds as you, installs to /usr/local
+#   scripts/install.sh --uninstall
 #
-# PREFIX defaults to ~/.local. DESTDIR stages a system install for packaging.
-# --no-build skips `cargo build`; POOPTERM_BIN picks the binary to install.
+# Run it as yourself: it asks for root (sudo or doas) only to copy files.
+# PREFIX (default /usr/local) and DESTDIR (staging, for packaging) are
+# honored. --no-build skips `cargo build`; POOPTERM_BIN picks the binary.
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -19,7 +18,7 @@ for argument in "$@"; do
 	--uninstall) action=uninstall ;;
 	--no-build) build=0 ;;
 	-h | --help)
-		sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	*)
@@ -29,47 +28,46 @@ for argument in "$@"; do
 	esac
 done
 
-: "${HOME:?HOME is not set}"
-PREFIX=${PREFIX:-$HOME/.local}
+PREFIX=${PREFIX:-/usr/local}
 DESTDIR=${DESTDIR:-}
 bindir=$PREFIX/bin
 datadir=$PREFIX/share
-# A per-user install puts data where the XDG Base Directory spec says.
-case $PREFIX in
-"$HOME" | "$HOME"/*)
-	user=1
-	case ${XDG_DATA_HOME:-} in
-	/*) datadir=$XDG_DATA_HOME ;;
-	esac
-	;;
-*) user=0 ;;
-esac
-
 icons="16x16:icon_16x16 32x32:icon_32x32 64x64:icon_32x32@2x 128x128:icon_128x128
 256x256:icon_256x256 512x512:icon_512x512"
+
+# Runs a command as root when the target is not writable as we are.
+target=$DESTDIR$PREFIX
+while [ ! -e "$target" ]; do target=$(dirname "$target"); done
+as_root=
+if [ ! -w "$target" ]; then
+	for tool in sudo doas; do
+		command -v "$tool" >/dev/null 2>&1 && as_root=$tool && break
+	done
+	[ -n "$as_root" ] || {
+		echo "install.sh: $DESTDIR$PREFIX is not writable; run as root" >&2
+		exit 1
+	}
+	echo "Installing to $DESTDIR$PREFIX needs root; asking $as_root."
+fi
+run() { $as_root "$@"; }
 
 # Lets running desktops notice the change; harmless when the tools are missing.
 refresh() {
 	[ -z "$DESTDIR" ] || return 0
 	command -v update-desktop-database >/dev/null 2>&1 &&
-		update-desktop-database -q "$datadir/applications" 2>/dev/null
+		run update-desktop-database -q "$datadir/applications" 2>/dev/null
 	command -v gtk-update-icon-cache >/dev/null 2>&1 &&
-		gtk-update-icon-cache -q -t -f "$datadir/icons/hicolor" 2>/dev/null
-	for tool in kbuildsycoca6 kbuildsycoca5; do
-		command -v "$tool" >/dev/null 2>&1 && "$tool" >/dev/null 2>&1 && break
-	done
+		run gtk-update-icon-cache -q -t -f "$datadir/icons/hicolor" 2>/dev/null
 	return 0
 }
 
 if [ "$action" = uninstall ]; then
-	rm -f "$DESTDIR$bindir/poopterm" "$DESTDIR$datadir/applications/poopterm.desktop"
+	run rm -f "$DESTDIR$bindir/poopterm" "$DESTDIR$datadir/applications/poopterm.desktop" \
+		"$DESTDIR$datadir/terminfo/x/xterm-poopterm" "$DESTDIR$datadir/terminfo/p/poopterm" \
+		"$DESTDIR$datadir/terminfo/78/xterm-poopterm" "$DESTDIR$datadir/terminfo/70/poopterm"
 	for icon in $icons; do
-		rm -f "$DESTDIR$datadir/icons/hicolor/${icon%%:*}/apps/poopterm.png"
+		run rm -f "$DESTDIR$datadir/icons/hicolor/${icon%%:*}/apps/poopterm.png"
 	done
-	if [ "$user" = 0 ]; then
-		rm -f "$DESTDIR$datadir/terminfo/x/xterm-poopterm" "$DESTDIR$datadir/terminfo/p/poopterm" \
-			"$DESTDIR$datadir/terminfo/78/xterm-poopterm" "$DESTDIR$datadir/terminfo/70/poopterm"
-	fi
 	refresh
 	echo "Removed poopterm from $DESTDIR$PREFIX"
 	exit 0
@@ -77,6 +75,10 @@ fi
 
 binary=${POOPTERM_BIN:-$root/target/release/poopterm}
 if [ "$build" = 1 ]; then
+	command -v cargo >/dev/null 2>&1 || {
+		echo "install.sh: cargo not found; run this script as yourself, not with sudo" >&2
+		exit 1
+	}
 	(cd "$root" && cargo build --release --locked)
 fi
 [ -f "$binary" ] || {
@@ -84,30 +86,26 @@ fi
 	exit 1
 }
 
-install -d "$DESTDIR$bindir" "$DESTDIR$datadir/applications"
-install -m 755 "$binary" "$DESTDIR$bindir/poopterm"
-# An absolute Exec works even when the session's PATH lacks ~/.local/bin.
+desktop=$(mktemp)
+trap 'rm -f "$desktop"' EXIT
 sed -e "s|^Exec=poopterm|Exec=$bindir/poopterm|" -e "s|^TryExec=poopterm|TryExec=$bindir/poopterm|" \
-	"$root/packaging/poopterm.desktop" >"$DESTDIR$datadir/applications/poopterm.desktop"
-chmod 644 "$DESTDIR$datadir/applications/poopterm.desktop"
+	"$root/packaging/poopterm.desktop" >"$desktop"
+
+run install -d "$DESTDIR$bindir" "$DESTDIR$datadir/applications"
+run install -m 755 "$binary" "$DESTDIR$bindir/poopterm"
+run install -m 644 "$desktop" "$DESTDIR$datadir/applications/poopterm.desktop"
 for icon in $icons; do
-	install -d "$DESTDIR$datadir/icons/hicolor/${icon%%:*}/apps"
-	install -m 644 "$root/assets/icon.iconset/${icon#*:}.png" \
+	run install -d "$DESTDIR$datadir/icons/hicolor/${icon%%:*}/apps"
+	run install -m 644 "$root/assets/icon.iconset/${icon#*:}.png" \
 		"$DESTDIR$datadir/icons/hicolor/${icon%%:*}/apps/poopterm.png"
 done
-# Only a system-wide entry is visible under sudo; see src/terminfo.rs.
-if [ "$user" = 0 ] && command -v tic >/dev/null 2>&1; then
-	install -d "$DESTDIR$datadir/terminfo"
-	tic -x -o "$DESTDIR$datadir/terminfo" "$root/terminfo/poopterm.terminfo"
+# Shells get TERM=xterm-poopterm only with this entry; see src/terminfo.rs.
+if command -v tic >/dev/null 2>&1; then
+	run install -d "$DESTDIR$datadir/terminfo"
+	run tic -x -o "$DESTDIR$datadir/terminfo" "$root/terminfo/poopterm.terminfo"
+else
+	echo "Note: tic not found; shells will use TERM=xterm-256color."
 fi
 refresh
 
 echo "Installed poopterm to $DESTDIR$PREFIX"
-case ":$PATH:" in
-*":$bindir:"*) ;;
-*) echo "Note: $bindir is not on your PATH; the desktop entry still works." ;;
-esac
-if [ "$user" = 1 ]; then
-	echo "For TERM=xterm-poopterm (otherwise xterm-256color), install the terminfo"
-	echo "entry system-wide: poopterm --print-terminfo | sudo tic -x -"
-fi

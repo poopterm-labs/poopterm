@@ -1,4 +1,4 @@
-"""The XDG installer: per-user layout, desktop entry, icons, and uninstall."""
+"""The system-wide installer: layout, desktop entry, icons, terminfo, and uninstall."""
 import os
 from pathlib import Path
 import shutil
@@ -17,49 +17,53 @@ class Install(unittest.TestCase):
         self.home.mkdir()
         self.binary = self.root / 'poopterm'
         self.binary.write_text('#!/bin/sh\n')
+        self.stage = self.root / 'stage'
 
     def tearDown(self):
         shutil.rmtree(self.root)
 
     def run_script(self, *args, **env):
-        environment = {'PATH': os.environ['PATH'], 'HOME': str(self.home), 'POOPTERM_BIN': str(self.binary)}
+        environment = {'PATH': os.environ['PATH'], 'HOME': str(self.home), 'POOPTERM_BIN': str(self.binary),
+                       'DESTDIR': str(self.stage)}
         environment.update(env)
         return subprocess.run(['sh', str(SCRIPT), '--no-build', *args], env=environment,
                               capture_output=True, text=True, check=True)
 
-    def test_user_install_follows_xdg_and_uninstalls_cleanly(self):
-        self.run_script()
-        local = self.home / '.local'
-        binary = local / 'bin/poopterm'
-        self.assertTrue(os.access(binary, os.X_OK))
-        desktop = (local / 'share/applications/poopterm.desktop').read_text()
-        # Desktop sessions often start without ~/.local/bin on PATH.
-        self.assertIn(f'\nExec={binary}\n', desktop)
-        self.assertIn(f'\nTryExec={binary}\n', desktop)
+    def test_installs_system_wide_by_default_and_uninstalls_cleanly(self):
+        # A per-user data directory no longer moves anything.
+        self.run_script(XDG_DATA_HOME=str(self.root / 'data'))
+        prefix = self.stage / 'usr/local'
+        self.assertTrue(os.access(prefix / 'bin/poopterm', os.X_OK))
+        desktop = (prefix / 'share/applications/poopterm.desktop').read_text()
+        self.assertIn('\nExec=/usr/local/bin/poopterm\n', desktop)
+        self.assertIn('\nTryExec=/usr/local/bin/poopterm\n', desktop)
         self.assertIn('\nStartupWMClass=poopterm\n', desktop)
         for size in SIZES:
-            self.assertTrue((local / f'share/icons/hicolor/{size}/apps/poopterm.png').is_file(), size)
+            self.assertTrue((prefix / f'share/icons/hicolor/{size}/apps/poopterm.png').is_file(), size)
         if shutil.which('desktop-file-validate'):
-            subprocess.run(['desktop-file-validate', str(local / 'share/applications/poopterm.desktop')], check=True)
+            subprocess.run(['desktop-file-validate', str(prefix / 'share/applications/poopterm.desktop')],
+                           check=True)
+        if shutil.which('tic'):
+            self.assertTrue(any((prefix / 'share/terminfo').rglob('xterm-poopterm')))
+        self.assertFalse((self.root / 'data').exists())
+        self.assertFalse((self.home / '.local').exists())
 
         self.run_script('--uninstall')
-        leftovers = [path for path in local.rglob('*poopterm*')]
+        leftovers = [path for path in self.stage.rglob('*poopterm*')]
         self.assertEqual(leftovers, [])
 
-    def test_xdg_data_home_is_honored(self):
-        data = self.root / 'data'
-        self.run_script(XDG_DATA_HOME=str(data))
-        self.assertTrue((data / 'applications/poopterm.desktop').is_file())
-        self.assertTrue((self.home / '.local/bin/poopterm').is_file())
+    def test_prefix_moves_everything(self):
+        self.run_script(PREFIX='/opt/poopterm')
+        desktop = (self.stage / 'opt/poopterm/share/applications/poopterm.desktop').read_text()
+        self.assertIn('\nExec=/opt/poopterm/bin/poopterm\n', desktop)
+        self.assertTrue((self.stage / 'opt/poopterm/bin/poopterm').is_file())
 
-    def test_staged_system_install_uses_the_final_paths(self):
-        stage = self.root / 'stage'
-        self.run_script(PREFIX='/usr/local', DESTDIR=str(stage))
-        desktop = (stage / 'usr/local/share/applications/poopterm.desktop').read_text()
-        self.assertIn('\nExec=/usr/local/bin/poopterm\n', desktop)
-        self.assertTrue((stage / 'usr/local/bin/poopterm').is_file())
-        if shutil.which('tic'):
-            self.assertTrue(any((stage / 'usr/local/share/terminfo').rglob('xterm-poopterm')))
+    def test_writable_targets_need_no_root(self):
+        # Without DESTDIR the script asks for root only when it cannot write.
+        prefix = self.root / 'prefix'
+        output = self.run_script(PREFIX=str(prefix), DESTDIR='')
+        self.assertTrue((prefix / 'bin/poopterm').is_file())
+        self.assertNotIn('sudo', output.stdout + output.stderr)
 
 
 if __name__ == '__main__':
