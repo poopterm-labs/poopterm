@@ -359,10 +359,11 @@ Poopterm is MIT licensed; see [LICENSE](LICENSE).
 
 Shells run with `TERM=xterm-poopterm`, an entry that advertises only what
 poopterm supports (truecolor, styled underlines, synchronized output, focus
-events, …). If the entry is not installed, poopterm compiles a private copy
-with `tic` on first launch and points `TERMINFO_DIRS` at it; without `tic` it
-falls back to `xterm-256color`. `make install` installs the entry system-wide,
-or run `poopterm --print-terminfo | tic -x -`. Set `term = "xterm-256color"`
+events, …), when it is installed system-wide; otherwise they get
+`TERM=xterm-256color`. A per-user copy (`~/.terminfo`) is not used, because
+`sudo` cannot see it and programs such as `sudo dmesg` would lose their
+colors. `make install` installs the entry system-wide, or run
+`poopterm --print-terminfo | sudo tic -x -`. Set `term = "xterm-256color"`
 (or any name) in `config.toml` to override.
 
 ## Development and releases

@@ -1,31 +1,23 @@
-//! Poopterm's terminfo entry: locating it, compiling a private copy, and
-//! choosing `TERM` for spawned shells.
+//! Poopterm's terminfo entry and choosing `TERM` for spawned shells.
 //!
-//! When the entry is not installed system-wide, poopterm compiles the
-//! bundled source with `tic` into its data directory once and points
-//! `TERMINFO_DIRS` at it, so `TERM=xterm-poopterm` works without setup.
-//! Without `tic`, shells get `TERM=xterm-256color`.
-use std::{
-	env,
-	ffi::OsString,
-	fs,
-	path::{Path, PathBuf},
-	process::Command,
-};
+//! Shells get `TERM=xterm-poopterm` only when the entry is installed in a
+//! system-wide directory. A copy only this user can see (`~/.terminfo`,
+//! `TERMINFO_DIRS`) is lost under `sudo`, which resets those variables, and
+//! programs such as `sudo dmesg` then print without colors. Otherwise shells
+//! get `TERM=xterm-256color`.
+use std::path::PathBuf;
 
 /// The entry's primary name; `poopterm` is an alias.
 pub(crate) const NAME: &str = "xterm-poopterm";
 /// The terminfo source, also printed by `poopterm --print-terminfo`.
 pub(crate) const SOURCE: &str = include_str!("../terminfo/poopterm.terminfo");
 
-/// `TERM` and terminfo search path for spawned shells.
+/// `TERM` and further variables for spawned shells.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TermEnv {
 	pub term: String,
-	/// A value for `TERMINFO_DIRS` when a private copy is in use.
-	pub terminfo_dirs: Option<OsString>,
 	/// Further variables, e.g. for automatic shell integration.
-	pub extra: Vec<(String, OsString)>,
+	pub extra: Vec<(String, std::ffi::OsString)>,
 }
 
 /// Picks `TERM`: an explicit config value wins; `auto` (or none) means
@@ -38,33 +30,11 @@ pub(crate) fn choose_term(configured: Option<&str>, available: bool) -> &str {
 	}
 }
 
-/// Resolves the environment for spawned shells, compiling a private copy
-/// of the entry if needed. `configured` is the `term` config key.
+/// Resolves the environment for spawned shells. `configured` is the `term`
+/// config key.
 pub(crate) fn resolve(configured: Option<&str>) -> TermEnv {
-	let explicit = configured.is_some_and(|term| !term.trim().is_empty() && term.trim() != "auto");
-	if explicit || installed_in(&search_dirs()) {
-		return TermEnv {
-			term: choose_term(configured, true).to_owned(),
-			terminfo_dirs: None,
-			extra: Vec::new(),
-		};
-	}
-	let private = private_dir();
-	let compiled = private
-		.as_deref()
-		.is_some_and(|dir| is_current(dir) || compile_into(dir));
-	let terminfo_dirs = compiled.then(|| {
-		// A trailing empty entry keeps the system's default directories.
-		let mut dirs = OsString::from(private.as_deref().unwrap_or(Path::new("")));
-		dirs.push(":");
-		if let Some(existing) = env::var_os("TERMINFO_DIRS") {
-			dirs.push(existing);
-		}
-		dirs
-	});
 	TermEnv {
-		term: choose_term(configured, compiled).to_owned(),
-		terminfo_dirs,
+		term: choose_term(configured, installed_in(&search_dirs())).to_owned(),
 		extra: Vec::new(),
 	}
 }
@@ -77,64 +47,40 @@ pub(crate) fn installed_in(dirs: &[PathBuf]) -> bool {
 		.any(|dir| dir.join("x").join(NAME).is_file() || dir.join("78").join(NAME).is_file())
 }
 
-/// Directories ncurses searches, in its order.
+/// System-wide directories ncurses searches, which root and `sudo` see too.
 fn search_dirs() -> Vec<PathBuf> {
-	let mut dirs = Vec::new();
-	if let Some(dir) = env::var_os("TERMINFO") {
-		dirs.push(PathBuf::from(dir));
-	}
-	if let Some(home) = env::var_os("HOME") {
-		dirs.push(PathBuf::from(home).join(".terminfo"));
-	}
-	if let Some(list) = env::var_os("TERMINFO_DIRS") {
-		dirs.extend(env::split_paths(&list).filter(|dir| !dir.as_os_str().is_empty()));
-	}
-	dirs.extend(
-		[
-			"/etc/terminfo",
-			"/lib/terminfo",
-			"/usr/share/terminfo",
-			"/usr/lib/terminfo",
-			"/usr/local/share/terminfo",
-			"/opt/homebrew/share/terminfo",
-			"/usr/local/opt/ncurses/share/terminfo",
-		]
-		.map(PathBuf::from),
-	);
-	dirs
-}
-
-/// Where a private copy of the entry is compiled.
-fn private_dir() -> Option<PathBuf> {
-	crate::config::data_dir().map(|dir| dir.join("terminfo"))
-}
-
-/// Whether `dir` holds a copy compiled from the current [`SOURCE`].
-fn is_current(dir: &Path) -> bool {
-	installed_in(&[dir.to_path_buf()])
-		&& fs::read_to_string(dir.join("source.stamp")).is_ok_and(|stamp| stamp == SOURCE)
-}
-
-/// Compiles [`SOURCE`] into `dir` with `tic -x`. Returns false if `tic` is
-/// missing or fails.
-pub(crate) fn compile_into(dir: &Path) -> bool {
-	let source = dir.join("poopterm.terminfo");
-	let compiled = fs::create_dir_all(dir).is_ok()
-		&& fs::write(&source, SOURCE).is_ok()
-		&& Command::new("tic")
-			.arg("-x")
-			.arg("-o")
-			.arg(dir)
-			.arg(&source)
-			.output()
-			.is_ok_and(|output| output.status.success());
-	compiled && fs::write(dir.join("source.stamp"), SOURCE).is_ok()
+	[
+		"/etc/terminfo",
+		"/lib/terminfo",
+		"/usr/share/terminfo",
+		"/usr/lib/terminfo",
+		"/usr/local/share/terminfo",
+		"/opt/homebrew/share/terminfo",
+		"/usr/local/opt/ncurses/share/terminfo",
+	]
+	.map(PathBuf::from)
+	.to_vec()
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use std::process::Command;
+	use std::{env, fs, path::Path, process::Command};
+
+	/// Compiles [`SOURCE`] into `dir` with `tic -x`. Returns false if `tic`
+	/// is missing or fails.
+	fn compile_into(dir: &Path) -> bool {
+		let source = dir.join("poopterm.terminfo");
+		fs::create_dir_all(dir).is_ok()
+			&& fs::write(&source, SOURCE).is_ok()
+			&& Command::new("tic")
+				.arg("-x")
+				.arg("-o")
+				.arg(dir)
+				.arg(&source)
+				.output()
+				.is_ok_and(|output| output.status.success())
+	}
 
 	struct TempDir(PathBuf);
 	impl TempDir {
@@ -168,6 +114,20 @@ mod tests {
 		assert!(installed_in(&[empty.0.clone(), linux.0.clone()]));
 		assert!(installed_in(std::slice::from_ref(&mac.0)));
 		assert!(!installed_in(std::slice::from_ref(&empty.0)));
+	}
+
+	#[test]
+	fn only_system_wide_entries_count() {
+		// sudo resets HOME and TERMINFO*, and ssh carries none of them, so an
+		// entry only this user can see leaves programs without colors.
+		let home = env::var_os("HOME").map(PathBuf::from);
+		for dir in search_dirs() {
+			assert!(dir.is_absolute(), "{dir:?}");
+			assert!(
+				home.as_ref().is_none_or(|home| !dir.starts_with(home)),
+				"{dir:?}"
+			);
+		}
 	}
 
 	#[test]
