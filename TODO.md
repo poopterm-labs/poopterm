@@ -3,12 +3,31 @@
 Open work, roughly in priority order. Measure before and after every step
 (`docs/performance.md`); drop changes without a reproducible gain.
 
-## Throughput: 200 MB/s end to end
+## Throughput goals
 
-This target depends on hardware and workload. The parser is now faster, but
-not every payload has demonstrated 200 MB/s consistently on every machine.
-Results and the Apple M4 test setup are in [`docs/performance.md`](docs/performance.md).
+**Text: 200 MB/s end to end on every payload** (ASCII, Unicode, CSI-heavy,
+cursor movement), measured with `scripts/bench-throughput.py` in a real
+window. Latest i3-N305 numbers are ~55–110 MB/s depending on the payload;
+see [`docs/performance.md`](docs/performance.md).
 
+**Images: up to 1 Gbit/s (~125 MB/s of encoded input)** for Sixel and the
+kitty graphics protocol, from first byte to pixels on screen.
+
+- **Own escape-sequence parser.** Replace `vte` with a hand-rolled,
+  SIMD-classified, batch-oriented parser; vte's per-character dispatch and
+  UTF-8 validation are most of the parser time on Unicode output, and vte
+  ignores APC strings, which the kitty graphics protocol needs. Design and
+  phased plan: [`docs/vte-design.md`](docs/vte-design.md). Each phase is
+  verified differentially against vte before it lands.
+- **Image benchmark.** Add Sixel and kitty-graphics payloads (small icons,
+  full-screen frames, animation) to `bench-throughput.py`, reporting MB/s of
+  encoded input and frames per second, and to the parser benchmark.
+- **Sixel decoding.** Profile `src/sixel.rs` against that benchmark; candidates
+  are SIMD band decoding, decoding straight into the placement bitmap, and
+  streaming decode instead of buffering the whole DCS.
+- **Kitty graphics protocol.** Transmission (direct, chunked `m=1`; file
+  and shared memory later), placement, deletion, and SIMD base64 and
+  zlib decoding, with explicit size limits like Sixel's.
 - **Rendering during floods:** frames still write unchanged background pixels,
   competing with parsing for memory bandwidth. Evaluate skipping those pixels
   or lowering internal resolution, retaining a change only with repeatable
@@ -16,25 +35,14 @@ Results and the Apple M4 test setup are in [`docs/performance.md`](docs/performa
 - **Reduce copies in PTY input:** an owned-buffer queue prototype did not show
   a repeatable gain across payloads and was removed. Revisit only with a
   benchmark that isolates copy cost while preserving queue backpressure.
-
-## Rendering
-
-- Selection and search highlights damage only rows whose highlight coverage
-  changed. Pixel comparison against full redraw covers movement, clearing,
-  scrolling, and Unicode text.
-- During floods, test whether avoiding unchanged background writes improves
-  throughput without harming visual correctness.
-
-## Other
-
-- Bash shell integration loads through a generated `--rcfile` wrapper.
+- **Fair comparisons.** Compare terminals at the same window size and in the
+  same session; the benchmark now names terminals by XTVERSION and no longer
+  aborts in kitty.
 
 ## CI and platforms
 
-- **Automatic monthly releases:** after every fully green CI run on `main`, CI
-  increments the patch or starts a new month at `YY.M.0` with a new codename.
-  It atomically pushes only if `main` still matches the checked revision,
-  publishes the release, then updates the Homebrew formula. Release publishing
-  and race handling are covered by local integration tests.
-- **FreeBSD CI:** build and test in a FreeBSD VM with X11, libxkbcommon,
-  Wayland, bash and zsh dependencies.
+- **First automatic release.** The release job (version bump, GitHub
+  release, Homebrew formula update) has never run: the FreeBSD job hung on
+  an interactive-bash test until it was fixed. Confirm the next green `main`
+  run publishes a release and points `Formula/poopterm.rb` at it (it is still
+  at 0.43.0).
