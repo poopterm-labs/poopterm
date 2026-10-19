@@ -91,11 +91,12 @@ jobs:
       - name: Build Debian package
         run: bash scripts/package-deb.sh
 
-      # Kept for trying out a pull request's package; releases build their own.
+      # For trying out a pull request's package; releases build their own.
+      # Uploaded as the .deb itself, named after it, so it installs as is.
       - name: Upload Debian package
         uses: actions/upload-artifact@v7
         with:
-          name: poopterm-deb
+          archive: false
           path: dist/*.deb
           if-no-files-found: error
           retention-days: 7
