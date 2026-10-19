@@ -40,6 +40,7 @@ pub(crate) enum ThemeKind {
 	CatppuccinMacchiato,
 	CatppuccinMocha,
 	Bark,
+	AmoledBlack,
 	Poop,
 	Custom,
 }
@@ -54,6 +55,7 @@ impl ThemeKind {
 			"catppuccin-frappe" => Some(Self::CatppuccinFrappe),
 			"catppuccin-macchiato" => Some(Self::CatppuccinMacchiato),
 			"bark" => Some(Self::Bark),
+			"amoled-black" | "amoled" => Some(Self::AmoledBlack),
 			"poop" => Some(Self::Poop),
 			"custom" => Some(Self::Custom),
 			_ => None,
@@ -68,6 +70,7 @@ impl ThemeKind {
 			Self::CatppuccinMacchiato => "catppuccin-macchiato",
 			Self::CatppuccinMocha => "catppuccin-mocha",
 			Self::Bark => "bark",
+			Self::AmoledBlack => "amoled-black",
 			Self::Poop => "poop",
 			Self::Custom => "custom",
 		}
@@ -80,7 +83,8 @@ impl ThemeKind {
 			Self::CatppuccinFrappe => Self::CatppuccinMacchiato,
 			Self::CatppuccinMacchiato => Self::CatppuccinMocha,
 			Self::CatppuccinMocha => Self::Bark,
-			Self::Bark => Self::Poop,
+			Self::Bark => Self::AmoledBlack,
+			Self::AmoledBlack => Self::Poop,
 			Self::Poop => Self::MacOsDark,
 			Self::Custom => Self::MacOsDark,
 		}
@@ -153,6 +157,15 @@ impl Theme {
 					0x101010, 0xAB4642, 0xA1B56C, 0xF7CA88, 0x7CAFC2, 0xBA8BAF, 0x86C1B9, 0xD0D0D0,
 				],
 			},
+			ThemeKind::AmoledBlack => Self {
+				kind,
+				fg: 0xE9E4D4,
+				bg: 0x000000,
+				border: 0x1B1B1B,
+				palette: [
+					0x121212, 0xFF5C57, 0x8CE88A, 0xF2C14E, 0xD4AF37, 0xC792EA, 0x6EDBD2, 0xE9E4D4,
+				],
+			},
 			ThemeKind::Poop => Self {
 				kind,
 				fg: DEFAULT_FG,
@@ -175,6 +188,9 @@ impl Theme {
 			.or_else(read_config_theme)
 			.unwrap_or(ThemeKind::Poop);
 		let mut theme = Self::from_kind(kind);
+		if kind == ThemeKind::AmoledBlack {
+			return theme;
+		}
 		for (key, target) in [
 			("foreground", &mut theme.fg),
 			("background", &mut theme.bg),
@@ -290,7 +306,7 @@ mod tests {
 		assert_eq!(ThemeKind::parse("Bark"), Some(ThemeKind::Bark));
 		assert_eq!(ThemeKind::Bark.name(), "bark");
 		assert_eq!(ThemeKind::CatppuccinMocha.next(), ThemeKind::Bark);
-		assert_eq!(ThemeKind::Bark.next(), ThemeKind::Poop);
+		assert_eq!(ThemeKind::Bark.next(), ThemeKind::AmoledBlack);
 		let theme = Theme::from_kind(ThemeKind::Bark);
 		assert_eq!(theme.kind.name(), "bark");
 		assert_eq!(

@@ -36,7 +36,7 @@ impl App {
 	}
 
 	pub(super) fn tab_layout(&self) -> TabLayout {
-		tab_layout(
+		tab_layout_with_compaction(
 			self.width as usize,
 			self.sessions.len(),
 			self
@@ -45,10 +45,14 @@ impl App {
 				.map_or(1.0, |w| w.scale_factor())
 				.round()
 				.max(1.0) as usize,
-			self.tab_left_reserve(),
-			self.tab_scroll,
-			self.preferences.show_new_tab_button,
-			self.preferences.show_settings_button,
+			TabStripOptions {
+				left_reserve: self.tab_left_reserve(),
+				scroll: self.tab_scroll,
+				show_plus: self.preferences.show_new_tab_button,
+				show_settings: self.preferences.show_settings_button,
+				active_tab: self.active,
+				compact_tabs: self.preferences.compact_tabs,
+			},
 		)
 	}
 
@@ -61,6 +65,8 @@ impl App {
 				top_reserve: self.titlebar_height,
 				status_height: self.status_height + self.border,
 				scroll: self.tab_scroll,
+				active_tab: self.active,
+				compact_tabs: self.preferences.compact_tabs,
 				show_plus: self.preferences.show_new_tab_button,
 				show_settings: self.preferences.show_settings_button,
 			},

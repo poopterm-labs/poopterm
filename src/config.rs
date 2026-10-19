@@ -16,6 +16,7 @@ pub struct Preferences {
 	pub opacity: usize,
 	pub show_tabs: bool,
 	pub vertical_tabs: bool,
+	pub compact_tabs: bool,
 	pub show_new_tab_button: bool,
 	pub show_settings_button: bool,
 	pub show_bottom_bar: bool,
@@ -32,6 +33,7 @@ impl Default for Preferences {
 			opacity: 100,
 			show_tabs: true,
 			vertical_tabs: false,
+			compact_tabs: false,
 			show_new_tab_button: true,
 			show_settings_button: true,
 			show_bottom_bar: true,
@@ -65,6 +67,9 @@ impl Preferences {
 			vertical_tabs: value(text, "vertical_tabs")
 				.and_then(|s| s.parse().ok())
 				.unwrap_or(defaults.vertical_tabs),
+			compact_tabs: value(text, "compact_tabs")
+				.and_then(|s| s.parse().ok())
+				.unwrap_or(defaults.compact_tabs),
 			show_new_tab_button: value(text, "show_new_tab_button")
 				.and_then(|s| s.parse().ok())
 				.unwrap_or(defaults.show_new_tab_button),

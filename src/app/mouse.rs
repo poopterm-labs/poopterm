@@ -371,10 +371,11 @@ impl App {
 					if index >= self.sessions.len() {
 						break;
 					}
-					let left = layout.start + local_index * (layout.width + layout.gap);
-					if x >= left as f64 && x < (left + layout.width) as f64 {
+					let left = layout.tab_x(index);
+					let width = layout.tab_width(index);
+					if x >= left as f64 && x < (left + width) as f64 {
 						if self.sessions.len() > 1
-							&& x >= (left + layout.width.saturating_sub(28 * layout.scale)) as f64
+							&& x >= (left + width.saturating_sub(28 * layout.scale)) as f64
 						{
 							self.close_tab(index, event_loop);
 						} else {

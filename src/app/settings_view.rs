@@ -21,7 +21,8 @@ pub(super) const VERTICAL_TABS_ROW: usize = 152;
 pub(super) const NEW_TAB_BUTTON_ROW: usize = 200;
 pub(super) const SETTINGS_BUTTON_ROW: usize = 248;
 pub(super) const BOTTOM_BAR_ROW: usize = 296;
-pub(super) const PADDING_ROW: usize = 344;
+pub(super) const COMPACT_TABS_ROW: usize = 344;
+pub(super) const PADDING_ROW: usize = 392;
 pub(super) const SHORTCUT_ROWS: [(ShortcutAction, usize); 7] = [
 	(ShortcutAction::NewTab, 104),
 	(ShortcutAction::CommandPalette, 152),
@@ -41,7 +42,7 @@ pub(super) const MIN_SIZE: (usize, usize) = (680, 600);
 pub(super) const ROW_HEIGHT: usize = 40;
 
 /// Themes in the order the Settings picker cycles through them.
-pub(super) const THEMES: [ThemeKind; 9] = [
+pub(super) const THEMES: [ThemeKind; 10] = [
 	ThemeKind::MacOsDark,
 	ThemeKind::MacOsLight,
 	ThemeKind::CatppuccinLatte,
@@ -49,6 +50,7 @@ pub(super) const THEMES: [ThemeKind; 9] = [
 	ThemeKind::CatppuccinMacchiato,
 	ThemeKind::CatppuccinMocha,
 	ThemeKind::Bark,
+	ThemeKind::AmoledBlack,
 	ThemeKind::Poop,
 	ThemeKind::Custom,
 ];
@@ -67,6 +69,7 @@ fn theme_label(kind: ThemeKind) -> String {
 		ThemeKind::MacOsDark => "Dark Mode".to_owned(),
 		ThemeKind::MacOsLight => "Light Mode".to_owned(),
 		ThemeKind::Bark => "Bark".to_owned(),
+		ThemeKind::AmoledBlack => "AMOLED Black".to_owned(),
 		ThemeKind::Custom => "Custom".to_owned(),
 		_ => kind.name().replace("catppuccin-", "Catppuccin "),
 	}
@@ -193,6 +196,7 @@ impl App {
 						prefs.show_settings_button,
 					),
 					(BOTTOM_BAR_ROW, "Show bottom bar", prefs.show_bottom_bar),
+					(COMPACT_TABS_ROW, "Compact tabs", prefs.compact_tabs),
 				] {
 					pen.text(p, x, row + 8, label, 0.82);
 					pen.toggle(p, style, row, enabled);
@@ -331,7 +335,7 @@ mod tests {
 		assert_eq!(step_theme(ThemeKind::Custom, 1), ThemeKind::MacOsDark);
 		assert_eq!(step_theme(ThemeKind::Poop, 1), ThemeKind::Custom);
 		assert_eq!(step_theme(ThemeKind::CatppuccinMocha, 1), ThemeKind::Bark);
-		assert_eq!(step_theme(ThemeKind::Bark, 1), ThemeKind::Poop);
+		assert_eq!(step_theme(ThemeKind::Bark, 1), ThemeKind::AmoledBlack);
 	}
 
 	#[test]

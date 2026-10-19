@@ -55,11 +55,12 @@ impl App {
 				.len()
 				.min(layout.first_visible + layout.visible_count);
 		for index in visible {
-			let x = layout.start + (index - layout.first_visible) * (layout.width + layout.gap);
+			let x = layout.tab_x(index);
+			let tab_width = layout.tab_width(index);
 			let active = index == self.active;
 			let hovered = hit(
 				self.cursor_pos,
-				(x, tab_y, layout.width, self.top.saturating_sub(tab_y)),
+				(x, tab_y, tab_width, self.top.saturating_sub(tab_y)),
 			);
 			let session = &self.sessions[index];
 			let style = session.term().tab_style.clone();
@@ -74,7 +75,7 @@ impl App {
 				p.round_rect(
 					x,
 					tab_y + 4 * scale,
-					layout.width,
+					tab_width,
 					self.tab_height.saturating_sub(6 * scale),
 					5 * scale,
 					blend(bg, color, shade),
@@ -84,7 +85,7 @@ impl App {
 				p.round_rect(
 					x,
 					tab_y + 4 * scale,
-					layout.width,
+					tab_width,
 					self.tab_height.saturating_sub(6 * scale),
 					5 * scale,
 					blend(bg, border, shade),
@@ -94,7 +95,7 @@ impl App {
 				p.round_rect(
 					x + 8 * scale,
 					tab_y + self.tab_height.saturating_sub(5 * scale),
-					layout.width.saturating_sub(16 * scale),
+					tab_width.saturating_sub(16 * scale),
 					3 * scale,
 					scale,
 					accent,
@@ -128,13 +129,13 @@ impl App {
 				);
 			}
 			if let Some(progress) = progress {
-				self.draw_tab_progress(p, (x, tab_y, layout.width), scale, progress);
+				self.draw_tab_progress(p, (x, tab_y, tab_width), scale, progress);
 			}
 			// Labels are drawn smaller than the UI font, up to the close button.
 			let small_cw = ui.cw as f32 * 0.82;
 			let left = if dot.is_some() { 22 } else { 12 } * scale;
 			let right = if self.sessions.len() > 1 { 32 } else { 12 } * scale;
-			let room = layout.width.saturating_sub(left + right);
+			let room = tab_width.saturating_sub(left + right);
 			let max_chars = ((room as f32 / small_cw.max(1.0)) as usize).max(1);
 			let (label, status) = tab_label(&session.title(), style.status.as_deref(), max_chars);
 			let label_x = x + left;
@@ -174,7 +175,7 @@ impl App {
 			if self.sessions.len() > 1 {
 				p.text(
 					&mut self.fonts,
-					x + layout.width.saturating_sub(28 * scale),
+					x + tab_width.saturating_sub(28 * scale),
 					text_y,
 					"×",
 					ui.px * 0.82,

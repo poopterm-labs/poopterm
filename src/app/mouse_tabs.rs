@@ -63,17 +63,32 @@ impl App {
 			{
 				self.add_tab();
 			} else if y >= layout.tab_start_y as f64 {
-				let local = (y as usize - layout.tab_start_y) / layout.row_height;
-				let index = layout.first_visible + local;
-				if local < layout.visible_count && index < self.sessions.len() {
+				for local in 0..layout.visible_count {
+					let index = layout.first_visible + local;
+					if index >= self.sessions.len() {
+						break;
+					}
+					let row_y = layout.row_y(index);
+					let row_h = layout
+						.row_height_for(index)
+						.saturating_sub(4 * layout.scale);
+					if y < row_y as f64 || y >= (row_y + row_h) as f64 {
+						continue;
+					}
 					let row_x = 6 * layout.scale;
+					let close_width = if layout.compact_rail {
+						18 * layout.scale
+					} else {
+						24 * layout.scale
+					};
 					if self.sessions.len() > 1
-						&& x >= (row_x + layout.tab_width.saturating_sub(24 * layout.scale)) as f64
+						&& x >= (row_x + layout.tab_width.saturating_sub(close_width)) as f64
 					{
 						self.close_tab(index, event_loop);
 					} else {
 						self.activate_tab(index);
 					}
+					break;
 				}
 			} else if let Some(window) = &self.window {
 				let _ = window.drag_window();

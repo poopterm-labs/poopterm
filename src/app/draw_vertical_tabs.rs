@@ -44,8 +44,8 @@ impl App {
 		let tabs = (layout.first_visible..visible_end)
 			.map(|index| {
 				let session = &self.sessions[index];
-				let y = layout.tab_start_y + (index - layout.first_visible) * layout.row_height;
-				let row_h = layout.row_height.saturating_sub(4 * scale);
+				let y = layout.row_y(index);
+				let row_h = layout.row_height_for(index).saturating_sub(4 * scale);
 				// `title` locks the terminal itself, so it comes first.
 				let title = session.title();
 				let term = session.term();
@@ -144,10 +144,17 @@ impl App {
 		);
 		for (local_index, tab) in view.tabs.iter().enumerate() {
 			let x = 6 * scale;
-			let y = layout.tab_start_y + local_index * layout.row_height;
-			let row_h = layout.row_height.saturating_sub(4 * scale);
+			let index = layout.first_visible + local_index;
+			let y = layout.row_y(index);
+			let row_height = layout.row_height_for(index);
+			let row_h = row_height.saturating_sub(4 * scale);
 			let (active, hovered, style) = (tab.active, tab.hovered, &tab.style);
-			let show_close = view.closable && (active || hovered);
+			let show_close = view.closable
+				&& (if layout.compact_rail {
+					hovered
+				} else {
+					active || hovered
+				});
 			if let Some(color) = style.color {
 				let shade = if active {
 					150
@@ -196,6 +203,44 @@ impl App {
 					Marker::Activity => ("•", blend(bg, fg, 150)),
 				})
 				.or(style.indicator.map(|color| ("•", color)));
+			if layout.compact_rail {
+				let label = (index + 1).to_string();
+				let glyph_width = (label.chars().count() as f32 * ui.cw as f32 * 0.9) as usize;
+				p.text(
+					&mut self.fonts,
+					x + layout.tab_width.saturating_sub(glyph_width) / 2,
+					y + row_h.saturating_sub(ui.ch) / 2,
+					&label,
+					ui.px * 0.9,
+					ui.ascent,
+					fg,
+				);
+				if let Some((_, color)) = dot.filter(|_| !hovered) {
+					p.round_rect(
+						x + layout.tab_width.saturating_sub(10 * scale),
+						y + 3 * scale,
+						6 * scale,
+						6 * scale,
+						3 * scale,
+						color,
+					);
+				}
+				if show_close {
+					p.text(
+						&mut self.fonts,
+						x + layout.tab_width.saturating_sub(17 * scale),
+						y + row_h.saturating_sub(ui.ch) / 2,
+						"×",
+						ui.px * 0.7,
+						(ui.ascent as f32 * 0.82) as i32,
+						fg,
+					);
+				}
+				if let Some(progress) = progress {
+					self.draw_vertical_tab_progress(p, (x, y, layout.tab_width, row_height), scale, progress);
+				}
+				continue;
+			}
 			let text_y = y + row_h.saturating_sub(ui.ch) / 2;
 			let small_ascent = (ui.ascent as f32 * 0.82) as i32;
 			if let Some((glyph, color)) = dot {
@@ -251,12 +296,7 @@ impl App {
 				);
 			}
 			if let Some(progress) = progress {
-				self.draw_vertical_tab_progress(
-					p,
-					(x, y, layout.tab_width, layout.row_height),
-					scale,
-					progress,
-				);
+				self.draw_vertical_tab_progress(p, (x, y, layout.tab_width, row_height), scale, progress);
 			}
 		}
 
