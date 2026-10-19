@@ -91,6 +91,7 @@ jobs:
       - name: Build Debian package
         run: bash scripts/package-deb.sh
 
+      # Kept for trying out a pull request's package; releases build their own.
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
         with:
@@ -102,8 +103,10 @@ jobs:
   release:
     needs: [check, freebsd, debian-package]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Builds the Debian package after the version bump, on the same old
+    # glibc as the debian-package job.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
     permissions:
       contents: write
     concurrency:
@@ -116,11 +119,10 @@ jobs:
           # main is protected; this write deploy key is the ruleset's only
           # bypass, so the release commits can land there.
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
-      - name: Download Debian package
-        uses: actions/download-artifact@v4
-        with:
-          name: poopterm-deb
-          path: dist
+      - name: Install Linux and Debian packaging libraries
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev dpkg-dev ncurses-bin
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
       - name: Publish the checked main revision
         env:
           GH_TOKEN: ${{ github.token }}
