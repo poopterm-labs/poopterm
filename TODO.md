@@ -41,6 +41,44 @@ match text throughput, within the explicit size limits on untrusted input.
   same session; the benchmark now names terminals by XTVERSION and no longer
   aborts in kitty.
 
+## Build and layout optimizations
+
+Heavier, stable optimizations of the shipped binary and of our data layout.
+Each item is an issue; measure every one before and after, and keep it only
+with a reproducible gain. The goal is heavily optimized binaries in **every
+release artifact** (deb, rpm, AppImage, macOS and whatever comes next). The
+packaging side of that is vgs499p's area.
+
+- **Profile-guided and post-link optimization**
+  - PGO for release builds, reusing `scripts/pgo.sh` in the release jobs
+    ([#32](https://github.com/poopterm-labs/poopterm/issues/32)).
+  - BOLT post-link layout on Linux, from perf LBR samples or
+    instrumentation ([#33](https://github.com/poopterm-labs/poopterm/issues/33)).
+  - A staged PGO + BOLT pipeline producing the binary in every release
+    artifact ([#34](https://github.com/poopterm-labs/poopterm/issues/34)).
+  - Sample-based PGO (AutoFDO) from perf profiles of real use, with nightly
+    `-Zprofile-sample-use` ([#35](https://github.com/poopterm-labs/poopterm/issues/35)).
+- **Code generation**
+  - Runtime CPU dispatch (AVX2, AVX-512) for the SIMD hot paths, keeping a
+    baseline x86-64 binary ([#36](https://github.com/poopterm-labs/poopterm/issues/36)).
+  - `-Zbuild-std`, so LTO, PGO and `panic = "abort"` cover std too
+    ([#37](https://github.com/poopterm-labs/poopterm/issues/37)).
+  - Hot-function ordering and identical code folding at link time, which
+    also works on macOS ([#38](https://github.com/poopterm-labs/poopterm/issues/38)).
+- **Memory layout**
+  - Split `Term` into hot and cold state, with the per-byte parser state on
+    one or two cache lines ([#39](https://github.com/poopterm-labs/poopterm/issues/39)).
+  - Store grid and scrollback rows contiguously, not as one `Vec` per row
+    ([#40](https://github.com/poopterm-labs/poopterm/issues/40)).
+  - Shrink `Cell` below 16 bytes ([#41](https://github.com/poopterm-labs/poopterm/issues/41)).
+  - Cache-line alignment of the structures shared between threads, plus
+    prefetching where profiles show misses
+    ([#42](https://github.com/poopterm-labs/poopterm/issues/42)).
+- **Regression to fix first.** The compatibility work from 26.10.23 to
+  26.10.27 cost 2–4% on escape-sequence-heavy workloads in the parser
+  benchmark (tui, editor, cursor, progress) and about 6% on unicode. Profile
+  and recover it before or alongside the items above.
+
 ## Hardware-accelerated rendering
 
 Full GPU rendering, now that kitty graphics has landed. CPU drawing is the main
