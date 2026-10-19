@@ -1,6 +1,7 @@
 //! Images shown in the terminal (Sixel and the kitty graphics protocol):
 //! decoded bitmaps and where they are placed on the grid.
 pub(crate) mod base64;
+pub(crate) mod iterm;
 pub(crate) mod kitty;
 
 use std::sync::Arc;

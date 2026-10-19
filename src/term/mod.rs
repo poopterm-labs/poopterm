@@ -16,6 +16,9 @@ mod grid;
 mod images;
 pub(crate) mod iterm;
 #[cfg(test)]
+mod iterm_image_tests;
+mod iterm_images;
+#[cfg(test)]
 mod iterm_tests;
 mod kitty;
 mod kitty_animation;

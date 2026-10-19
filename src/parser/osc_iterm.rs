@@ -1,7 +1,7 @@
-//! iTerm2's OSC 1337 commands besides images. Commands that need a feature
-//! poopterm lacks (profiles, the Touch Bar, annotations, blocks, buttons,
-//! custom sequences) or a user's confirmation (background images, opening
-//! URLs) are ignored.
+//! iTerm2's OSC 1337 commands; images are placed by `term::iterm_images`.
+//! Commands that need a feature poopterm lacks (profiles, the Touch Bar,
+//! annotations, blocks, buttons, custom sequences) or a user's confirmation
+//! (background images, opening URLs, downloads) are ignored.
 use std::sync::Arc;
 
 use crate::{
@@ -16,6 +16,24 @@ use crate::{
 impl Term {
 	/// `params` are `Command=value` (or `Command`) and any further fields.
 	pub(super) fn osc_iterm(&mut self, params: &[&[u8]], bell: bool) {
+		// Files are bytes; the arguments' semicolons split them into fields.
+		let rejoined = |first: &[u8]| {
+			let mut fields = vec![first];
+			fields.extend_from_slice(&params[1..]);
+			fields.join(&b';')
+		};
+		if let Some(file) = params[0].strip_prefix(b"File=") {
+			return self.iterm_file(&rejoined(file));
+		}
+		if let Some(args) = params[0].strip_prefix(b"MultipartFile=") {
+			return self.iterm_multipart_file(&rejoined(args));
+		}
+		if let Some(part) = params[0].strip_prefix(b"FilePart=") {
+			return self.iterm_file_part(part);
+		}
+		if params[0] == b"FileEnd" {
+			return self.iterm_file_end();
+		}
 		let Ok(first) = std::str::from_utf8(params[0]) else {
 			return;
 		};

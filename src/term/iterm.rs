@@ -1,6 +1,7 @@
 //! State behind iTerm2's OSC 1337 commands: user variables, the remote
 //! host, the cursor guide, text being copied to the clipboard, and requests
 //! for the window.
+use crate::graphics::iterm::Upload;
 
 /// Most user variables kept; new names beyond it are ignored.
 pub(crate) const MAX_USER_VARS: usize = 64;
@@ -54,6 +55,8 @@ pub(crate) struct Iterm {
 	user_vars: Vec<(String, String)>,
 	/// Text since `CopyToClipboard`; `None` inside once it grew too large.
 	pub capture: Option<Option<String>>,
+	/// A file arriving in `FilePart`s.
+	pub upload: Option<Box<Upload>>,
 }
 
 impl Iterm {

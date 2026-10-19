@@ -1,5 +1,6 @@
 //! Turns transmitted image data (`f=24` RGB, `f=32` RGBA, `f=100` PNG,
-//! optionally zlib-compressed with `o=z`) into a [`Bitmap`].
+//! optionally zlib-compressed with `o=z`), and image files, into a
+//! [`Bitmap`].
 use std::io::Cursor;
 
 use super::{Command, Error, MAX_TRANSFER};
@@ -91,9 +92,23 @@ fn from_rgba(data: &[u8]) -> Vec<u32> {
 		.collect()
 }
 
+/// Decodes a PNG, JPEG or WebP file, as its first bytes say it is.
+pub(crate) fn decode_file(data: &[u8]) -> Result<Bitmap, Error> {
+	use image::ImageFormat::{Jpeg, Png, WebP};
+	match image::guess_format(data) {
+		Ok(format @ (Png | Jpeg | WebP)) => decode_as(data, format, "EBADFILE"),
+		_ => Err(Error::new("EBADFILE", "unsupported image format")),
+	}
+}
+
 fn decode_png(data: &[u8]) -> Result<Bitmap, Error> {
-	let bad = |error: image::ImageError| Error::new("EBADPNG", error.to_string());
-	let mut reader = image::ImageReader::with_format(Cursor::new(data), image::ImageFormat::Png);
+	decode_as(data, image::ImageFormat::Png, "EBADPNG")
+}
+
+/// Decodes `data` as `format`, within the size limits; failures report `code`.
+fn decode_as(data: &[u8], format: image::ImageFormat, code: &'static str) -> Result<Bitmap, Error> {
+	let bad = |error: image::ImageError| Error::new(code, error.to_string());
+	let mut reader = image::ImageReader::with_format(Cursor::new(data), format);
 	let mut limits = image::Limits::default();
 	limits.max_image_width = Some(MAX_SIDE as u32);
 	limits.max_image_height = Some(MAX_SIDE as u32);
@@ -173,5 +188,37 @@ mod tests {
 		let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&png, 6);
 		assert_eq!(decode(&command("f=100,o=z"), &compressed).unwrap(), bitmap);
 		assert_eq!(code(decode(&command("f=100"), b"not a png")), "EBADPNG");
+	}
+
+	#[test]
+	fn files_are_decoded_by_their_format() {
+		use image::ImageEncoder;
+		let pixels = [200u8, 100, 50, 255].repeat(6);
+		let mut png = Vec::new();
+		image::codecs::png::PngEncoder::new(&mut png)
+			.write_image(&pixels, 3, 2, image::ExtendedColorType::Rgba8)
+			.unwrap();
+		let mut jpeg = Vec::new();
+		image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+			.write_image(
+				&[200, 100, 50].repeat(6),
+				3,
+				2,
+				image::ExtendedColorType::Rgb8,
+			)
+			.unwrap();
+		let mut webp = Vec::new();
+		image::codecs::webp::WebPEncoder::new_lossless(&mut webp)
+			.write_image(&pixels, 3, 2, image::ExtendedColorType::Rgba8)
+			.unwrap();
+		for file in [png, jpeg, webp] {
+			let bitmap = decode_file(&file).unwrap();
+			assert_eq!((bitmap.width, bitmap.height), (3, 2));
+			// JPEG is lossy: close is enough.
+			let red = (bitmap.pixels[0] >> 16) & 0xff;
+			assert!(red.abs_diff(200) < 8, "{red}");
+		}
+		assert_eq!(code(decode_file(b"GIF89a\x01\x00")), "EBADFILE");
+		assert_eq!(code(decode_file(b"")), "EBADFILE");
 	}
 }

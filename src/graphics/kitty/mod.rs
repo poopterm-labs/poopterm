@@ -3,7 +3,7 @@
 mod animation;
 mod command;
 mod compose;
-mod decode;
+pub(crate) mod decode;
 mod diacritics;
 mod media;
 mod placeholder;

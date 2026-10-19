@@ -1,5 +1,5 @@
-//! Image placement, scrolling and eviction (Sixel; kitty images are in
-//! `kitty.rs`).
+//! Image placement, scrolling and eviction (Sixel; iTerm2 images are in
+//! `iterm_images.rs`, kitty images in `kitty.rs`).
 use std::sync::Arc;
 
 use super::Term;
@@ -89,20 +89,7 @@ impl Term {
 		} else {
 			(0, 0)
 		};
-		// Sixel images have no ids to delete them by, so only the newest are
-		// kept; kitty placements have their own store and quota.
-		let count = bitmap.pixels.len();
-		loop {
-			let sixels = self.images.iter().filter(|image| image.kitty.is_none());
-			let (len, pixels) = sixels.fold((0, 0), |(len, pixels), image| {
-				(len + 1, pixels + image.bitmap.pixels.len())
-			});
-			if len == 0 || (len < 16 && pixels + count <= 4 * 1024 * 1024) {
-				break;
-			}
-			let oldest = self.images.iter().position(|image| image.kitty.is_none());
-			self.images.remove(oldest.unwrap());
-		}
+		self.make_room_for_image(bitmap.pixels.len());
 		if self.sixel_scrolling {
 			for _ in 0..rows {
 				if self.cy == self.scroll_bottom {
@@ -118,5 +105,21 @@ impl Term {
 			col,
 			row,
 		));
+	}
+
+	/// Sixel and iTerm2 images have no ids to delete them by, so only the
+	/// newest are kept; kitty placements have their own store and quota.
+	pub(crate) fn make_room_for_image(&mut self, count: usize) {
+		loop {
+			let sixels = self.images.iter().filter(|image| image.kitty.is_none());
+			let (len, pixels) = sixels.fold((0, 0), |(len, pixels), image| {
+				(len + 1, pixels + image.bitmap.pixels.len())
+			});
+			if len == 0 || (len < 16 && pixels + count <= 4 * 1024 * 1024) {
+				break;
+			}
+			let oldest = self.images.iter().position(|image| image.kitty.is_none());
+			self.images.remove(oldest.unwrap());
+		}
 	}
 }
