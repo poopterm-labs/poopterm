@@ -1280,6 +1280,7 @@ version = "26.10.0"
 dependencies = [
  "fontdue",
  "image",
+ "miniz_oxide 0.9.1",
  "objc2 0.6.5",
  "portable-pty",
  "rfd",

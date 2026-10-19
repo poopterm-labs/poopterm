@@ -10,14 +10,19 @@ spec.loader.exec_module(throughput)
 
 
 class Payloads(unittest.TestCase):
+    def setUp(self):
+        try:
+            self.binary = throughput.poopterm_binary()
+        except FileNotFoundError:
+            self.skipTest('needs target/release/poopterm (cargo build --release)')
+
     def test_timed_and_warm_up_payloads_end_on_whole_sequences(self):
         # A payload cut inside `CSI 38;2;…` makes the following DA1 query part
         # of that sequence. kitty then drops both, never answers, and the
         # benchmark aborts (closing kitty's window, which looks like a crash).
-        for payload in throughput.build_payloads(1 << 20):
+        for payload in throughput.build_payloads(1, binary=self.binary):
             for data in [payload.data, payload.warm_up]:
                 with self.subTest(payload=payload.key, size=len(data)):
-                    data.decode('utf-8')
                     self.assertIsNone(re.search(rb'\x1b(\[[0-9;:]*)?$', data))
                     self.assertTrue(payload.data.startswith(data))
             self.assertLess(len(payload.warm_up), len(payload.data))

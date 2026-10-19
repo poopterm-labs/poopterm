@@ -15,6 +15,7 @@ portable-pty = "^0.9"
 vte = "^0.15"
 fontdue = "^0.9"
 unicode-width = "^0.2"
+miniz_oxide = "^0.9"
 image = { version = "^0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 rfd = { version = "^0.17", default-features = false, features = ["xdg-portal"] }
 

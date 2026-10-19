@@ -1,44 +1,50 @@
 #!/usr/bin/env python3
-"""Terminal-agnostic output throughput benchmark.
+"""Terminal-agnostic output throughput benchmark over real-world workloads.
 
 Measures how fast the terminal *running this script* consumes output, in the
 spirit of kitty's `kitten __benchmark__`, but using nothing terminal-specific:
 
-* Payloads are deterministic (fixed seed) and generated before timing starts.
+* Workloads come from poopterm's corpus (`poopterm --bench-corpus`): build
+  logs, colored compiler output, ls, highlighted source, Unicode, CJK, emoji,
+  full-screen TUI redraws, editor scrolling, progress bars, truecolor art,
+  shell prompts with OSC 133, Sixel and kitty graphics. They are
+  deterministic, so every terminal gets identical bytes. Build poopterm
+  first (`cargo build --release`), or point POOPTERM_BIN at a binary.
 * Each measurement ends with a Primary Device Attributes query (`CSI c`),
   which every VT100-compatible terminal answers only after parsing all prior
   output, so buffering inside the terminal cannot inflate the numbers.
 * One warm-up pass, then `--repeat` timed passes; the median is reported
   along with min/max so noisy runs are visible.
-* Window size, $TERM and payload sizes are recorded, because rendering cost
-  scales with the grid size. Compare terminals at the same window size.
+* Workloads are generated for the window's size, which is recorded, because
+  rendering cost scales with the grid. Compare terminals at the same size.
 
 Usage (run inside the terminal under test):
 
-    python3 scripts/bench-throughput.py                  # 32 MiB x 3 repeats
-    python3 scripts/bench-throughput.py --mib 64 --repeat 5
+    python3 scripts/bench-throughput.py                    # 16 MiB x 3 per workload
+    python3 scripts/bench-throughput.py --mib 64 --repeat 5 --only log --only tui
     python3 scripts/bench-throughput.py --output results.json --format json
 """
 import argparse
 from collections import namedtuple
 import json
 import os
-import random
+from pathlib import Path
 import re
 import select
 import shutil
 import statistics
+import subprocess
 import sys
 import termios
 import time
 import tty
 
 CHUNK = 1 << 16  # bytes per write(2) call, identical for every terminal
+ROOT = Path(__file__).resolve().parents[1]
 
-
-# `data` is the timed payload; `warm_up` is about an eighth of it. Both are
-# whole chunks, so no escape sequence or UTF-8 character is cut: a DA1 query
-# sent after a cut sequence is swallowed by some terminals (kitty).
+# `data` is the timed payload; `warm_up` is about an eighth of it. Both end
+# on whole bursts, so no escape sequence or UTF-8 character is cut: a DA1
+# query sent after a cut sequence is swallowed by some terminals (kitty).
 Payload = namedtuple("Payload", "key name data warm_up")
 
 
@@ -71,37 +77,34 @@ def parse_xtversion(reply):
     return match.group(1).decode(errors="replace") if match else None
 
 
-def build_payloads(size):
-    rng = random.Random(1234)
-    printable = bytes(range(0x20, 0x7F))
-    ascii_chunk = b"".join(
-        bytes(rng.choice(printable) for _ in range(rng.randint(40, 120))) + b"\n"
-        for _ in range(512)
-    )
-    words = ["héllo", "wörld", "日本語", "terminal", "→", "λ", "🙂", "naïve", "box─┼─"]
-    unicode_chunk = (
-        "\n".join(" ".join(rng.choice(words) for _ in range(12)) for _ in range(256)) + "\n"
-    ).encode()
-    csi_chunk = b"".join(
-        b"\x1b[%d;%dm%s\x1b[0m\x1b[38;2;%d;%d;%dmx" % (
-            rng.randint(30, 37), rng.randint(40, 47), b"ab",
-            rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
-        for _ in range(2048)
-    ) + b"\n"
-    cursor_chunk = b"".join(
-        b"\x1b[%d;%dHtext\x1b[K\x1b[2A\x1b[3C" % (rng.randint(1, 24), rng.randint(1, 80))
-        for _ in range(2048)
-    )
-    chunks = [
-        ("ascii", "Only ASCII chars", ascii_chunk),
-        ("unicode", "Unicode chars", unicode_chunk),
-        ("csi", "CSI codes with few chars", csi_chunk),
-        ("cursor", "Cursor movement", cursor_chunk),
-    ]
+def poopterm_binary():
+    binary = Path(os.environ.get("POOPTERM_BIN") or ROOT / "target/release/poopterm")
+    if not binary.is_file():
+        raise FileNotFoundError(f"{binary} not found; run `cargo build --release` or set POOPTERM_BIN")
+    return binary
+
+
+def workloads(binary):
+    """(name, description) of every corpus workload."""
+    listing = subprocess.run([binary, "--benchmark", "--list"], capture_output=True, text=True, check=True)
+    return [tuple(line.split(None, 1)) for line in listing.stdout.splitlines() if line.strip()]
+
+
+def corpus(binary, name, kib, columns, lines):
+    return subprocess.run([binary, "--bench-corpus", name, "--kib", str(kib), "--size", f"{columns}x{lines}"],
+                          capture_output=True, check=True).stdout
+
+
+def build_payloads(mib, columns=120, lines=40, only=None, binary=None):
+    binary = binary or poopterm_binary()
     payloads = []
-    for key, name, chunk in chunks:
-        count = max(1, size // len(chunk))
-        payloads.append(Payload(key, name, chunk * count, chunk * max(1, count // 8)))
+    for key, name in workloads(binary):
+        if only and key not in only:
+            continue
+        data = corpus(binary, key, mib << 10, columns, lines)
+        # A smaller build is a prefix of the larger one: same seed, whole bursts.
+        warm_up = corpus(binary, key, max(1, mib << 7), columns, lines)
+        payloads.append(Payload(key, name, data, warm_up))
     return payloads
 
 
@@ -121,10 +124,9 @@ def measure(fd, out, data, timeout):
 
 def main():
     parser = argparse.ArgumentParser(description="Terminal-agnostic throughput benchmark.")
-    parser.add_argument("--mib", type=int, default=32, help="payload size per test (MiB)")
-    parser.add_argument("--repeat", type=int, default=3, help="timed passes per payload")
-    parser.add_argument("--only", choices=["ascii", "unicode", "csi", "cursor"], action="append",
-                        help="run only these payloads (repeatable)")
+    parser.add_argument("--mib", type=int, default=16, help="payload size per workload (MiB)")
+    parser.add_argument("--repeat", type=int, default=3, help="timed passes per workload")
+    parser.add_argument("--only", action="append", help="run only these workloads (repeatable)")
     parser.add_argument("--timeout", type=float, default=120.0,
                         help="seconds to wait for each DA1 reply")
     parser.add_argument("--output", help="also append results to this file")
@@ -134,17 +136,18 @@ def main():
         sys.exit("bench-throughput: stdin and stdout must be the terminal under test")
 
     fd, out = sys.stdin.fileno(), sys.stdout.fileno()
-    # Environment variables such as TERM_PROGRAM may come from a parent
-    # terminal; the terminal's own XTVERSION answer is authoritative.
-    try:
-        terminal = parse_xtversion(wait_for_terminal(fd, args.timeout, b"\x1b[>q"))
-    except NoReply as error:
-        sys.exit(f"bench-throughput: {error}")
     size = shutil.get_terminal_size()
-    payloads = [p for p in build_payloads(args.mib * 1024 * 1024)
-                if not args.only or p.key in args.only]
+    try:
+        payloads = build_payloads(args.mib, size.columns, size.lines, args.only)
+    except (OSError, subprocess.CalledProcessError) as error:
+        sys.exit(f"bench-throughput: {error}")
+    if args.only and len(payloads) != len(set(args.only)):
+        sys.exit("bench-throughput: unknown workload; see `poopterm --benchmark --list`")
     results = []
     try:
+        # Environment variables such as TERM_PROGRAM may come from a parent
+        # terminal; the terminal's own XTVERSION answer is authoritative.
+        terminal = parse_xtversion(wait_for_terminal(fd, args.timeout, b"\x1b[>q"))
         for key, name, data, warm_up in payloads:
             measure(fd, out, warm_up, args.timeout)
             seconds = [measure(fd, out, data, args.timeout) for _ in range(args.repeat)]
@@ -157,21 +160,25 @@ def main():
     except NoReply as error:
         sys.exit(f"bench-throughput: {error}")
     finally:
-        os.write(out, b"\x1b[0m\x1b[2J\x1b[H")
+        # Also delete kitty images, which survive a screen clear.
+        os.write(out, b"\x1b_Ga=d,q=2\x1b\\\x1b[0m\x1b[r\x1b[2J\x1b[H")
 
+    total_bytes = sum(r["bytes"] for r in results)
+    total_seconds = sum(r["bytes"] / r["median_mb_s"] / 1e6 for r in results)
     report = {
         "terminal": terminal or "", "term": os.environ.get("TERM", ""),
         "term_program": os.environ.get("TERM_PROGRAM", ""),
         "columns": size.columns, "lines": size.lines, "repeat": args.repeat, "results": results,
+        "overall_mb_s": total_bytes / total_seconds / 1e6 if results else 0,
     }
     if args.format == "json":
         text = json.dumps(report, indent=2)
     else:
         header = (f"{terminal or report['term_program'] or report['term']}  {size.columns}x{size.lines}  "
                   f"{args.mib} MiB x {args.repeat} (median, min-max)")
-        rows = [f"{r['name']:<26} {r['median_mb_s']:9.1f} MB/s  "
-                f"({r['min_mb_s']:.1f}-{r['max_mb_s']:.1f})" for r in results]
-        text = "\n".join([header, *rows])
+        rows = [f"{r['payload']:<11} {r['median_mb_s']:9.1f} MB/s  "
+                f"({r['min_mb_s']:.1f}-{r['max_mb_s']:.1f})  {r['name']}" for r in results]
+        text = "\n".join([header, *rows, f"{'overall':<11} {report['overall_mb_s']:9.1f} MB/s"])
     print(text)
     if args.output:
         with open(args.output, "a") as handle:

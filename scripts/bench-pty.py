@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Measure Python + kernel PTY throughput with a reader that only discards.
 
-Uses the same payloads and 64 KiB writes as bench-throughput.py. The slave
+Uses the same workloads (poopterm --bench-corpus) and 64 KiB writes as
+bench-throughput.py. The slave
 is raw: no newline expansion or flow control, so this is an upper bound.
 Timing includes draining every byte on a separate reader thread, but excludes
 PTY creation, payload generation, and thread startup. No window is needed.
@@ -62,7 +63,7 @@ def measure(data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mib', type=int, default=32)
+    parser.add_argument('--mib', type=int, default=16)
     parser.add_argument('--repeat', type=int, default=3)
     parser.add_argument('--format', choices=['text', 'json'], default='text')
     args = parser.parse_args()
@@ -72,7 +73,7 @@ def main():
     throughput = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(throughput)
     results = []
-    for key, name, data, warm_up in throughput.build_payloads(args.mib << 20):
+    for key, name, data, warm_up in throughput.build_payloads(args.mib):
         measure(warm_up)
         rates = [len(data) / measure(data)[0] / 1e6 for _ in range(args.repeat)]
         results.append(dict(payload=key, median_mb_s=statistics.median(rates),
@@ -81,7 +82,7 @@ def main():
         print(json.dumps(dict(consumer='discard', raw=True, repeat=args.repeat, results=results), indent=2))
     else:
         for result in results:
-            print(f"{result['payload']:<8} {result['median_mb_s']:8.1f} MB/s "
+            print(f"{result['payload']:<11} {result['median_mb_s']:8.1f} MB/s "
                   f"({result['min_mb_s']:.1f}-{result['max_mb_s']:.1f})")
 
 

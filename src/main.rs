@@ -8,6 +8,7 @@
 //! - `render`, `ui`, `input`: pure helpers for pixels, layout and key encoding.
 
 mod app;
+mod bench;
 mod clipboard;
 mod config;
 mod fonts;
@@ -29,6 +30,7 @@ use std::{env, error::Error};
 
 const HELP: &str =
 	"Usage: poopterm [--version | --help | --print-terminfo | --print-shell-integration SHELL]
+       poopterm --benchmark [--mib N] [--size COLSxROWS] [--only a,b] [--no-render] [--list]
 
 Launches your login shell. Configure appearance and session restore with Settings.
 POOPTERM_CONFIG overrides the config path; POOPTERM_THEME overrides the theme.
@@ -45,6 +47,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 		"--version" | "-V" => println!("poopterm {}", env!("CARGO_PKG_VERSION")),
 		"--help" | "-h" => println!("Poopterm {}\n\n{HELP}", env!("CARGO_PKG_VERSION")),
 		"--print-terminfo" => print!("{}", terminfo::SOURCE),
+		"--benchmark" => bench::run(args)?,
+		"--bench-corpus" => bench::print_corpus(args)?,
 		"--print-shell-integration" => {
 			let shell = args
 				.next()

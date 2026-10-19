@@ -2,21 +2,38 @@
 
 ## Measuring
 
-Two benchmarks, both deterministic:
+All benchmarks share one deterministic corpus (`src/bench/corpus.rs`) of
+what programs actually send a terminal; `poopterm --benchmark --list` shows
+it: build logs, colored compiler output with hyperlinks, `ls --color`,
+highlighted source, accented/Greek/Cyrillic prose, CJK, emoji with ZWJ
+sequences and combining marks, full-screen TUI redraws in synchronized
+output, editor scrolling with scroll regions, progress bars, truecolor
+half-block art, cursor motion, shell prompts with OSC 133/7/0/8, Sixel, and
+kitty graphics (raw RGBA, PNG, zlib). Results are per workload plus an
+overall figure (total bytes over total time), so a regression in one use
+case cannot hide behind another.
 
-**End to end**, in any terminal (also useful for comparing emulators):
+**Headless**, parser and terminal, then with a frame rendered every MiB:
 
 ```sh
-python3 scripts/bench-throughput.py                 # 32 MiB × 3 runs per payload
-python3 scripts/bench-throughput.py --mib 64 --repeat 5 --only ascii
+cargo build --release
+./target/release/poopterm --benchmark                      # 16 MiB per workload, 120×40
+./target/release/poopterm --benchmark --mib 64 --only log,tui --size 200x50
+```
+
+**End to end**, in any terminal (also for comparing emulators):
+
+```sh
+python3 scripts/bench-throughput.py                        # 16 MiB × 3 runs per workload
+python3 scripts/bench-throughput.py --mib 64 --repeat 5 --only log --only emoji
 python3 scripts/bench-throughput.py --format json --output results.json
 ```
 
-It writes ASCII, Unicode, SGR-heavy and cursor-movement payloads, and stops
-each timer only after a DA1 (`CSI c`) round-trip proves the terminal parsed
-everything. It reports the median and min–max of the runs plus the window
-size; compare terminals at the same window size, since grid size affects
-the cost.
+It takes the workloads from `poopterm --bench-corpus`, generated for the
+window's size, so every terminal gets identical bytes. Each timer stops only
+after a DA1 (`CSI c`) round-trip proves the terminal parsed everything. It
+reports the median and min–max of the runs plus the window size; compare
+terminals at the same window size, since grid size affects the cost.
 
 The terminal is named by its XTVERSION reply (`CSI > q`), not `TERM_PROGRAM`,
 which a terminal launched from another one inherits. Every write, including
@@ -24,20 +41,33 @@ the warm-up, ends on a whole escape sequence and UTF-8 character: a DA1
 query that lands inside an unfinished `CSI` is answered by poopterm and
 xterm, but dropped by kitty, which used to abort the run.
 
-**Parser only**, without the PTY or rendering:
-
-```sh
-cargo test --release -- --ignored --nocapture parser_throughput
-```
+**Parser only**, without rendering: `cargo test --release -- --ignored
+--nocapture parser_throughput`. **PTY ceiling**: `scripts/bench-pty.py`.
 
 To profile, build with symbols and use `perf` (user-space events work
 without root):
 
 ```sh
 CARGO_PROFILE_RELEASE_DEBUG=true CARGO_PROFILE_RELEASE_STRIP=false cargo build --release
-perf record -e cycles:u -p "$(pgrep -x poopterm)" -- sleep 5
+perf record -e cycles:u -- ./target/release/poopterm --benchmark --only emoji
 perf report --sort sym
 ```
+
+### Profile-guided optimization
+
+`poopterm --benchmark` needs no window and covers every workload, the
+parser, terminal state, and rendering, so it is the PGO training run. With
+[`cargo-pgo`](https://github.com/Kobzol/cargo-pgo):
+
+```sh
+cargo pgo build
+./target/x86_64-unknown-linux-gnu/release/poopterm --benchmark --mib 8
+cargo pgo optimize
+```
+
+Train on the whole corpus, not one workload, or the profile will favor it.
+Compare the optimized build against a plain release build with the same
+`--benchmark` arguments.
 
 ## Results
 
