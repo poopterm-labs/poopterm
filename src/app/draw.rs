@@ -41,21 +41,6 @@ pub(super) struct UiFont {
 	pub ascent: i32,
 }
 
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn command_palette_height_contains_every_command_row() {
-		let scale = 2;
-		let final_row_bottom = (PALETTE_COMMANDS_TOP
-			+ (PALETTE_COMMANDS.len() - 1) * PALETTE_COMMAND_ROW_HEIGHT
-			+ PALETTE_COMMAND_ROW_HEIGHT)
-			* scale;
-		assert!(command_palette_height(PALETTE_COMMANDS.len(), scale) >= final_row_bottom);
-	}
-}
-
 impl App {
 	pub(super) fn scale(&self) -> usize {
 		self
@@ -365,5 +350,20 @@ impl App {
 			ui.ascent,
 			color,
 		);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn command_palette_height_contains_every_command_row() {
+		let scale = 2;
+		let final_row_bottom = (PALETTE_COMMANDS_TOP
+			+ (PALETTE_COMMANDS.len() - 1) * PALETTE_COMMAND_ROW_HEIGHT
+			+ PALETTE_COMMAND_ROW_HEIGHT)
+			* scale;
+		assert!(command_palette_height(PALETTE_COMMANDS.len(), scale) >= final_row_bottom);
 	}
 }
