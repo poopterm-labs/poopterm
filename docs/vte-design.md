@@ -38,10 +38,10 @@ vte still handles, and the bookkeeping of switching in and out of it:
 
 ### Goals
 
-1. **200 MB/s end to end** on every payload in `bench-throughput.py`
+1. **At least 200 MB/s end to end** (higher wherever it stays safe) on every payload in `bench-throughput.py`
    (ASCII, Unicode, SGR-heavy, cursor movement) on the reference hosts in
    `docs/performance.md`, with the parser alone well above that.
-2. **Image protocols toward ~1 Gbit/s (~125 MB/s) of payload**: Sixel (DCS)
+2. **Image protocols as fast as possible**, with no fixed target: Sixel (DCS)
    and the kitty graphics protocol (APC, base64) stream through the parser
    in slices, not bytes, with SIMD base64 decoding.
 3. **Span-based API**: the parser hands `Term` runs of printable text and
