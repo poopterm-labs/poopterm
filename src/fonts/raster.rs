@@ -244,8 +244,8 @@ impl Raster {
 			(-1.0, p1, p0)
 		};
 		let dxdy = (bx - tx) / (by - ty);
-		let first = ty.max(0.0).floor() as usize;
-		let last = (by.ceil().max(0.0) as usize).min(self.height);
+		let first = ty.max(0.0) as usize;
+		let last = ceil(by).min(self.height);
 		for row in first..last {
 			let (ya, yb) = (ty.max(row as f32), by.min(row as f32 + 1.0));
 			if yb <= ya {
@@ -267,8 +267,8 @@ impl Raster {
 		let right = self.width as f32;
 		let (lo, hi) = (xa.min(xb).clamp(0.0, right), xa.max(xb).clamp(0.0, right));
 		let cells = &mut self.cells[row * self.stride..][..self.stride];
-		let first = (lo.floor() as usize).min(self.width - 1);
-		let last = (hi.ceil() as usize).clamp(first + 1, self.width) - 1;
+		let first = (lo as usize).min(self.width - 1);
+		let last = ceil(hi).clamp(first + 1, self.width) - 1;
 		if first == last {
 			let mid = (lo + hi) * 0.5 - first as f32;
 			cells[first] += dy * (1.0 - mid);
@@ -311,6 +311,15 @@ impl Raster {
 		}
 		out
 	}
+}
+
+/// `x.ceil()` for `x >= 0` (0 below): without SSE4.1, the baseline x86-64
+/// target makes `ceil` and `floor` library calls, and truncating is
+/// already `floor` for non-negative values.
+#[inline]
+fn ceil(x: f32) -> usize {
+	let whole = x as usize;
+	whole + usize::from((whole as f32) < x)
 }
 
 /// Running totals within one vector: three shifted adds.
