@@ -1,4 +1,5 @@
 //! Translating winit key events into the bytes a terminal application expects.
+use super::modify::{CURSOR_KEYS, FUNCTION_KEYS, KeyOptions, encode_other_key, with_modifiers};
 use winit::keyboard::{Key, NamedKey};
 
 /// Modifier keys held while a key was pressed.
@@ -21,6 +22,8 @@ pub(crate) struct KeyModes {
 	pub kitty: bool,
 	/// LNM (`CSI 20 h`): Enter sends CR LF.
 	pub newline: bool,
+	/// XTMODKEYS and XTFMTKEYS choices.
+	pub options: KeyOptions,
 }
 
 /// Encodes one key press, or returns `None` when the key produces no input.
@@ -31,13 +34,25 @@ pub(crate) fn encode_key(key: &Key, mods: Modifiers, modes: KeyModes) -> Option<
 		+ 2 * u8::from(mods.alt)
 		+ 4 * u8::from(mods.ctrl)
 		+ 8 * u8::from(mods.super_key);
+	// The kitty protocol always reports modifiers as the second parameter.
+	let modify = modes.options.modify;
+	let levels = if modes.kitty {
+		(2, 2)
+	} else {
+		(modify[CURSOR_KEYS], modify[FUNCTION_KEYS])
+	};
 	if let Key::Named(named) = key
-		&& let Some(sequence) = special_key(*named, param, modes.application_cursor)
+		&& let Some(sequence) = special_key(*named, param, modes.application_cursor, levels)
 	{
 		return Some(sequence);
 	}
 	if modes.kitty
 		&& let Some(sequence) = kitty_key(key, mods, param)
+	{
+		return Some(sequence);
+	}
+	if !modes.kitty
+		&& let Some(sequence) = encode_other_key(key, mods, modes.options)
 	{
 		return Some(sequence);
 	}
@@ -52,9 +67,14 @@ pub(crate) fn encode_key(key: &Key, mods: Modifiers, modes: KeyModes) -> Option<
 }
 
 /// Cursor, editing and function keys, which use the same `CSI` forms in
-/// legacy xterm mode and the kitty protocol.
-fn special_key(key: NamedKey, param: u8, application_cursor: bool) -> Option<Vec<u8>> {
-	let modified = param > 1;
+/// legacy xterm mode and the kitty protocol. `cursor` and `function` are the
+/// modifyCursorKeys and modifyFunctionKeys levels.
+fn special_key(
+	key: NamedKey,
+	param: u8,
+	application_cursor: bool,
+	(cursor, function): (i8, i8),
+) -> Option<Vec<u8>> {
 	let letter = match key {
 		NamedKey::ArrowUp => Some('A'),
 		NamedKey::ArrowDown => Some('B'),
@@ -65,14 +85,8 @@ fn special_key(key: NamedKey, param: u8, application_cursor: bool) -> Option<Vec
 		_ => None,
 	};
 	if let Some(letter) = letter {
-		return Some(
-			match (modified, application_cursor) {
-				(true, _) => format!("\x1b[1;{param}{letter}"),
-				(false, true) => format!("\x1bO{letter}"),
-				(false, false) => format!("\x1b[{letter}"),
-			}
-			.into_bytes(),
-		);
+		let plain = format!("\x1b{}{letter}", if application_cursor { 'O' } else { '[' });
+		return Some(with_modifiers(cursor, None, param, letter, plain.into()));
 	}
 	if let Some(letter) = match key {
 		NamedKey::F1 => Some('P'),
@@ -81,14 +95,8 @@ fn special_key(key: NamedKey, param: u8, application_cursor: bool) -> Option<Vec
 		NamedKey::F4 => Some('S'),
 		_ => None,
 	} {
-		return Some(
-			if modified {
-				format!("\x1b[1;{param}{letter}")
-			} else {
-				format!("\x1bO{letter}")
-			}
-			.into_bytes(),
-		);
+		let plain = format!("\x1bO{letter}").into_bytes();
+		return Some(with_modifiers(function, None, param, letter, plain));
 	}
 	let number = match key {
 		NamedKey::Insert => 2,
@@ -105,14 +113,8 @@ fn special_key(key: NamedKey, param: u8, application_cursor: bool) -> Option<Vec
 		NamedKey::F12 => 24,
 		_ => return None,
 	};
-	Some(
-		if modified {
-			format!("\x1b[{number};{param}~")
-		} else {
-			format!("\x1b[{number}~")
-		}
-		.into_bytes(),
-	)
+	let plain = format!("\x1b[{number}~").into_bytes();
+	Some(with_modifiers(function, Some(number), param, '~', plain))
 }
 
 /// Kitty "disambiguate escape codes": modified text keys and Escape become `CSI u`.

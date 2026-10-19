@@ -7,6 +7,13 @@ pub(crate) trait ParamList {
 	fn get(&self, index: usize) -> Option<&[u16]> {
 		self.iter().nth(index)
 	}
+
+	/// Whether the list is empty or a lone 0, which the tokenizer cannot
+	/// tell apart.
+	fn is_default(&self) -> bool {
+		let mut groups = self.iter();
+		matches!((groups.next(), groups.next()), (None | Some([0]), None))
+	}
 }
 
 impl ParamList for crate::vt::Params {

@@ -2,6 +2,9 @@
 pub(crate) mod click;
 pub(crate) mod keypad;
 pub(crate) mod keys;
+pub(crate) mod modify;
+#[cfg(test)]
+mod modify_tests;
 pub(crate) mod mouse;
 pub(crate) mod paste;
 pub(crate) mod scroll;

@@ -3,7 +3,10 @@
 //! Operators, Enter and `=` send `SS3` sequences; digits and the period
 //! follow NumLock, as on xterm: with NumLock on they type themselves, with
 //! it off they are the cursor and editing keys they are labeled with.
-use super::keys::{KeyModes, Modifiers};
+use super::{
+	keys::{KeyModes, Modifiers},
+	modify::{CURSOR_KEYS, KEYPAD_KEYS, with_modifiers},
+};
 use winit::keyboard::{Key, NamedKey};
 
 /// Encodes a key pressed on the numeric keypad, or returns `None` when it
@@ -16,7 +19,9 @@ pub(crate) fn encode_keypad(key: &Key, mods: Modifiers, modes: KeyModes) -> Opti
 		+ 8 * u8::from(mods.super_key);
 	// Begin (keypad 5 without NumLock) is a cursor key like Home and End.
 	if let Key::Named(NamedKey::Clear) = key {
-		return Some(ss3_or_csi('E', param, modes.application_cursor));
+		let plain = format!("\x1b{}E", if modes.application_cursor { 'O' } else { '[' });
+		let level = modes.options.modify[CURSOR_KEYS];
+		return Some(with_modifiers(level, None, param, 'E', plain.into()));
 	}
 	if !modes.application_keypad {
 		return None;
@@ -36,20 +41,9 @@ pub(crate) fn encode_keypad(key: &Key, mods: Modifiers, modes: KeyModes) -> Opti
 		},
 		_ => return None,
 	};
-	Some(if param > 1 {
-		format!("\x1bO{param}{letter}").into_bytes()
-	} else {
-		format!("\x1bO{letter}").into_bytes()
-	})
-}
-
-fn ss3_or_csi(letter: char, param: u8, application_cursor: bool) -> Vec<u8> {
-	match (param > 1, application_cursor) {
-		(true, _) => format!("\x1b[1;{param}{letter}"),
-		(false, true) => format!("\x1bO{letter}"),
-		(false, false) => format!("\x1b[{letter}"),
-	}
-	.into_bytes()
+	let level = modes.options.modify[KEYPAD_KEYS];
+	let plain = format!("\x1bO{letter}").into_bytes();
+	Some(with_modifiers(level, None, param, letter, plain))
 }
 
 #[cfg(test)]
@@ -61,6 +55,11 @@ mod tests {
 		application_keypad: true,
 		kitty: false,
 		newline: false,
+		options: crate::input::modify::KeyOptions {
+			modify: [0, 2, 2, 0, 0, 0, 0, 0],
+			format: [0; 8],
+			other_mask: 0,
+		},
 	};
 
 	fn text(s: &str) -> Key {
