@@ -1,5 +1,9 @@
 # Changelog
 
+## 26.10.1 "Giga Fly" — 2026-10-19
+
+- Includes the changes verified by CI on main.
+
 ## 26.10.0 "Giga Fly" — 2026-10-18
 
 Poopterm now numbers releases `YEAR.MONTH.PATCH`, and each release gets a
