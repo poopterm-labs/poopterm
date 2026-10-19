@@ -40,33 +40,48 @@ else
   echo 'main moved since this CI run; skipping release.'
   exit 0
 fi
-# Look the release up first; API failures other than 404 must stop publication.
-released=yes
-if ! gh api "repos/${GH_REPO}/releases/tags/v${version}" > /tmp/poopterm-release.json 2> /tmp/poopterm-release-error; then
-  if ! grep -q 'HTTP 404' /tmp/poopterm-release-error; then
-    cat /tmp/poopterm-release-error >&2
-    exit 1
-  fi
-  released=no
-fi
+# Look the release up first, drafts included (the tag endpoint omits them);
+# API failures must stop publication. State is none, draft or published,
+# then whether this version's package is attached.
+gh api "repos/${GH_REPO}/releases?per_page=100" > /tmp/poopterm-releases.json
+read -r state attached < <(python3 - "v${version}" "poopterm_${version}-1_" <<'PY'
+import json, sys
+tag, package = sys.argv[1:]
+release = next((r for r in json.load(open('/tmp/poopterm-releases.json')) if r['tag_name'] == tag), None)
+if release is None:
+    print('none no')
+else:
+    has = any(a['name'].startswith(package) for a in release['assets'])
+    print('draft' if release['draft'] else 'published', 'yes' if has else 'no')
+PY
+)
 # A rerun of a finished release has nothing left to do.
-if [[ $released == yes ]] && grep -q "\"poopterm_${version}-1_" /tmp/poopterm-release.json; then
+if [[ $state == published && $attached == yes ]]; then
   echo "v${version} is already published."
   exit 0
 fi
-# Package the release commit itself, so the .deb and the binary in it carry
-# the new version; a failed build stops before the GitHub release exists.
-cargo build --release --locked
-bash scripts/package-deb.sh
-if [[ $released == no ]]; then
+if [[ $attached == no ]]; then
+  # Package the release commit itself, so the .deb and the binary in it carry
+  # the new version; a failed build stops before the GitHub release exists.
+  cargo build --release --locked
+  bash scripts/package-deb.sh
+  shopt -s nullglob
+  packages=(dist/poopterm_"${version}"-1_*.deb)
+  if ((${#packages[@]} != 1)); then
+    echo "expected exactly one Debian package of ${version} in dist/, found ${#packages[@]}" >&2
+    exit 1
+  fi
+fi
+# Releases start as drafts and are published once the package is attached,
+# since immutable releases refuse new assets after publication.
+if [[ $state == none ]]; then
   python3 -c 'from pathlib import Path; s=Path("CHANGELOG.md").read_text(); print("## " + s.split("\n## ", 2)[1])' > /tmp/poopterm-release-notes.md
-  gh release create "v${version}" --verify-tag --title "Poopterm ${version} \"${codename}\"" --notes-file /tmp/poopterm-release-notes.md
+  gh release create "v${version}" --draft --verify-tag --title "Poopterm ${version} \"${codename}\"" --notes-file /tmp/poopterm-release-notes.md
 fi
 # The APT feed polls this release asset and republishes it from GitHub Pages.
-shopt -s nullglob
-packages=(dist/poopterm_"${version}"-1_*.deb)
-if ((${#packages[@]} != 1)); then
-  echo "expected exactly one Debian package of ${version} in dist/, found ${#packages[@]}" >&2
-  exit 1
+if [[ $attached == no ]]; then
+  gh release upload "v${version}" "${packages[0]}" --clobber
 fi
-gh release upload "v${version}" "${packages[0]}" --clobber
+if [[ $state != published ]]; then
+  gh release edit "v${version}" --draft=false
+fi
