@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.19 "Giga Fly" — 2026-10-19
+
+### Maintenance
+
+- Require pull requests and 3:1 test-driven development (#1).
+
 ## 26.10.18 "Giga Fly" — 2026-10-19
 
 ### Added
