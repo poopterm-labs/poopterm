@@ -72,8 +72,8 @@ def main():
     throughput = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(throughput)
     results = []
-    for key, name, data in throughput.build_payloads(args.mib << 20):
-        measure(data[:len(data) // 8])
+    for key, name, data, warm_up in throughput.build_payloads(args.mib << 20):
+        measure(warm_up)
         rates = [len(data) / measure(data)[0] / 1e6 for _ in range(args.repeat)]
         results.append(dict(payload=key, median_mb_s=statistics.median(rates),
                             min_mb_s=min(rates), max_mb_s=max(rates)))

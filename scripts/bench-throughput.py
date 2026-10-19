@@ -20,9 +20,11 @@ Usage (run inside the terminal under test):
     python3 scripts/bench-throughput.py --output results.json --format json
 """
 import argparse
+from collections import namedtuple
 import json
 import os
 import random
+import re
 import select
 import shutil
 import statistics
@@ -34,16 +36,23 @@ import tty
 CHUNK = 1 << 16  # bytes per write(2) call, identical for every terminal
 
 
+# `data` is the timed payload; `warm_up` is about an eighth of it. Both are
+# whole chunks, so no escape sequence or UTF-8 character is cut: a DA1 query
+# sent after a cut sequence is swallowed by some terminals (kitty).
+Payload = namedtuple("Payload", "key name data warm_up")
+
+
 class NoReply(Exception):
     pass
 
 
-def wait_for_terminal(fd, timeout):
-    """Send DA1 and block until the reply (`ESC [ ? ... c`) arrives."""
+def wait_for_terminal(fd, timeout, query=b""):
+    """Send `query` and DA1, and block until the DA1 reply (`ESC [ ? ... c`)
+    arrives. Returns everything the terminal answered."""
     old = termios.tcgetattr(fd)
     tty.setraw(fd)
     try:
-        os.write(sys.stdout.fileno(), b"\x1b[c")
+        os.write(sys.stdout.fileno(), query + b"\x1b[c")
         reply = b""
         deadline = time.monotonic() + timeout
         while not (b"\x1b[" in reply and reply.endswith(b"c")):
@@ -53,6 +62,13 @@ def wait_for_terminal(fd, timeout):
             reply += os.read(fd, 256)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    return reply
+
+
+def parse_xtversion(reply):
+    """The name in an XTVERSION reply (`DCS > | name ST`), if any."""
+    match = re.search(rb"\x1bP>\|(.*?)\x1b\\", reply, re.S)
+    return match.group(1).decode(errors="replace") if match else None
 
 
 def build_payloads(size):
@@ -82,7 +98,11 @@ def build_payloads(size):
         ("csi", "CSI codes with few chars", csi_chunk),
         ("cursor", "Cursor movement", cursor_chunk),
     ]
-    return [(key, name, chunk * max(1, size // len(chunk))) for key, name, chunk in chunks]
+    payloads = []
+    for key, name, chunk in chunks:
+        count = max(1, size // len(chunk))
+        payloads.append(Payload(key, name, chunk * count, chunk * max(1, count // 8)))
+    return payloads
 
 
 def write_all(out, data):
@@ -114,13 +134,19 @@ def main():
         sys.exit("bench-throughput: stdin and stdout must be the terminal under test")
 
     fd, out = sys.stdin.fileno(), sys.stdout.fileno()
+    # Environment variables such as TERM_PROGRAM may come from a parent
+    # terminal; the terminal's own XTVERSION answer is authoritative.
+    try:
+        terminal = parse_xtversion(wait_for_terminal(fd, args.timeout, b"\x1b[>q"))
+    except NoReply as error:
+        sys.exit(f"bench-throughput: {error}")
     size = shutil.get_terminal_size()
     payloads = [p for p in build_payloads(args.mib * 1024 * 1024)
-                if not args.only or p[0] in args.only]
+                if not args.only or p.key in args.only]
     results = []
     try:
-        for key, name, data in payloads:
-            measure(fd, out, data[: len(data) // 8], args.timeout)  # warm-up
+        for key, name, data, warm_up in payloads:
+            measure(fd, out, warm_up, args.timeout)
             seconds = [measure(fd, out, data, args.timeout) for _ in range(args.repeat)]
             rates = [len(data) / s / 1e6 for s in seconds]
             results.append({
@@ -134,13 +160,14 @@ def main():
         os.write(out, b"\x1b[0m\x1b[2J\x1b[H")
 
     report = {
-        "term": os.environ.get("TERM", ""), "term_program": os.environ.get("TERM_PROGRAM", ""),
+        "terminal": terminal or "", "term": os.environ.get("TERM", ""),
+        "term_program": os.environ.get("TERM_PROGRAM", ""),
         "columns": size.columns, "lines": size.lines, "repeat": args.repeat, "results": results,
     }
     if args.format == "json":
         text = json.dumps(report, indent=2)
     else:
-        header = (f"{report['term_program'] or report['term']}  {size.columns}x{size.lines}  "
+        header = (f"{terminal or report['term_program'] or report['term']}  {size.columns}x{size.lines}  "
                   f"{args.mib} MiB x {args.repeat} (median, min-max)")
         rows = [f"{r['name']:<26} {r['median_mb_s']:9.1f} MB/s  "
                 f"({r['min_mb_s']:.1f}-{r['max_mb_s']:.1f})" for r in results]

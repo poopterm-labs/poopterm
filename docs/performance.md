@@ -18,6 +18,12 @@ everything. It reports the median and min–max of the runs plus the window
 size; compare terminals at the same window size, since grid size affects
 the cost.
 
+The terminal is named by its XTVERSION reply (`CSI > q`), not `TERM_PROGRAM`,
+which a terminal launched from another one inherits. Every write, including
+the warm-up, ends on a whole escape sequence and UTF-8 character: a DA1
+query that lands inside an unfinished `CSI` is answered by poopterm and
+xterm, but dropped by kitty, which used to abort the run.
+
 **Parser only**, without the PTY or rendering:
 
 ```sh
