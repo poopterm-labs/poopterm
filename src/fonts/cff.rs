@@ -214,7 +214,7 @@ pub(crate) struct Cff {
 	/// Offset of the FDSelect table in CID fonts.
 	fd_select: Option<usize>,
 	/// CFF2: no advance widths in charstrings, and blended values.
-	version2: bool,
+	pub(super) version2: bool,
 	regions: Vec<usize>,
 }
 

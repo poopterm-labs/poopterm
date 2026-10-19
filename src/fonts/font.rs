@@ -41,6 +41,11 @@ impl Font {
 		self.face.is_cff()
 	}
 
+	#[cfg(test)]
+	pub(crate) fn is_cff2(&self) -> bool {
+		self.face.is_cff2()
+	}
+
 	/// The glyph for `ch`, 0 when the font lacks it.
 	pub(crate) fn lookup_glyph_index(&self, ch: char) -> u16 {
 		self.face.glyph_index(ch)

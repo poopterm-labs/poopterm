@@ -161,6 +161,11 @@ impl Face {
 		self.cff.is_some()
 	}
 
+	#[cfg(test)]
+	pub(crate) fn is_cff2(&self) -> bool {
+		self.cff.as_ref().is_some_and(|cff| cff.version2)
+	}
+
 	/// The glyph for `ch`; 0 (`.notdef`) when the font lacks it.
 	pub(crate) fn glyph_index(&self, ch: char) -> u16 {
 		let glyph = self
