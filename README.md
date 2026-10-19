@@ -468,6 +468,10 @@ and AI coding agents alike), then see [architecture](docs/architecture.md),
 [testing](docs/testing.md) and [performance](docs/performance.md).
 CI builds and checks macOS, Linux, and a real FreeBSD VM.
 
+Want to help? Read [CONTRIBUTING.md](CONTRIBUTING.md) and our
+[Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately as
+described in [SECURITY.md](SECURITY.md), never in a public issue.
+
 Releases are numbered `YY.M.PATCH`. After all checks pass on `main`, CI
 increments the patch, or starts a new month at `YY.M.0` with a new random
 codename. It updates `Cargo.toml`, `Cargo.lock`, and `CHANGELOG.md` together,
