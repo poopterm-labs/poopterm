@@ -47,7 +47,7 @@ fn compact_rail_active_tab_0_uses_an_icon_row() {
 	assert_eq!(layout.tab_width, 52);
 	assert_eq!(layout.row_height, 40);
 	assert_eq!(layout.row_height_for(0), 40);
-	assert_eq!(layout.row_y(0), layout.tab_start_y + 0 * 40);
+	assert_eq!(layout.row_y(0), layout.tab_start_y);
 	assert_sidebar_geometry(&layout, 30);
 }
 
@@ -59,7 +59,7 @@ fn compact_rail_active_tab_1_uses_an_icon_row() {
 	assert_eq!(layout.tab_width, 52);
 	assert_eq!(layout.row_height, 40);
 	assert_eq!(layout.row_height_for(1), 40);
-	assert_eq!(layout.row_y(1), layout.tab_start_y + 1 * 40);
+	assert_eq!(layout.row_y(1), layout.tab_start_y + 40);
 	assert_sidebar_geometry(&layout, 30);
 }
 
@@ -113,13 +113,13 @@ fn compact_rail_active_tab_5_uses_an_icon_row() {
 
 #[test]
 fn compact_rail_scale_1_scales_rows_and_bottom_buttons() {
-	let layout = sidebar(640 * 1, 30, 1, options(1, 0, 4, true, true, true));
-	assert_eq!(layout.sidebar_width, 64 * 1);
-	assert_eq!(layout.tab_width, 52 * 1);
-	assert_eq!(layout.row_height, 40 * 1);
-	assert_eq!(layout.button_width, 24 * 1);
-	assert_eq!(layout.button_height, 24 * 1);
-	assert_eq!(layout.plus_y, Some(640 * 1 - 60 * 1));
+	let layout = sidebar(640, 30, 1, options(1, 0, 4, true, true, true));
+	assert_eq!(layout.sidebar_width, 64);
+	assert_eq!(layout.tab_width, 52);
+	assert_eq!(layout.row_height, 40);
+	assert_eq!(layout.button_width, 24);
+	assert_eq!(layout.button_height, 24);
+	assert_eq!(layout.plus_y, Some(580));
 	assert_eq!(layout.settings_y, layout.plus_y);
 	assert_sidebar_geometry(&layout, 30);
 }
@@ -338,14 +338,14 @@ fn compact_rail_scroll_18_keeps_the_active_tab_visible() {
 
 #[test]
 fn regular_sidebar_scale_1_keeps_full_width_rows() {
-	let layout = sidebar(640 * 1, 30, 1, options(1, 0, 5, false, true, true));
+	let layout = sidebar(640, 30, 1, options(1, 0, 5, false, true, true));
 	assert!(!layout.compact_rail);
-	assert_eq!(layout.sidebar_width, 184 * 1);
-	assert_eq!(layout.tab_width, 172 * 1);
-	assert_eq!(layout.row_height, 32 * 1);
-	assert_eq!(layout.row_height_for(5), 32 * 1);
-	assert_eq!(layout.button_width, 32 * 1);
-	assert_eq!(layout.button_height, 28 * 1);
+	assert_eq!(layout.sidebar_width, 184);
+	assert_eq!(layout.tab_width, 172);
+	assert_eq!(layout.row_height, 32);
+	assert_eq!(layout.row_height_for(5), 32);
+	assert_eq!(layout.button_width, 32);
+	assert_eq!(layout.button_height, 28);
 	assert_sidebar_geometry(&layout, 30);
 }
 
