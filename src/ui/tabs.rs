@@ -17,24 +17,62 @@ pub(crate) struct TabLayout {
 	pub(crate) scale: usize,
 }
 
+/// Geometry for tabs arranged in a left sidebar.
+pub(crate) struct VerticalTabLayout {
+	pub(crate) sidebar_width: usize,
+	pub(crate) tab_start_y: usize,
+	pub(crate) tab_width: usize,
+	pub(crate) row_height: usize,
+	pub(crate) first_visible: usize,
+	pub(crate) visible_count: usize,
+	pub(crate) plus_x: usize,
+	pub(crate) plus_y: Option<usize>,
+	pub(crate) settings_x: usize,
+	pub(crate) settings_y: Option<usize>,
+	pub(crate) button_width: usize,
+	pub(crate) button_height: usize,
+	pub(crate) scale: usize,
+}
+
+pub(crate) struct VerticalTabOptions {
+	pub(crate) top_reserve: usize,
+	pub(crate) status_height: usize,
+	pub(crate) scroll: usize,
+	pub(crate) show_plus: bool,
+	pub(crate) show_settings: bool,
+}
+
 pub(crate) fn tab_layout(
 	width: usize,
 	count: usize,
 	scale: usize,
 	left_reserve: usize,
 	scroll: usize,
+	show_plus: bool,
+	show_settings: bool,
 ) -> TabLayout {
 	let scale = scale.max(1);
 	let arrow_w = 28 * scale;
 	let left_arrow_x = left_reserve + 8 * scale;
 	let start = left_arrow_x + arrow_w + 6 * scale;
-	let plus_w = 52 * scale;
-	let settings_w = 42 * scale;
-	let controls_gap = 8 * scale;
+	let plus_w = if show_plus { 52 * scale } else { 0 };
+	let settings_w = if show_settings { 42 * scale } else { 0 };
+	let controls_gap = if show_plus && show_settings {
+		8 * scale
+	} else {
+		0
+	};
 	let right = 12 * scale;
 	let settings_x = width.saturating_sub(right + settings_w);
 	let plus_x = settings_x.saturating_sub(controls_gap + plus_w);
-	let right_arrow_x = plus_x.saturating_sub(controls_gap + arrow_w);
+	let controls_left = if show_plus {
+		plus_x
+	} else if show_settings {
+		settings_x
+	} else {
+		width.saturating_sub(right)
+	};
+	let right_arrow_x = controls_left.saturating_sub(8 * scale + arrow_w);
 	let viewport_end = right_arrow_x.saturating_sub(8 * scale);
 	let gap = 6 * scale;
 	let room = viewport_end.saturating_sub(start);
@@ -63,14 +101,74 @@ pub(crate) fn tab_layout(
 	}
 }
 
+pub(crate) fn vertical_tab_layout(
+	height: usize,
+	count: usize,
+	scale: usize,
+	options: VerticalTabOptions,
+) -> VerticalTabLayout {
+	let scale = scale.max(1);
+	let VerticalTabOptions {
+		top_reserve,
+		status_height,
+		scroll,
+		show_plus,
+		show_settings,
+	} = options;
+	let sidebar_width = 184 * scale;
+	let row_height = 32 * scale;
+	let tab_start_y = top_reserve + 8 * scale;
+	let button_height = 28 * scale;
+	let button_width = 32 * scale;
+	let has_buttons = show_plus || show_settings;
+	let button_y = has_buttons.then(|| {
+		height
+			.saturating_sub(status_height)
+			.saturating_sub(10 * scale)
+			.saturating_sub(button_height)
+	});
+	let tab_end_y = button_y.map_or_else(
+		|| height.saturating_sub(status_height + 10 * scale),
+		|y| y.saturating_sub(6 * scale),
+	);
+	let visible_count = ((tab_end_y.saturating_sub(tab_start_y)) / row_height).max(1);
+	let first_visible = scroll.min(count.saturating_sub(visible_count));
+	let button_gap = 6 * scale;
+	let buttons_width = usize::from(show_plus) * button_width
+		+ usize::from(show_settings) * button_width
+		+ usize::from(show_plus && show_settings) * button_gap;
+	let controls_start_x = sidebar_width.saturating_sub(buttons_width) / 2;
+	let plus_x = controls_start_x;
+	let settings_x = if show_plus {
+		controls_start_x + button_width + button_gap
+	} else {
+		controls_start_x
+	};
+	VerticalTabLayout {
+		sidebar_width,
+		tab_start_y,
+		tab_width: sidebar_width.saturating_sub(12 * scale),
+		row_height,
+		first_visible,
+		visible_count,
+		plus_x,
+		plus_y: show_plus.then_some(button_y.unwrap_or(0)),
+		settings_x,
+		settings_y: show_settings.then_some(button_y.unwrap_or(0)),
+		button_width,
+		button_height,
+		scale,
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
 
 	#[test]
 	fn tab_strip_can_reach_older_tabs() {
-		let first_page = tab_layout(980, 20, 1, 0, 0);
-		let last_page = tab_layout(980, 20, 1, 0, 19);
+		let first_page = tab_layout(980, 20, 1, 0, 0, true, true);
+		let last_page = tab_layout(980, 20, 1, 0, 19, true, true);
 
 		assert!(first_page.visible_count < 20);
 		assert_eq!(first_page.first_visible, 0);
@@ -80,11 +178,63 @@ mod tests {
 
 	#[test]
 	fn narrow_tab_strip_keeps_a_reachable_tab() {
-		let layout = tab_layout(450, 20, 1, 0, 19);
+		let layout = tab_layout(450, 20, 1, 0, 19, true, true);
 
 		assert!(layout.visible_count >= 1);
 		assert!(layout.first_visible < 20);
 		assert!(layout.first_visible + layout.visible_count <= 20);
+	}
+
+	#[test]
+	fn hidden_horizontal_controls_give_tabs_their_space() {
+		let layout = tab_layout(980, 20, 1, 0, 0, false, false);
+
+		assert_eq!(layout.plus_w, 0);
+		assert_eq!(layout.settings_w, 0);
+		assert!(layout.visible_count > tab_layout(980, 20, 1, 0, 0, true, true).visible_count);
+	}
+
+	#[test]
+	fn vertical_tab_layout_pages_and_places_optional_controls() {
+		let layout = vertical_tab_layout(
+			640,
+			20,
+			1,
+			VerticalTabOptions {
+				top_reserve: 52,
+				status_height: 26,
+				scroll: 19,
+				show_plus: true,
+				show_settings: false,
+			},
+		);
+
+		assert!(layout.first_visible > 0);
+		assert!(layout.first_visible + layout.visible_count <= 20);
+		assert_eq!(layout.sidebar_width, 184);
+		assert_eq!(layout.row_height, 32);
+		assert_eq!(layout.plus_y, Some(576));
+		assert_eq!(layout.settings_y, None);
+	}
+
+	#[test]
+	fn vertical_controls_are_compact_and_share_a_centered_row() {
+		let layout = vertical_tab_layout(
+			640,
+			4,
+			1,
+			VerticalTabOptions {
+				top_reserve: 52,
+				status_height: 26,
+				scroll: 0,
+				show_plus: true,
+				show_settings: true,
+			},
+		);
+
+		assert_eq!(layout.button_width, 32);
+		assert_eq!(layout.button_height, 28);
+		assert_eq!(layout.settings_x - layout.plus_x, 38);
 	}
 }
 

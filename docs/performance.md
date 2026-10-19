@@ -36,6 +36,8 @@ window's size, so every terminal gets identical bytes. Each timer stops only
 after a DA1 (`CSI c`) round-trip proves the terminal parsed everything. It
 reports the median and min–max of the runs plus the window size; compare
 terminals at the same window size, since grid size affects the cost.
+The script uses `target/release/poopterm` when present, otherwise it finds
+`poopterm` on `PATH`; set `POOPTERM_BIN` to choose a different build.
 
 The terminal is named by its XTVERSION reply (`CSI > q`), not `TERM_PROGRAM`,
 which a terminal launched from another one inherits. Every write, including

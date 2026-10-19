@@ -7,7 +7,7 @@ use crate::{
 	ui::tabs::{Marker, tab_marker},
 };
 
-fn hit(cursor: (f64, f64), (x, y, w, h): (usize, usize, usize, usize)) -> bool {
+pub(super) fn hit(cursor: (f64, f64), (x, y, w, h): (usize, usize, usize, usize)) -> bool {
 	cursor.0 >= x as f64
 		&& cursor.0 < (x + w) as f64
 		&& cursor.1 >= y as f64
@@ -16,6 +16,13 @@ fn hit(cursor: (f64, f64), (x, y, w, h): (usize, usize, usize, usize)) -> bool {
 
 impl App {
 	pub(super) fn draw_tab_bar(&mut self, p: &mut Painter, scale: usize, ui: UiFont) {
+		if !self.preferences.show_tabs {
+			return;
+		}
+		if self.preferences.vertical_tabs {
+			self.draw_vertical_tab_bar(p, scale, ui);
+			return;
+		}
 		let tab_y = self.tab_y();
 		let layout = self.tab_layout();
 		let (bg, border, fg) = (self.theme.bg, self.theme.border, self.theme.fg);
@@ -131,7 +138,7 @@ impl App {
 			let max_chars = ((room as f32 / small_cw.max(1.0)) as usize).max(1);
 			let (label, status) = tab_label(&session.title(), style.status.as_deref(), max_chars);
 			let label_x = x + left;
-			p.text(
+			p.text_clipped(
 				&mut self.fonts,
 				label_x,
 				text_y,
@@ -139,10 +146,16 @@ impl App {
 				ui.px * 0.82,
 				small_ascent,
 				fg,
+				(
+					label_x,
+					tab_y + 4 * scale,
+					room,
+					self.tab_height.saturating_sub(6 * scale),
+				),
 			);
 			if !status.is_empty() {
 				let status_x = label_x + ((label.chars().count() + 2) as f32 * small_cw) as usize;
-				p.text(
+				p.text_clipped(
 					&mut self.fonts,
 					status_x,
 					text_y,
@@ -150,6 +163,12 @@ impl App {
 					ui.px * 0.82,
 					small_ascent,
 					style.status_color.unwrap_or(blend(bg, fg, 150)),
+					(
+						label_x,
+						tab_y + 4 * scale,
+						room,
+						self.tab_height.saturating_sub(6 * scale),
+					),
 				);
 			}
 			if self.sessions.len() > 1 {
@@ -195,10 +214,23 @@ impl App {
 
 		let button_h = 34 * scale;
 		let button_y = tab_y + self.tab_height.saturating_sub(button_h) / 2;
-		for (x, w, label) in [
-			(layout.plus_x, layout.plus_w, "+"),
-			(layout.settings_x, layout.settings_w, "⚙"),
+		for (x, w, label, shown) in [
+			(
+				layout.plus_x,
+				layout.plus_w,
+				"+",
+				self.preferences.show_new_tab_button,
+			),
+			(
+				layout.settings_x,
+				layout.settings_w,
+				"⚙",
+				self.preferences.show_settings_button,
+			),
 		] {
+			if !shown {
+				continue;
+			}
 			let rect = (x, button_y, w, button_h);
 			p.button(rect, style, hit(self.cursor_pos, rect));
 			p.text(

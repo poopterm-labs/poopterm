@@ -39,6 +39,7 @@ pub(crate) enum ThemeKind {
 	CatppuccinFrappe,
 	CatppuccinMacchiato,
 	CatppuccinMocha,
+	Bark,
 	Poop,
 	Custom,
 }
@@ -52,6 +53,7 @@ impl ThemeKind {
 			"catppuccin-latte" => Some(Self::CatppuccinLatte),
 			"catppuccin-frappe" => Some(Self::CatppuccinFrappe),
 			"catppuccin-macchiato" => Some(Self::CatppuccinMacchiato),
+			"bark" => Some(Self::Bark),
 			"poop" => Some(Self::Poop),
 			"custom" => Some(Self::Custom),
 			_ => None,
@@ -65,6 +67,7 @@ impl ThemeKind {
 			Self::CatppuccinFrappe => "catppuccin-frappe",
 			Self::CatppuccinMacchiato => "catppuccin-macchiato",
 			Self::CatppuccinMocha => "catppuccin-mocha",
+			Self::Bark => "bark",
 			Self::Poop => "poop",
 			Self::Custom => "custom",
 		}
@@ -76,7 +79,8 @@ impl ThemeKind {
 			Self::CatppuccinLatte => Self::CatppuccinFrappe,
 			Self::CatppuccinFrappe => Self::CatppuccinMacchiato,
 			Self::CatppuccinMacchiato => Self::CatppuccinMocha,
-			Self::CatppuccinMocha => Self::Poop,
+			Self::CatppuccinMocha => Self::Bark,
+			Self::Bark => Self::Poop,
 			Self::Poop => Self::MacOsDark,
 			Self::Custom => Self::MacOsDark,
 		}
@@ -138,6 +142,15 @@ impl Theme {
 				border: 0x45475A,
 				palette: [
 					0x45475A, 0xF38BA8, 0xA6E3A1, 0xF9E2AF, 0x89B4FA, 0xF5C2E7, 0x94E2D5, 0xBAC2DE,
+				],
+			},
+			ThemeKind::Bark => Self {
+				kind,
+				fg: 0xD0D0D0,
+				bg: 0x101010,
+				border: 0x2B2B2B,
+				palette: [
+					0x101010, 0xAB4642, 0xA1B56C, 0xF7CA88, 0x7CAFC2, 0xBA8BAF, 0x86C1B9, 0xD0D0D0,
 				],
 			},
 			ThemeKind::Poop => Self {
@@ -270,5 +283,25 @@ mod tests {
 				(fg, bg, border, palette)
 			);
 		}
+	}
+
+	#[test]
+	fn bark_theme_matches_its_terminal_colors() {
+		assert_eq!(ThemeKind::parse("Bark"), Some(ThemeKind::Bark));
+		assert_eq!(ThemeKind::Bark.name(), "bark");
+		assert_eq!(ThemeKind::CatppuccinMocha.next(), ThemeKind::Bark);
+		assert_eq!(ThemeKind::Bark.next(), ThemeKind::Poop);
+		let theme = Theme::from_kind(ThemeKind::Bark);
+		assert_eq!(theme.kind.name(), "bark");
+		assert_eq!(
+			(theme.fg, theme.bg, theme.border),
+			(0xD0D0D0, 0x101010, 0x2B2B2B)
+		);
+		assert_eq!(
+			theme.palette,
+			[
+				0x101010, 0xAB4642, 0xA1B56C, 0xF7CA88, 0x7CAFC2, 0xBA8BAF, 0x86C1B9, 0xD0D0D0,
+			]
+		);
 	}
 }

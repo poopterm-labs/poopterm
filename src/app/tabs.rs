@@ -25,6 +25,9 @@ impl App {
 	}
 
 	pub(super) fn tab_y(&self) -> usize {
+		if self.preferences.show_tabs && self.preferences.vertical_tabs {
+			return self.vertical_tab_layout().tab_start_y;
+		}
 		if cfg!(target_os = "macos") {
 			self.titlebar_height.saturating_sub(self.tab_height) / 2
 		} else {
@@ -44,16 +47,42 @@ impl App {
 				.max(1.0) as usize,
 			self.tab_left_reserve(),
 			self.tab_scroll,
+			self.preferences.show_new_tab_button,
+			self.preferences.show_settings_button,
+		)
+	}
+
+	pub(super) fn vertical_tab_layout(&self) -> VerticalTabLayout {
+		vertical_tab_layout(
+			self.height as usize,
+			self.sessions.len(),
+			self.scale(),
+			VerticalTabOptions {
+				top_reserve: self.titlebar_height,
+				status_height: self.status_height + self.border,
+				scroll: self.tab_scroll,
+				show_plus: self.preferences.show_new_tab_button,
+				show_settings: self.preferences.show_settings_button,
+			},
 		)
 	}
 
 	pub(super) fn ensure_active_tab_visible(&mut self) {
-		let layout = self.tab_layout();
-		let mut first = layout.first_visible;
+		if !self.preferences.show_tabs {
+			return;
+		}
+		let (first_visible, visible_count) = if self.preferences.vertical_tabs {
+			let layout = self.vertical_tab_layout();
+			(layout.first_visible, layout.visible_count)
+		} else {
+			let layout = self.tab_layout();
+			(layout.first_visible, layout.visible_count)
+		};
+		let mut first = first_visible;
 		if self.active < first {
 			first = self.active;
-		} else if self.active >= first + layout.visible_count {
-			first = self.active + 1 - layout.visible_count;
+		} else if self.active >= first + visible_count {
+			first = self.active + 1 - visible_count;
 		}
 		self.tab_scroll = first;
 	}

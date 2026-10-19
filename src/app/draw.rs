@@ -23,6 +23,15 @@ pub(super) const PALETTE_COMMANDS: [&str; 7] = [
 	"Rename active tab",
 ];
 
+const PALETTE_COMMANDS_TOP: usize = 54;
+const PALETTE_COMMAND_ROW_HEIGHT: usize = 28;
+const PALETTE_BOTTOM_PADDING: usize = 16;
+
+fn command_palette_height(command_count: usize, scale: usize) -> usize {
+	(PALETTE_COMMANDS_TOP + command_count * PALETTE_COMMAND_ROW_HEIGHT + PALETTE_BOTTOM_PADDING)
+		* scale
+}
+
 /// Metrics for toolbar text, which keeps its size regardless of the terminal font.
 #[derive(Clone, Copy)]
 pub(super) struct UiFont {
@@ -30,6 +39,21 @@ pub(super) struct UiFont {
 	pub cw: usize,
 	pub ch: usize,
 	pub ascent: i32,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn command_palette_height_contains_every_command_row() {
+		let scale = 2;
+		let final_row_bottom = (PALETTE_COMMANDS_TOP
+			+ (PALETTE_COMMANDS.len() - 1) * PALETTE_COMMAND_ROW_HEIGHT
+			+ PALETTE_COMMAND_ROW_HEIGHT)
+			* scale;
+		assert!(command_palette_height(PALETTE_COMMANDS.len(), scale) >= final_row_bottom);
+	}
 }
 
 impl App {
@@ -119,7 +143,7 @@ impl App {
 		}
 	}
 
-	fn compose(&mut self, p: &mut Painter) {
+	pub(super) fn compose(&mut self, p: &mut Painter) {
 		let scale = self.scale();
 		let ui = self.ui_font(18.0 * scale as f32);
 		self.restore_background(p, 0, p.height);
@@ -137,7 +161,7 @@ impl App {
 	pub(super) fn draw_terminal(&mut self, p: &mut Painter, scale: usize, rows: Option<&[bool]>) {
 		let view = GridView {
 			frame: &self.frame,
-			origin: (self.margin, self.top),
+			origin: (self.grid_left(), self.top),
 			cell: (self.cw, self.ch),
 			px: self.px,
 			ascent: self.ascent,
@@ -206,14 +230,25 @@ impl App {
 		let box_w = (520 * scale).min(p.width.saturating_sub(24 * scale));
 		let x = p.width.saturating_sub(box_w) / 2;
 		let y = self.top + 20 * scale;
-		self.panel(p, (x, y, box_w, 210 * scale), 10 * scale);
+		let query = self.command_query.to_ascii_lowercase();
+		let matches: Vec<_> = PALETTE_COMMANDS
+			.into_iter()
+			.filter(|command| command.to_ascii_lowercase().contains(&query))
+			.collect();
+		let requested_height = if self.renaming_tab {
+			210 * scale
+		} else {
+			command_palette_height(matches.len(), scale)
+		};
+		let box_h = requested_height.min(p.height.saturating_sub(y));
+		self.panel(p, (x, y, box_w, box_h), 10 * scale);
 		let color = self.theme.fg;
 		let label = if self.renaming_tab {
 			format!("Rename active tab: {}", self.command_query)
 		} else {
 			format!("Run command: {}", self.command_query)
 		};
-		p.text(
+		p.text_clipped(
 			&mut self.fonts,
 			x + 16 * scale,
 			y + 14 * scale,
@@ -221,28 +256,35 @@ impl App {
 			ui.px * 0.86,
 			ui.ascent,
 			color,
+			(x + 16 * scale, y, box_w.saturating_sub(32 * scale), box_h),
 		);
 		if self.renaming_tab {
 			return;
 		}
-		let query = self.command_query.to_ascii_lowercase();
-		let matches = PALETTE_COMMANDS
-			.into_iter()
-			.filter(|command| command.to_ascii_lowercase().contains(&query));
-		for (index, command) in matches.enumerate() {
-			p.text(
+		let row_clip = (
+			x + 20 * scale,
+			y + PALETTE_COMMANDS_TOP * scale,
+			box_w.saturating_sub(40 * scale),
+			box_h.saturating_sub(PALETTE_COMMANDS_TOP * scale),
+		);
+		for (index, command) in matches.into_iter().enumerate() {
+			p.text_clipped(
 				&mut self.fonts,
 				x + 20 * scale,
-				y + (54 + index * 28) * scale,
+				y + (PALETTE_COMMANDS_TOP + index * PALETTE_COMMAND_ROW_HEIGHT) * scale,
 				command,
 				ui.px * 0.78,
 				ui.ascent,
 				color,
+				row_clip,
 			);
 		}
 	}
 
 	pub(super) fn draw_status_bar(&mut self, p: &mut Painter, scale: usize, ui: UiFont) {
+		if !self.preferences.show_bottom_bar {
+			return;
+		}
 		let status_y = p.height.saturating_sub(self.status_height + self.border);
 		let (bg, border) = (self.theme.bg, self.theme.border);
 		p.rect(

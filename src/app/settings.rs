@@ -1,6 +1,6 @@
 //! The Settings window: editable preferences, saving, and input handling.
 use super::{settings_view::*, *};
-use crate::input::shortcuts::Shortcuts;
+use crate::input::shortcuts::{Shortcut, ShortcutAction, Shortcuts};
 use winit::{dpi::LogicalSize, event::KeyEvent};
 
 /// Unsaved preference edits shown in the Settings window.
@@ -11,6 +11,9 @@ pub(crate) struct SettingsEditor {
 	pub(crate) wallpaper_strength: usize,
 	pub(crate) status: String,
 	pub(crate) about: bool,
+	pub(crate) shortcuts_page: bool,
+	pub(crate) recording_shortcut: Option<ShortcutAction>,
+	pub(crate) shortcuts: Shortcuts,
 }
 
 impl SettingsEditor {
@@ -27,6 +30,9 @@ impl SettingsEditor {
 				.clamp(0, 100),
 			status: "Change preferences, then click Save.".into(),
 			about: false,
+			shortcuts_page: false,
+			recording_shortcut: None,
+			shortcuts: Shortcuts::load(),
 		}
 	}
 
@@ -76,6 +82,14 @@ pub(super) enum SettingsTarget {
 	ChooseWallpaper,
 	ClearWallpaper,
 	ToggleRestore,
+	ToggleTabs,
+	ToggleVerticalTabs,
+	ToggleNewTabButton,
+	ToggleSettingsButton,
+	ToggleBottomBar,
+	OpenShortcuts,
+	BackFromShortcuts,
+	SetShortcut(ShortcutAction),
 	/// A stepper button: the row constant and -1 or +1.
 	Step(usize, isize),
 	/// A theme arrow: -1 or +1.
@@ -88,9 +102,27 @@ pub(super) fn settings_target(
 	(width, height): (usize, usize),
 	scale: usize,
 	about_page: bool,
+	shortcuts_page: bool,
 ) -> Option<SettingsTarget> {
 	let s = scale;
 	let in_row = |row: usize| (row * s..(row + ROW_HEIGHT) * s).contains(&y);
+	if shortcuts_page {
+		let back_x = width.saturating_sub(164 * s);
+		if (20 * s..56 * s).contains(&y) && (back_x..back_x + 140 * s).contains(&x) {
+			return Some(SettingsTarget::BackFromShortcuts);
+		}
+		let binding_x = width.saturating_sub(240 * s);
+		for (action, row) in SHORTCUT_ROWS {
+			if in_row(row) && (binding_x..binding_x + 216 * s).contains(&x) {
+				return Some(SettingsTarget::SetShortcut(action));
+			}
+		}
+		let (save_x, save_y) = (width.saturating_sub(140 * s), height.saturating_sub(52 * s));
+		if (save_x..save_x + 120 * s).contains(&x) && (save_y..save_y + 36 * s).contains(&y) {
+			return Some(SettingsTarget::Save);
+		}
+		return None;
+	}
 	// The About button toggles into a wider "Settings" back button.
 	let (about_x, about_w) = if about_page {
 		(width.saturating_sub(164 * s), 140 * s)
@@ -102,6 +134,10 @@ pub(super) fn settings_target(
 	}
 	if about_page {
 		return None;
+	}
+	let shortcuts_x = width.saturating_sub(280 * s);
+	if (20 * s..56 * s).contains(&y) && (shortcuts_x..shortcuts_x + 124 * s).contains(&x) {
+		return Some(SettingsTarget::OpenShortcuts);
 	}
 	let (save_x, save_y) = (width.saturating_sub(140 * s), height.saturating_sub(52 * s));
 	if (save_x..save_x + 120 * s).contains(&x) && (save_y..save_y + 36 * s).contains(&y) {
@@ -118,6 +154,17 @@ pub(super) fn settings_target(
 	let right = |offset: usize| width.saturating_sub(offset * s);
 	if in_row(RESTORE_ROW) && (right(240)..right(24)).contains(&x) {
 		return Some(SettingsTarget::ToggleRestore);
+	}
+	for (row, target) in [
+		(SHOW_TABS_ROW, SettingsTarget::ToggleTabs),
+		(VERTICAL_TABS_ROW, SettingsTarget::ToggleVerticalTabs),
+		(NEW_TAB_BUTTON_ROW, SettingsTarget::ToggleNewTabButton),
+		(SETTINGS_BUTTON_ROW, SettingsTarget::ToggleSettingsButton),
+		(BOTTOM_BAR_ROW, SettingsTarget::ToggleBottomBar),
+	] {
+		if in_row(row) && (right(240)..right(24)).contains(&x) {
+			return Some(target);
+		}
 	}
 	let step = if (right(240)..right(192)).contains(&x) {
 		-1
@@ -157,8 +204,8 @@ impl App {
 		self.settings_editor = SettingsEditor::load();
 		let attributes = crate::platform::identify(Window::default_attributes())
 			.with_title("Poopterm Settings")
-			.with_inner_size(LogicalSize::new(760.0, 640.0))
-			.with_min_inner_size(LogicalSize::new(680.0, 600.0));
+			.with_inner_size(LogicalSize::new(760.0, 860.0))
+			.with_min_inner_size(LogicalSize::new(680.0, 860.0));
 		let window = Arc::new(
 			event_loop
 				.create_window(attributes)
@@ -200,18 +247,33 @@ impl App {
 			|| "\"\"".to_owned(),
 			|path| quote_config_string(&path.to_string_lossy()),
 		);
-		let result = config::save(
-			&config_path(),
-			&[
-				("theme", format!("\"{}\"", editor.theme.name())),
-				("font_size", preferences.font_size.to_string()),
-				("scrollback_lines", preferences.scrollback_lines.to_string()),
-				("restore_sessions", preferences.restore_sessions.to_string()),
-				("opacity", preferences.opacity.to_string()),
-				("wallpaper", wallpaper_path),
-				("wallpaper_strength", editor.wallpaper_strength.to_string()),
-			],
-		);
+		let mut values = vec![
+			("theme", format!("\"{}\"", editor.theme.name())),
+			("font_size", preferences.font_size.to_string()),
+			("scrollback_lines", preferences.scrollback_lines.to_string()),
+			("restore_sessions", preferences.restore_sessions.to_string()),
+			("opacity", preferences.opacity.to_string()),
+			("show_tabs", preferences.show_tabs.to_string()),
+			("vertical_tabs", preferences.vertical_tabs.to_string()),
+			(
+				"show_new_tab_button",
+				preferences.show_new_tab_button.to_string(),
+			),
+			(
+				"show_settings_button",
+				preferences.show_settings_button.to_string(),
+			),
+			("show_bottom_bar", preferences.show_bottom_bar.to_string()),
+			("wallpaper", wallpaper_path),
+			("wallpaper_strength", editor.wallpaper_strength.to_string()),
+		];
+		for action in ShortcutAction::ALL {
+			values.push((
+				action.config_key(),
+				quote_config_string(&editor.shortcuts.get(action).binding()),
+			));
+		}
+		let result = config::save(&config_path(), &values);
 		if let Err(error) = result {
 			self.settings_editor.status = format!("Could not save: {error}");
 		} else {
@@ -222,6 +284,8 @@ impl App {
 	}
 
 	fn apply_saved_settings(&mut self, preferences: Preferences) {
+		self.preferences = preferences;
+		self.update_chrome_layout(self.scale());
 		self.theme = Theme::load();
 		self.shortcuts = Shortcuts::load();
 		self.wallpaper_strength = self.settings_editor.wallpaper_strength;
@@ -247,7 +311,9 @@ impl App {
 		self.selection = None;
 		self.end_search();
 		self.resize(self.width, self.height);
+		let shortcuts_page = self.settings_editor.shortcuts_page;
 		self.settings_editor = SettingsEditor::load();
+		self.settings_editor.shortcuts_page = shortcuts_page;
 		self.settings_editor.status = status;
 	}
 
@@ -278,6 +344,15 @@ impl App {
 			WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
 				self.settings_key(&event)
 			}
+			WindowEvent::ModifiersChanged(modifiers) => {
+				let state = modifiers.state();
+				self.mods = Modifiers {
+					ctrl: state.control_key(),
+					shift: state.shift_key(),
+					alt: state.alt_key(),
+					super_key: state.super_key(),
+				};
+			}
 			WindowEvent::RedrawRequested => self.draw_settings(),
 			_ => {}
 		}
@@ -295,8 +370,20 @@ impl App {
 		);
 		let size = (self.settings_width as usize, self.settings_height as usize);
 		let editor = &mut self.settings_editor;
-		match settings_target(point, size, scale, editor.about) {
+		match settings_target(point, size, scale, editor.about, editor.shortcuts_page) {
 			Some(SettingsTarget::About) => editor.about = !editor.about,
+			Some(SettingsTarget::OpenShortcuts) => {
+				editor.shortcuts_page = true;
+				editor.recording_shortcut = None;
+			}
+			Some(SettingsTarget::BackFromShortcuts) => {
+				editor.shortcuts_page = false;
+				editor.recording_shortcut = None;
+			}
+			Some(SettingsTarget::SetShortcut(action)) => {
+				editor.recording_shortcut = Some(action);
+				editor.status = format!("Press a key chord for {}. Esc cancels.", action.label());
+			}
 			Some(SettingsTarget::Save) => return self.save_settings_config(),
 			Some(SettingsTarget::ChooseWallpaper) => self.choose_wallpaper(),
 			Some(SettingsTarget::ClearWallpaper) => {
@@ -305,6 +392,21 @@ impl App {
 			}
 			Some(SettingsTarget::ToggleRestore) => {
 				editor.preferences.restore_sessions = !editor.preferences.restore_sessions
+			}
+			Some(SettingsTarget::ToggleTabs) => {
+				editor.preferences.show_tabs = !editor.preferences.show_tabs
+			}
+			Some(SettingsTarget::ToggleVerticalTabs) => {
+				editor.preferences.vertical_tabs = !editor.preferences.vertical_tabs
+			}
+			Some(SettingsTarget::ToggleNewTabButton) => {
+				editor.preferences.show_new_tab_button = !editor.preferences.show_new_tab_button
+			}
+			Some(SettingsTarget::ToggleSettingsButton) => {
+				editor.preferences.show_settings_button = !editor.preferences.show_settings_button
+			}
+			Some(SettingsTarget::ToggleBottomBar) => {
+				editor.preferences.show_bottom_bar = !editor.preferences.show_bottom_bar
 			}
 			Some(SettingsTarget::Step(row, step)) => editor.step(row, step),
 			Some(SettingsTarget::Theme(step)) => editor.theme = step_theme(editor.theme, step),
@@ -336,6 +438,25 @@ impl App {
 
 	fn settings_key(&mut self, event: &KeyEvent) {
 		let key = &event.logical_key;
+		if let Some(action) = self.settings_editor.recording_shortcut {
+			if matches!(key, Key::Named(NamedKey::Escape)) {
+				self.settings_editor.recording_shortcut = None;
+				self.settings_editor.status = "Shortcut change cancelled.".into();
+			} else if let Some(shortcut) = Shortcut::from_event(key, self.mods) {
+				if let Some(conflict) = self.settings_editor.shortcuts.conflict(action, &shortcut) {
+					self.settings_editor.status =
+						format!("That shortcut is already assigned to {}.", conflict.label());
+				} else {
+					self.settings_editor.shortcuts.set(action, shortcut);
+					self.settings_editor.recording_shortcut = None;
+					self.settings_editor.status = "Shortcut changed. Click Save to apply.".into();
+				}
+			} else {
+				self.settings_editor.status =
+					"Use a character or supported navigation key with at least one modifier.".into();
+			}
+			return self.redraw_settings();
+		}
 		let is_save = (self.mods.ctrl || self.mods.super_key)
 			&& matches!(key, Key::Character(s) if s.eq_ignore_ascii_case("s"));
 		match key {
@@ -343,6 +464,9 @@ impl App {
 			Key::Named(NamedKey::Enter) => return self.save_settings_config(),
 			Key::Named(NamedKey::Escape) if self.settings_editor.about => {
 				self.settings_editor.about = false
+			}
+			Key::Named(NamedKey::Escape) if self.settings_editor.shortcuts_page => {
+				self.settings_editor.shortcuts_page = false
 			}
 			Key::Named(NamedKey::Escape) => return self.close_settings_window(),
 			Key::Named(NamedKey::ArrowLeft) => {
@@ -361,16 +485,21 @@ impl App {
 mod tests {
 	use super::*;
 
-	const SIZE: (usize, usize) = (760, 640);
+	const SIZE: (usize, usize) = (760, 860);
 
 	#[test]
 	fn clicks_map_to_settings_controls() {
-		let target = |x, y| settings_target((x, y), SIZE, 1, false);
+		let target = |x, y| settings_target((x, y), SIZE, 1, false, false);
 		assert_eq!(target(630, 30), Some(SettingsTarget::About));
-		assert_eq!(target(630, 600), Some(SettingsTarget::Save));
+		assert_eq!(target(630, 820), Some(SettingsTarget::Save));
 		assert_eq!(target(30, 240), Some(SettingsTarget::ChooseWallpaper));
 		assert_eq!(target(200, 240), Some(SettingsTarget::ClearWallpaper));
 		assert_eq!(target(530, 390), Some(SettingsTarget::ToggleRestore));
+		assert_eq!(target(530, 560), Some(SettingsTarget::ToggleTabs));
+		assert_eq!(target(530, 604), Some(SettingsTarget::ToggleVerticalTabs));
+		assert_eq!(target(530, 648), Some(SettingsTarget::ToggleNewTabButton));
+		assert_eq!(target(530, 692), Some(SettingsTarget::ToggleSettingsButton));
+		assert_eq!(target(530, 736), Some(SettingsTarget::ToggleBottomBar));
 		assert_eq!(target(530, 280), Some(SettingsTarget::Step(FONT_ROW, -1)));
 		assert_eq!(
 			target(700, 330),
@@ -382,11 +511,31 @@ mod tests {
 	}
 
 	#[test]
-	fn about_page_only_exposes_the_back_button() {
-		assert_eq!(settings_target((630, 600), SIZE, 1, true), None);
-		assert_eq!(settings_target((750, 30), SIZE, 1, true), None);
+	fn keyboard_shortcut_page_and_bindings_are_clickable() {
 		assert_eq!(
-			settings_target((610, 30), SIZE, 1, true),
+			settings_target((550, 30), SIZE, 1, false, false),
+			Some(SettingsTarget::OpenShortcuts)
+		);
+		assert_eq!(
+			settings_target((690, 30), SIZE, 1, false, true),
+			Some(SettingsTarget::BackFromShortcuts)
+		);
+		assert_eq!(
+			settings_target((600, 112), SIZE, 1, false, true),
+			Some(SettingsTarget::SetShortcut(ShortcutAction::NewTab))
+		);
+		assert_eq!(
+			settings_target((600, 164), SIZE, 1, false, true),
+			Some(SettingsTarget::SetShortcut(ShortcutAction::CommandPalette))
+		);
+	}
+
+	#[test]
+	fn about_page_only_exposes_the_back_button() {
+		assert_eq!(settings_target((630, 600), SIZE, 1, true, false), None);
+		assert_eq!(settings_target((750, 30), SIZE, 1, true, false), None);
+		assert_eq!(
+			settings_target((610, 30), SIZE, 1, true, false),
 			Some(SettingsTarget::About)
 		);
 	}
@@ -394,7 +543,13 @@ mod tests {
 	#[test]
 	fn hit_testing_scales_with_the_window() {
 		assert_eq!(
-			settings_target((530 * 2, 280 * 2), (SIZE.0 * 2, SIZE.1 * 2), 2, false),
+			settings_target(
+				(530 * 2, 280 * 2),
+				(SIZE.0 * 2, SIZE.1 * 2),
+				2,
+				false,
+				false
+			),
 			Some(SettingsTarget::Step(FONT_ROW, -1))
 		);
 	}

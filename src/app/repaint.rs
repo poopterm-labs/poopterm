@@ -12,6 +12,10 @@ impl App {
 		p: &mut Painter,
 		damage: &GridDamage,
 	) -> Vec<(usize, usize)> {
+		if self.preferences.show_tabs && self.preferences.vertical_tabs {
+			self.compose(p);
+			return vec![(0, p.height)];
+		}
 		let scale = self.scale();
 		let ui = self.ui_font(18.0 * scale as f32);
 		let (top, ch, width) = (self.top, self.ch, p.width);

@@ -8,8 +8,8 @@ spirit of kitty's `kitten __benchmark__`, but using nothing terminal-specific:
   logs, colored compiler output, ls, highlighted source, Unicode, CJK, emoji,
   full-screen TUI redraws, editor scrolling, progress bars, truecolor art,
   shell prompts with OSC 133, Sixel and kitty graphics. They are
-  deterministic, so every terminal gets identical bytes. Build poopterm
-  first (`cargo build --release`), or point POOPTERM_BIN at a binary.
+  deterministic, so every terminal gets identical bytes. It uses the local
+  release build, then `poopterm` from PATH. Set POOPTERM_BIN to choose a binary.
 * Each measurement ends with a Primary Device Attributes query (`CSI c`),
   which every VT100-compatible terminal answers only after parsing all prior
   output, so buffering inside the terminal cannot inflate the numbers.
@@ -78,9 +78,16 @@ def parse_xtversion(reply):
 
 
 def poopterm_binary():
-    binary = Path(os.environ.get("POOPTERM_BIN") or ROOT / "target/release/poopterm")
+    configured = os.environ.get("POOPTERM_BIN")
+    binary = Path(configured).expanduser() if configured else ROOT / "target/release/poopterm"
+    if not configured and not binary.is_file():
+        installed = shutil.which("poopterm")
+        if installed:
+            binary = Path(installed)
     if not binary.is_file():
-        raise FileNotFoundError(f"{binary} not found; run `cargo build --release` or set POOPTERM_BIN")
+        raise FileNotFoundError(
+            f"{binary} not found; run `cargo build --release`, install poopterm, or set POOPTERM_BIN"
+        )
     return binary
 
 

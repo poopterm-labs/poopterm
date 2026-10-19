@@ -2,10 +2,12 @@
 mod canvas;
 mod draw;
 mod draw_tabs;
+mod draw_vertical_tabs;
 mod frame_pacer;
 mod handler;
 mod keyboard;
 mod mouse;
+mod mouse_tabs;
 mod notifications;
 mod output;
 mod repaint;
@@ -41,7 +43,7 @@ use crate::{
 	ui::{
 		search::find_matches,
 		selection::{CellPoint, Selection},
-		tabs::{TabLayout, tab_layout},
+		tabs::{TabLayout, VerticalTabLayout, VerticalTabOptions, tab_layout, vertical_tab_layout},
 	},
 	wallpaper::Wallpaper,
 };
@@ -50,6 +52,7 @@ pub(crate) use settings::SettingsEditor;
 
 pub(crate) struct App {
 	theme: Theme,
+	preferences: Preferences,
 	wallpaper: Option<Wallpaper>,
 	wallpaper_strength: usize,
 	fonts: FontSet,
@@ -164,6 +167,39 @@ impl App {
 		self.fonts.clear();
 	}
 
+	/// Recomputes the areas reserved for window chrome after a settings change.
+	pub(super) fn update_chrome_layout(&mut self, scale: usize) {
+		self.status_height = if self.preferences.show_bottom_bar {
+			26 * scale
+		} else {
+			0
+		};
+		let top_chrome = if !self.preferences.show_tabs || self.preferences.vertical_tabs {
+			if cfg!(target_os = "macos") {
+				self.titlebar_height
+			} else {
+				0
+			}
+		} else {
+			self.titlebar_height
+				+ if cfg!(target_os = "macos") {
+					0
+				} else {
+					self.tab_height
+				}
+		};
+		self.top = top_chrome + self.margin;
+	}
+
+	pub(super) fn grid_left(&self) -> usize {
+		self.margin
+			+ if self.preferences.show_tabs && self.preferences.vertical_tabs {
+				184 * self.scale()
+			} else {
+				0
+			}
+	}
+
 	pub(super) fn resize(&mut self, w: u32, h: u32) {
 		// Also reached after font, wallpaper and settings changes.
 		self.canvas.invalidate();
@@ -171,7 +207,9 @@ impl App {
 		self.height = h.max(1);
 		self.ensure_active_tab_visible();
 
-		let cols = ((self.width as usize).saturating_sub(2 * self.margin) / self.cw.max(1)).max(2);
+		let cols = ((self.width as usize).saturating_sub(self.grid_left() + self.margin)
+			/ self.cw.max(1))
+		.max(2);
 		let rows = ((self.height as usize).saturating_sub(self.top + self.margin + self.status_height)
 			/ self.ch.max(1))
 		.max(2);
@@ -215,6 +253,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 
 	let theme = Theme::load();
 	let settings_editor = SettingsEditor::load();
+	let preferences = settings_editor.preferences;
 	let wallpaper_strength = settings_editor.wallpaper_strength;
 	let wallpaper = read_config_value("wallpaper")
 		.filter(|path| !path.is_empty())
@@ -246,6 +285,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 	let next_session_id = sessions.len() as u64 + 1;
 	let mut app = App {
 		theme,
+		preferences,
 		wallpaper,
 		wallpaper_strength,
 		fonts: FontSet::new(font, fallback_fonts),

@@ -32,10 +32,82 @@ impl Shortcut {
 	pub(crate) fn matches(&self, key: &Key, mods: Modifiers) -> bool {
 		mods == self.mods
 			&& match key {
+				Key::Character(value) if self.key == "plus" => value == "+",
 				Key::Character(value) => value.eq_ignore_ascii_case(&self.key),
 				Key::Named(named) => named_key(&self.key) == Some(*named),
 				_ => false,
 			}
+	}
+
+	/// Captures one modified character or supported named key.
+	pub(crate) fn from_event(key: &Key, mods: Modifiers) -> Option<Self> {
+		if !(mods.ctrl || mods.shift || mods.alt || mods.super_key) {
+			return None;
+		}
+		let key = match key {
+			Key::Character(value)
+				if value.is_ascii()
+					&& value.chars().count() == 1
+					&& value.as_bytes()[0].is_ascii_graphic() =>
+			{
+				if value == "+" {
+					"plus".to_owned()
+				} else {
+					value.to_ascii_lowercase()
+				}
+			}
+			Key::Named(named) => named_key_name(*named)?.to_owned(),
+			_ => return None,
+		};
+		Some(Self { mods, key })
+	}
+
+	/// Serializes this chord using the syntax accepted by the config file.
+	pub(crate) fn binding(&self) -> String {
+		let mut parts = Vec::with_capacity(5);
+		for (name, enabled) in [
+			("ctrl", self.mods.ctrl),
+			("shift", self.mods.shift),
+			("alt", self.mods.alt),
+			("super", self.mods.super_key),
+		] {
+			if enabled {
+				parts.push(name);
+			}
+		}
+		parts.push(&self.key);
+		parts.join("+")
+	}
+
+	/// Formats a chord for the Settings window.
+	pub(crate) fn display(&self, mac: bool) -> String {
+		let mut parts = Vec::with_capacity(5);
+		for (name, enabled) in [
+			(if mac { "⌃" } else { "Ctrl" }, self.mods.ctrl),
+			(if mac { "⌥" } else { "Alt" }, self.mods.alt),
+			(if mac { "⇧" } else { "Shift" }, self.mods.shift),
+			(if mac { "⌘" } else { "Super" }, self.mods.super_key),
+		] {
+			if enabled {
+				parts.push(name.to_owned());
+			}
+		}
+		parts.push(match self.key.as_str() {
+			"plus" => "+".to_owned(),
+			"up" => "↑".to_owned(),
+			"down" => "↓".to_owned(),
+			"left" => "←".to_owned(),
+			"right" => "→".to_owned(),
+			"pageup" => "PageUp".to_owned(),
+			"pagedown" => "PageDown".to_owned(),
+			"home" => "Home".to_owned(),
+			"end" => "End".to_owned(),
+			"tab" => "Tab".to_owned(),
+			"enter" => "Enter".to_owned(),
+			"space" => "Space".to_owned(),
+			key => key.to_ascii_uppercase(),
+		});
+		parts.join(if mac { "" } else { "+" })
 	}
 }
 
@@ -55,6 +127,71 @@ fn named_key(name: &str) -> Option<NamedKey> {
 		"space" => NamedKey::Space,
 		_ => return None,
 	})
+}
+
+fn named_key_name(key: NamedKey) -> Option<&'static str> {
+	Some(match key {
+		NamedKey::ArrowUp => "up",
+		NamedKey::ArrowDown => "down",
+		NamedKey::ArrowLeft => "left",
+		NamedKey::ArrowRight => "right",
+		NamedKey::PageUp => "pageup",
+		NamedKey::PageDown => "pagedown",
+		NamedKey::Home => "home",
+		NamedKey::End => "end",
+		NamedKey::Tab => "tab",
+		NamedKey::Enter => "enter",
+		NamedKey::Space => "space",
+		_ => return None,
+	})
+}
+
+/// Actions with configurable keyboard shortcuts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShortcutAction {
+	NewTab,
+	CommandPalette,
+	CycleTheme,
+	Search,
+	CloseTab,
+	PreviousPrompt,
+	NextPrompt,
+}
+
+impl ShortcutAction {
+	pub(crate) const ALL: [Self; 7] = [
+		Self::NewTab,
+		Self::CommandPalette,
+		Self::CycleTheme,
+		Self::Search,
+		Self::CloseTab,
+		Self::PreviousPrompt,
+		Self::NextPrompt,
+	];
+
+	pub(crate) fn label(self) -> &'static str {
+		match self {
+			Self::NewTab => "New tab",
+			Self::CommandPalette => "Command palette",
+			Self::CycleTheme => "Cycle theme",
+			Self::Search => "Search",
+			Self::CloseTab => "Close tab",
+			Self::PreviousPrompt => "Previous prompt",
+			Self::NextPrompt => "Next prompt",
+		}
+	}
+
+	pub(crate) fn config_key(self) -> &'static str {
+		match self {
+			Self::NewTab => "shortcut_new_tab",
+			Self::CommandPalette => "shortcut_command_palette",
+			Self::CycleTheme => "shortcut_cycle_theme",
+			Self::Search => "shortcut_search",
+			Self::CloseTab => "shortcut_close_tab",
+			Self::PreviousPrompt => "shortcut_previous_prompt",
+			Self::NextPrompt => "shortcut_next_prompt",
+		}
+	}
 }
 
 /// Shortcut table, read from the config once instead of on every key press.
@@ -107,6 +244,40 @@ impl Shortcuts {
 
 	pub(crate) fn load() -> Self {
 		Self::from_config(&std::fs::read_to_string(config::config_path()).unwrap_or_default())
+	}
+
+	pub(crate) fn get(&self, action: ShortcutAction) -> &Shortcut {
+		match action {
+			ShortcutAction::NewTab => &self.new_tab,
+			ShortcutAction::CommandPalette => &self.command_palette,
+			ShortcutAction::CycleTheme => &self.cycle_theme,
+			ShortcutAction::Search => &self.search,
+			ShortcutAction::CloseTab => &self.close_tab,
+			ShortcutAction::PreviousPrompt => &self.previous_prompt,
+			ShortcutAction::NextPrompt => &self.next_prompt,
+		}
+	}
+
+	pub(crate) fn set(&mut self, action: ShortcutAction, shortcut: Shortcut) {
+		match action {
+			ShortcutAction::NewTab => self.new_tab = shortcut,
+			ShortcutAction::CommandPalette => self.command_palette = shortcut,
+			ShortcutAction::CycleTheme => self.cycle_theme = shortcut,
+			ShortcutAction::Search => self.search = shortcut,
+			ShortcutAction::CloseTab => self.close_tab = shortcut,
+			ShortcutAction::PreviousPrompt => self.previous_prompt = shortcut,
+			ShortcutAction::NextPrompt => self.next_prompt = shortcut,
+		}
+	}
+
+	pub(crate) fn conflict(
+		&self,
+		action: ShortcutAction,
+		shortcut: &Shortcut,
+	) -> Option<ShortcutAction> {
+		ShortcutAction::ALL
+			.into_iter()
+			.find(|other| *other != action && self.get(*other) == shortcut)
 	}
 }
 
@@ -175,5 +346,41 @@ mod tests {
 			..Default::default()
 		};
 		assert!(page.matches(&Key::Named(NamedKey::PageDown), shift));
+	}
+
+	#[test]
+	fn captured_bindings_round_trip_and_require_a_modifier() {
+		let ctrl_shift = Modifiers {
+			ctrl: true,
+			shift: true,
+			..Default::default()
+		};
+		let captured = Shortcut::from_event(&chr("K"), ctrl_shift).unwrap();
+		assert_eq!(captured.binding(), "ctrl+shift+k");
+		assert_eq!(captured.display(false), "Ctrl+Shift+K");
+		let plus = Shortcut::from_event(&chr("+"), ctrl_shift).unwrap();
+		assert_eq!(plus.binding(), "ctrl+shift+plus");
+		assert!(
+			Shortcut::parse(&plus.binding())
+				.unwrap()
+				.matches(&chr("+"), ctrl_shift)
+		);
+		assert!(Shortcut::from_event(&chr("k"), Modifiers::default()).is_none());
+	}
+
+	#[test]
+	fn shortcut_actions_can_be_updated_and_conflicts_are_reported() {
+		let mut shortcuts = Shortcuts::from_config("");
+		let binding = Shortcut::parse("ctrl+alt+n").unwrap();
+		shortcuts.set(ShortcutAction::NewTab, binding.clone());
+		assert_eq!(
+			shortcuts.get(ShortcutAction::NewTab).binding(),
+			"ctrl+alt+n"
+		);
+		assert_eq!(shortcuts.conflict(ShortcutAction::NewTab, &binding), None);
+		assert_eq!(
+			shortcuts.conflict(ShortcutAction::Search, &binding),
+			Some(ShortcutAction::NewTab)
+		);
 	}
 }

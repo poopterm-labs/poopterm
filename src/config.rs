@@ -14,6 +14,11 @@ pub struct Preferences {
 	pub scrollback_lines: usize,
 	pub restore_sessions: bool,
 	pub opacity: usize,
+	pub show_tabs: bool,
+	pub vertical_tabs: bool,
+	pub show_new_tab_button: bool,
+	pub show_settings_button: bool,
+	pub show_bottom_bar: bool,
 }
 
 impl Default for Preferences {
@@ -23,6 +28,11 @@ impl Default for Preferences {
 			scrollback_lines: 5000,
 			restore_sessions: true,
 			opacity: 100,
+			show_tabs: true,
+			vertical_tabs: false,
+			show_new_tab_button: true,
+			show_settings_button: true,
+			show_bottom_bar: true,
 		}
 	}
 }
@@ -46,6 +56,21 @@ impl Preferences {
 				.and_then(|s| s.parse().ok())
 				.unwrap_or(defaults.opacity)
 				.clamp(60, 100),
+			show_tabs: value(text, "show_tabs")
+				.and_then(|s| s.parse().ok())
+				.unwrap_or(defaults.show_tabs),
+			vertical_tabs: value(text, "vertical_tabs")
+				.and_then(|s| s.parse().ok())
+				.unwrap_or(defaults.vertical_tabs),
+			show_new_tab_button: value(text, "show_new_tab_button")
+				.and_then(|s| s.parse().ok())
+				.unwrap_or(defaults.show_new_tab_button),
+			show_settings_button: value(text, "show_settings_button")
+				.and_then(|s| s.parse().ok())
+				.unwrap_or(defaults.show_settings_button),
+			show_bottom_bar: value(text, "show_bottom_bar")
+				.and_then(|s| s.parse().ok())
+				.unwrap_or(defaults.show_bottom_bar),
 		}
 	}
 	pub fn load() -> Self {
@@ -216,6 +241,24 @@ mod tests {
 		assert_eq!(p.opacity, 100);
 		assert_eq!(Preferences::parse("font_size = -1").font_size, 18);
 		assert_eq!(Preferences::parse("opacity = 25").opacity, 60);
+	}
+	#[test]
+	fn tab_and_bar_preferences_default_on_and_parse_independently() {
+		let defaults = Preferences::default();
+		assert!(defaults.show_tabs);
+		assert!(!defaults.vertical_tabs);
+		assert!(defaults.show_new_tab_button);
+		assert!(defaults.show_settings_button);
+		assert!(defaults.show_bottom_bar);
+
+		let configured = Preferences::parse(
+			"show_tabs = false\nvertical_tabs = true\nshow_new_tab_button = false\nshow_settings_button = false\nshow_bottom_bar = false",
+		);
+		assert!(!configured.show_tabs);
+		assert!(configured.vertical_tabs);
+		assert!(!configured.show_new_tab_button);
+		assert!(!configured.show_settings_button);
+		assert!(!configured.show_bottom_bar);
 	}
 	#[test]
 	fn xdg_variables_must_be_absolute_paths() {

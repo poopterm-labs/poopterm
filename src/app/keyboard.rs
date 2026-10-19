@@ -82,7 +82,7 @@ impl App {
 						match *command {
 							"Rename active tab" => {
 								self.renaming_tab = true;
-								let title = self.active_term().title.clone();
+								let title = self.sessions[self.active].title();
 								self.command_query = title;
 							}
 							"New tab" => {

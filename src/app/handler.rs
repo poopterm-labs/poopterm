@@ -41,7 +41,8 @@ impl ApplicationHandler<UserEvent> for App {
 
 		let scale = window.scale_factor() as f32;
 		self.margin = (8.0 * scale) as usize;
-		self.border = scale as usize;
+		// A subtle inset frame gives the client area the Ghostty window-border look.
+		self.border = (2.0 * scale) as usize;
 		self.titlebar_height = if cfg!(target_os = "macos") {
 			(44.0 * scale) as usize
 		} else {
@@ -52,14 +53,6 @@ impl ApplicationHandler<UserEvent> for App {
 		} else {
 			44.0
 		} * scale) as usize;
-		self.top = self.titlebar_height
-			+ if cfg!(target_os = "macos") {
-				0
-			} else {
-				self.tab_height
-			}
-			+ self.margin;
-		self.status_height = (26.0 * scale) as usize;
 
 		self.set_font_px(Preferences::load().font_size as f32 * scale);
 
@@ -67,17 +60,17 @@ impl ApplicationHandler<UserEvent> for App {
 			let term = self.active_term();
 			(term.cols, term.rows)
 		};
-		let size = PhysicalSize::new(
-			(self.cw * cols + 2 * self.margin) as u32,
-			(self.ch * rows + self.top + self.margin + self.status_height) as u32,
-		);
-		let _ = window.request_inner_size(size);
-
 		let context = softbuffer::Context::new(window.clone()).expect("softbuffer context");
 		let surface = softbuffer::Surface::new(&context, window.clone()).expect("softbuffer surface");
 		self.surface = Some(surface);
 		self._context = Some(context);
 		self.window = Some(window);
+		self.update_chrome_layout(self.scale());
+		let size = PhysicalSize::new(
+			(self.cw * cols + self.grid_left() + self.margin) as u32,
+			(self.ch * rows + self.top + self.margin + self.status_height) as u32,
+		);
+		let _ = self.window.as_ref().unwrap().request_inner_size(size);
 		self.update_window_title();
 		if let Some(millihertz) = window_refresh_millihertz(self.window.as_deref()) {
 			self.pacer.set_interval(std::time::Duration::from_micros(

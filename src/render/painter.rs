@@ -131,19 +131,41 @@ impl<'a> Painter<'a> {
 		ascent: i32,
 		color: u32,
 	) {
+		self.text_clipped(
+			fonts,
+			x,
+			y,
+			text,
+			px,
+			ascent,
+			color,
+			(0, 0, self.width, self.height),
+		);
+	}
+
+	/// Draws a line of text clipped to the given pixel rectangle.
+	#[allow(clippy::too_many_arguments)]
+	pub(crate) fn text_clipped(
+		&mut self,
+		fonts: &mut FontSet,
+		x: usize,
+		y: usize,
+		text: &str,
+		px: f32,
+		ascent: i32,
+		color: u32,
+		(clip_x, clip_y, clip_width, clip_height): (usize, usize, usize, usize),
+	) {
+		let clip_right = clip_x.saturating_add(clip_width).min(self.width) as i32;
+		let clip_bottom = clip_y.saturating_add(clip_height).min(self.height) as i32;
+		let clip = (clip_x as i32, clip_y as i32, clip_right, clip_bottom);
 		let mut cursor_x = x as i32;
 		for ch in text.chars() {
 			let glyph = fonts.glyph(ch, px);
 			let origin = (cursor_x + glyph.metrics.xmin, glyph_top(glyph, y, ascent));
-			self.glyph(
-				glyph,
-				origin,
-				(0, 0, self.width as i32, self.height as i32),
-				false,
-				color,
-			);
+			self.glyph(glyph, origin, clip, false, color);
 			cursor_x += glyph.metrics.advance_width.ceil() as i32;
-			if cursor_x >= self.width as i32 {
+			if cursor_x >= clip_right {
 				break;
 			}
 		}
@@ -227,6 +249,36 @@ mod tests {
 			pixels,
 			[0, 0, 0, 0, 0xffffff, 0, 0, 0, 0, 0, 0, 0],
 			"only column 1 of row 1 is inside both the glyph and the clip"
+		);
+	}
+
+	#[test]
+	fn text_is_clipped_to_its_tab_label_area() {
+		let font = fontdue::Font::from_bytes(
+			include_bytes!("../../assets/font.ttf") as &[u8],
+			fontdue::FontSettings::default(),
+		)
+		.unwrap();
+		let mut fonts = FontSet::new(font, Vec::new());
+		let mut pixels = vec![0u32; 30 * 20];
+		let mut painter = Painter::new(&mut pixels, 30, 20);
+		painter.text_clipped(
+			&mut fonts,
+			0,
+			2,
+			"MMMMMMMM",
+			14.0,
+			12,
+			0xffffff,
+			(0, 0, 8, 20),
+		);
+
+		assert!(pixels.iter().any(|pixel| *pixel != 0), "text is visible");
+		assert!(
+			pixels
+				.iter()
+				.enumerate()
+				.all(|(index, pixel)| index % 30 < 8 || *pixel == 0)
 		);
 	}
 

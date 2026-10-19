@@ -1,6 +1,6 @@
 # poopterm 💩
 
-Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it handles real-world text output at 63–248 MB/s end to end (108 MB/s overall, images included) on a low-power laptop CPU (see [performance](docs/performance.md)). It opens your default shell in a native window, with tabs, clipboard support, and seven built-in color themes. Terminal compatibility is growing and is not yet a complete xterm implementation.
+Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it handles real-world text output at 63–248 MB/s end to end (108 MB/s overall, images included) on a low-power laptop CPU (see [performance](docs/performance.md)). It opens your default shell in a native window, with tabs, clipboard support, and eight built-in color themes. Terminal compatibility is growing and is not yet a complete xterm implementation.
 
 ![Poopterm app icon](assets/icon.png)
 
@@ -25,7 +25,7 @@ Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it
   and Unicode placeholders) within explicit memory limits, and tracks OSC 133
   shell markers.
 - Supports semicolon/colon TrueColor, DEC line drawing, and additional text styles.
-- Includes Dark Mode, Light Mode, all four Catppuccin flavors, signature Poop, and a configurable Custom theme.
+- Includes Dark Mode, Light Mode, all four Catppuccin flavors, Bark, signature Poop, and a configurable Custom theme.
 - Includes an **About poopterm** page in Settings.
 - Supports PNG, JPEG, and WebP terminal wallpapers with adjustable strength in Settings.
 - Lets macOS users adjust main-window opacity from Settings.
@@ -111,7 +111,7 @@ pkg install rust pkgconf xorg libX11 libxkbcommon wayland
 ## Themes
 
 Poopterm includes Dark Mode and Light Mode, Catppuccin Latte, Frappé, Macchiato,
-Mocha, and signature Poop themes. Rosé Pine has been removed for now. Choose a
+Mocha, Bark, and signature Poop themes. Rosé Pine has been removed for now. Choose a
 theme in **Settings** or press **Ctrl+Shift+T** to cycle through them. The
 selection is saved to a config file and restored on the next launch.
 
@@ -120,8 +120,9 @@ on macOS and `~/.config/poopterm/config.toml` on Linux and FreeBSD (or
 `$XDG_CONFIG_HOME/poopterm/config.toml` when `XDG_CONFIG_HOME` is set). Create
 the file or open **Settings** from the gear button in the tab bar. Settings
 opens in a separate window with a theme picker, wallpaper chooser and strength
-control, font-size and scrollback controls, and a session-restore toggle. Click
-**Save** to apply the preferences:
+control, font-size and scrollback controls, session restore, tab visibility and
+orientation, tab-button visibility, and a bottom-bar toggle. Click **Save** to
+apply the preferences:
 
 ```toml
 theme = "catppuccin-mocha"
@@ -129,6 +130,11 @@ font_size = 18           # Logical pixels, 10–32
 scrollback_lines = 5000 # 0–100000; 0 disables history
 restore_sessions = true
 opacity = 100           # macOS main window opacity, 60–100
+show_tabs = true
+vertical_tabs = false
+show_new_tab_button = true
+show_settings_button = true
+show_bottom_bar = true
 wallpaper = "/Users/you/Pictures/terminal.webp" # optional PNG, JPEG, or WebP
 wallpaper_strength = 35 # 0–100; 0 hides the image, 100 shows it at full strength
 shortcut_new_tab = "super+t"
@@ -139,7 +145,7 @@ shortcut_close_tab = "super+w"
 ```
 
 `theme` accepts `darkmode`, `light-mode`, `catppuccin-latte`,
-`catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `poop`, or
+`catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `bark`, `poop`, or
 `custom`. The custom theme starts from the Poop palette and accepts optional
 six-digit RGB overrides. Color keys can also override a built-in theme:
 
@@ -219,13 +225,22 @@ POOPTERM_THEME=catppuccin-latte poopterm
 - **Ctrl+Shift+P** opens the command palette for new tab, settings, About, theme,
   copy-last-command-output, close-tab, and rename-tab actions. Enter filters and runs the first match; after
   choosing rename, type a title and press Enter.
+- Open Settings with the gear button or from the command palette. Choose
+  **Shortcuts**, click a binding, and press a new key chord; press **Esc** to
+  cancel recording. Click **Save** to apply your changes. The shortcut page also
+  lists each action's current binding.
 
 The `shortcut_new_tab`, `shortcut_command_palette`, `shortcut_cycle_theme`,
 `shortcut_search`, `shortcut_close_tab`, `shortcut_previous_prompt`, and
 `shortcut_next_prompt` config keys accept `ctrl`, `shift`, `alt`, and `super`
 plus a character key or one of `up`, `down`, `left`, `right`, `pageup`,
-`pagedown`, `home`, `end`, `tab`, `enter`, `space`. Defaults use the platform's common
-shortcuts; the sample values above are for macOS.
+`pagedown`, `home`, `end`, `tab`, `enter`, `space`, or `plus`. Defaults use the platform's common
+shortcuts shown above: **Cmd+T** / **Ctrl+Shift+N** opens a tab, **Ctrl+Shift+P**
+opens the command palette, **Ctrl+Shift+T** cycles themes, **Cmd+F** /
+**Ctrl+Shift+F** searches, **Cmd+W** / **Ctrl+Shift+W** closes a tab, and
+**Cmd+Up/Down** / **Ctrl+Shift+Up/Down** jumps between prompts. The sample values
+above are for macOS. Tab cycling, direct tab selection, and clipboard shortcuts
+are fixed bindings.
 
 On Linux, clipboard shortcuts need a clipboard command-line tool: `wl-clipboard`
 for Wayland (`wl-copy` and `wl-paste`), or `xclip`/`xsel` for X11.

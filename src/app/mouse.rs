@@ -8,14 +8,15 @@ use winit::{dpi::PhysicalPosition, event::MouseScrollDelta};
 impl App {
 	pub(super) fn point_at(&self, x: f64, y: f64) -> Option<CellPoint> {
 		let term = self.active_term();
-		if x < self.margin as f64
-			|| x >= (self.margin + term.cols * self.cw) as f64
+		let grid_left = self.grid_left();
+		if x < grid_left as f64
+			|| x >= (grid_left + term.cols * self.cw) as f64
 			|| y < self.top as f64
 			|| y >= (self.height as usize).saturating_sub(self.status_height + self.margin) as f64
 		{
 			return None;
 		}
-		let col = ((x as usize - self.margin) / self.cw.max(1)).min(term.cols - 1);
+		let col = ((x as usize - grid_left) / self.cw.max(1)).min(term.cols - 1);
 		let row = ((y as usize - self.top) / self.ch.max(1)).min(term.rows - 1);
 		Some(CellPoint {
 			row: term.scrollback.len().saturating_sub(term.scroll_offset) + row,
@@ -249,7 +250,14 @@ impl App {
 			MouseScrollDelta::LineDelta(_, n) => *n > 0.0,
 			MouseScrollDelta::PixelDelta(p) => p.y > 0.0,
 		};
-		if y >= self.tab_y() as f64 && y < self.top as f64 {
+		if self.handle_vertical_tab_wheel(x, y, scroll_up) {
+			return;
+		}
+		if self.preferences.show_tabs
+			&& !self.preferences.vertical_tabs
+			&& y >= self.tab_y() as f64
+			&& y < self.top as f64
+		{
 			let layout = self.tab_layout();
 			if layout.first_visible > 0 && scroll_up {
 				self.tab_scroll -= 1;
@@ -304,7 +312,9 @@ impl App {
 			let button = self.held_button.unwrap_or(MouseButtonCode::None);
 			self.send_mouse_report(button, MouseAction::Motion, self.cursor_pos);
 		}
-		if (previous.1 < self.top as f64 || position.y < self.top as f64)
+		let over_sidebar =
+			self.is_over_vertical_sidebar(previous.0) || self.is_over_vertical_sidebar(position.x);
+		if ((previous.1 < self.top as f64 || position.y < self.top as f64) || over_sidebar)
 			&& let Some(window) = &self.window
 		{
 			window.request_redraw();
@@ -325,8 +335,15 @@ impl App {
 			_ => return,
 		};
 		self.held_button = (state == ElementState::Pressed).then_some(code);
+		if self.handle_vertical_tab_mouse(event_loop, state, button, (x, y)) {
+			return;
+		}
 		let tab_y = self.tab_y() as f64;
-		if state == ElementState::Pressed && button == MouseButton::Left && y < self.top as f64 {
+		if self.preferences.show_tabs
+			&& state == ElementState::Pressed
+			&& button == MouseButton::Left
+			&& y < self.top as f64
+		{
 			let layout = self.tab_layout();
 			let in_tabbar = y >= tab_y && y < self.top as f64;
 			if in_tabbar
