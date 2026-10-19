@@ -3,6 +3,7 @@ use super::{
 	blend::blend,
 	glyphs::FontSet,
 	images::draw_placement,
+	multicell::draw_multicell,
 	painter::{Painter, glyph_top},
 };
 use crate::{
@@ -194,13 +195,23 @@ fn draw_cell(
 	if (cell.ch == ' ' && cell.extra == NO_EXTRA) || cell.width == 0 || cell.ch == PLACEHOLDER {
 		return;
 	}
+	let italic = cell.attrs & attr::ITALIC != 0;
+	if cell.extra != NO_EXTRA
+		&& let Some(part) = view.frame.multicell(cell)
+	{
+		// A block's first column draws its row; the other columns only
+		// have backgrounds and lines.
+		if part.dx == 0 {
+			draw_multicell(p, fonts, view, part, (x0, y0), italic, fg);
+		}
+		return;
+	}
 	let span = cw * cell.width as usize;
 	let glyph = fonts.glyph(cell.ch, view.px);
 	let origin = (
 		x0 as i32 + glyph.metrics.xmin,
 		glyph_top(glyph, y0, view.ascent),
 	);
-	let italic = cell.attrs & attr::ITALIC != 0;
 	let (top, bottom) = (y0 as i32, (y0 + ch) as i32);
 	p.glyph(
 		glyph,

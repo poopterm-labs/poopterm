@@ -38,10 +38,17 @@ impl Term {
 			}
 		}
 		self.wrap_pending = false;
+		if self.has_multicells {
+			// Lower rows of scaled text are skipped; text over a top row
+			// erases the whole block.
+			self.skip_lower_rows(width);
+			self.erase_multicells_in_row(self.cy, self.cx, self.cx + width);
+		}
 		let (x, y, cols) = (self.cx, self.cy, self.cols);
 		let i = self.idx(x, y);
 		if self.insert_mode {
 			let count = width.min(cols - x);
+			self.erase_multicells_for_shift(x, y, count, true);
 			self.grid[y].copy_within(x..cols - count, x + count);
 			self.clear_range(i, i + count);
 			self.repair_wide_rows(y, y + 1);
@@ -81,7 +88,10 @@ impl Term {
 	pub(super) fn print_text(&mut self, text: &str) {
 		let template = self.styled_cell();
 		let blank = self.blank();
-		let general = self.charsets[self.active_charset] || self.insert_mode || self.has_sixel_images();
+		let general = self.charsets[self.active_charset]
+			|| self.insert_mode
+			|| self.has_multicells
+			|| self.has_sixel_images();
 		let mut chars = text.chars();
 		while let Some(c) = chars.next() {
 			debug_assert!(c >= ' ' && !('\u{80}'..='\u{9f}').contains(&c));
@@ -146,7 +156,7 @@ impl Term {
 	/// [`Term::apply_print`] per byte, but resolves the cell style once and
 	/// fills each row segment in one pass.
 	pub(crate) fn print_ascii(&mut self, mut bytes: &[u8]) {
-		if self.charsets[self.active_charset] || self.insert_mode {
+		if self.charsets[self.active_charset] || self.insert_mode || self.has_multicells {
 			for &byte in bytes {
 				self.apply_print(byte as char);
 			}
@@ -243,6 +253,15 @@ impl Term {
 			x = x.saturating_sub(1);
 		}
 		let extra = row[x].extra;
+		if self.has_multicells
+			&& let Some(part) = self.extras.multicell(extra)
+		{
+			if width != 0 && !part.text.ends_with('\u{200d}') {
+				return false;
+			}
+			self.extend_multicell(x, self.cy, c);
+			return true;
+		}
 		// Fast path: most cells have no marks, so nothing can join them.
 		if width != 0 && (extra == NO_EXTRA || self.extras.marks(extra).last() != Some(&'\u{200d}')) {
 			return false;

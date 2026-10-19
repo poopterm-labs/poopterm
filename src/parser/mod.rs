@@ -18,6 +18,7 @@ mod osc_pointer;
 mod osc_shell;
 mod osc_status;
 mod osc_tab;
+mod osc_text_size;
 mod params;
 mod print;
 mod sgr;

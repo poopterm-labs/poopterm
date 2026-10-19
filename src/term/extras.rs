@@ -1,6 +1,8 @@
-//! Rarely used per-cell data (combining marks, OSC 8 hyperlinks) kept out of
-//! [`Cell`](super::Cell) so cells stay 16 bytes.
+//! Rarely used per-cell data (combining marks, OSC 8 hyperlinks, parts of
+//! scaled text) kept out of [`Cell`](super::Cell) so cells stay 16 bytes.
 use std::collections::HashMap;
+
+use super::multicell::Multicell;
 
 /// The `extra` id of a cell with no marks and no hyperlink.
 pub(crate) const NONE: u16 = 0;
@@ -11,6 +13,7 @@ pub(crate) const MAX_MARKS: usize = 8;
 struct Extra {
 	hyperlink: u16,
 	marks: Box<[char]>,
+	multicell: Option<Box<Multicell>>,
 }
 
 /// Interned [`Extra`] entries. Ids are stable for the table's lifetime and
@@ -56,8 +59,8 @@ impl Extras {
 		let mut marks = current.marks.to_vec();
 		marks.push(mark);
 		self.intern(Extra {
-			hyperlink: current.hyperlink,
 			marks: marks.into(),
+			..current.clone()
 		})
 	}
 
@@ -69,7 +72,21 @@ impl Extras {
 		}
 		self.intern(Extra {
 			hyperlink: link,
-			marks: current.marks.clone(),
+			..current.clone()
+		})
+	}
+
+	/// The part of a block of scaled text `id`'s cell holds, if any.
+	pub(crate) fn multicell(&self, id: u16) -> Option<&Multicell> {
+		self.entries.get(id as usize)?.multicell.as_deref()
+	}
+
+	/// The id for `id`'s content holding `multicell`, or `None` if the table is full.
+	pub(crate) fn with_multicell(&mut self, id: u16, multicell: Option<Multicell>) -> Option<u16> {
+		let current = self.entries.get(id as usize)?;
+		self.intern(Extra {
+			multicell: multicell.map(Box::new),
+			..current.clone()
 		})
 	}
 

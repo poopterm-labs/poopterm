@@ -132,6 +132,7 @@ impl Term {
 	pub(crate) fn scroll_region_up(&mut self, count: usize) {
 		let (top, bottom) = (self.scroll_top, self.scroll_bottom);
 		let count = count.min(bottom - top + 1);
+		self.split_multicells_above(&[top, bottom + 1]);
 		self.scroll_images(-(count as isize));
 		let blank = self.blank();
 		if top != 0 || bottom + 1 != self.rows || self.primary_screen.is_some() {
@@ -188,6 +189,7 @@ impl Term {
 	pub(crate) fn scroll_region_down(&mut self, count: usize) {
 		let (top, bottom) = (self.scroll_top, self.scroll_bottom);
 		let count = count.min(bottom - top + 1);
+		self.split_multicells_above(&[top, bottom + 1]);
 		self.scroll_images(count as isize);
 		let blank = self.blank();
 		self.grid.scroll_down(top, bottom, count, blank);
@@ -197,6 +199,7 @@ impl Term {
 	/// the current background, removing images that overlap it.
 	pub(crate) fn clear_range(&mut self, from: usize, to: usize) {
 		self.erase_images(from, to);
+		self.erase_multicells(from, to);
 		let end = to.min(self.rows * self.cols);
 		if from >= end {
 			return;

@@ -71,6 +71,7 @@ impl Term {
 			b"3008" => self.contexts.apply(&params[1..]),
 			b"1337" if params.len() >= 2 => self.osc_iterm(&params[1..], bell),
 			b"21337" => self.osc_session_status(&params[1..]),
+			b"66" => self.osc_text_size(&params[1..]),
 			_ => {}
 		}
 	}

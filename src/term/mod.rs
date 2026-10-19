@@ -29,6 +29,9 @@ mod kitty_animation;
 mod kitty_animation_tests;
 #[cfg(test)]
 mod kitty_tests;
+pub(crate) mod multicell;
+#[cfg(test)]
+mod multicell_tests;
 #[cfg(test)]
 mod notification_tests;
 pub(crate) mod notifications;
@@ -197,6 +200,9 @@ pub(crate) struct Term {
 	pub(crate) extras: Arc<extras::Extras>,
 	pub(crate) hyperlinks: Vec<String>,
 	pub(crate) wrap_pending: bool,
+	/// Whether blocks of scaled text (OSC 66) may be on screen; printing
+	/// and erasing take the slower paths that respect them.
+	pub(crate) has_multicells: bool,
 	pub(crate) charsets: [bool; 2],
 	pub(crate) active_charset: usize,
 	pub(crate) tab_stops: Vec<bool>,
@@ -374,6 +380,7 @@ impl Term {
 			extras: Arc::default(),
 			hyperlinks: vec![String::new()],
 			wrap_pending: false,
+			has_multicells: false,
 			charsets: [false; 2],
 			active_charset: 0,
 			tab_stops: (0..cols).map(|col| col > 0 && col % 8 == 0).collect(),

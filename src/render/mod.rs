@@ -5,4 +5,5 @@ pub(crate) mod fxhash;
 pub(crate) mod glyphs;
 pub(crate) mod grid;
 pub(crate) mod images;
+mod multicell;
 pub(crate) mod painter;

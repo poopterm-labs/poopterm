@@ -229,6 +229,7 @@ impl Term {
 				self.erase_images(self.cy * self.cols, (self.cy + 1) * self.cols);
 				let count = p(0, 1).min(self.cols - self.cx);
 				let (x, cols) = (self.cx, self.cols);
+				self.erase_multicells_for_shift(x, self.cy, count, true);
 				self.grid[self.cy].copy_within(x..cols - count, x + count);
 				let start = self.idx(x, self.cy);
 				self.clear_range(start, start + count);
@@ -237,6 +238,7 @@ impl Term {
 				self.erase_images(self.cy * self.cols, (self.cy + 1) * self.cols);
 				let count = p(0, 1).min(self.cols - self.cx);
 				let (x, cols) = (self.cx, self.cols);
+				self.erase_multicells_for_shift(x, self.cy, count, false);
 				self.grid[self.cy].copy_within(x + count..cols, x);
 				let end = self.idx(cols, self.cy);
 				self.clear_range(end - count, end);
@@ -249,6 +251,13 @@ impl Term {
 				self.erase_images(self.cy * self.cols, (self.scroll_bottom + 1) * self.cols);
 				let bottom = self.scroll_bottom.max(self.cy).min(self.rows - 1);
 				let count = p(0, 1).min(bottom + 1 - self.cy);
+				// Blocks that lines moving apart would cut are erased.
+				let (y, edge) = if action == 'L' {
+					(self.cy, bottom + 1 - count)
+				} else {
+					(self.cy, self.cy + count)
+				};
+				self.split_multicells_above(&[y, edge, bottom + 1]);
 				let blank = self.blank();
 				if action == 'L' {
 					self.grid.scroll_down(self.cy, bottom, count, blank);

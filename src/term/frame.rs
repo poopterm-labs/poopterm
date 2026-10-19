@@ -2,11 +2,19 @@
 //! render without blocking the parser thread.
 use std::collections::HashMap;
 
-use super::{Cell, CursorShape, NO_EXTRA, Term};
+use super::{Cell, CursorShape, NO_EXTRA, Term, multicell::Multicell};
 use crate::graphics::{
 	PlaceholderCell, Placement,
 	kitty::{PLACEHOLDER, PlaceholderInput, resolve_row},
 };
+
+/// What a frame keeps of a cell's extras.
+#[derive(Clone, Default)]
+struct FrameExtra {
+	link: bool,
+	marks: Box<[char]>,
+	multicell: Option<Multicell>,
+}
 
 /// The visible rows of a [`Term`] plus what the renderer needs to draw them.
 /// Buffers are reused between frames.
@@ -36,7 +44,7 @@ pub(crate) struct Frame {
 	/// Cells showing kitty images through Unicode placeholders, in row order.
 	pub placeholders: Vec<PlaceholderCell>,
 	/// Frame-local extras: `cell.extra` indexes this; 0 means none.
-	extras: Vec<(bool, Box<[char]>)>,
+	extras: Vec<FrameExtra>,
 }
 
 impl Frame {
@@ -50,7 +58,12 @@ impl Frame {
 		self
 			.extras
 			.get(cell.extra as usize)
-			.map_or(&[], |(_, marks)| marks)
+			.map_or(&[], |extra| &extra.marks)
+	}
+
+	/// The part of a block of scaled text `cell` holds, if any.
+	pub(crate) fn multicell(&self, cell: &Cell) -> Option<&Multicell> {
+		self.extras.get(cell.extra as usize)?.multicell.as_ref()
 	}
 
 	/// Whether row `row` looks the same as `other`'s row `other_row`: same
@@ -63,7 +76,9 @@ impl Frame {
 			same_cell
 				&& (a.extra == NO_EXTRA) == (b.extra == NO_EXTRA)
 				&& (a.extra == NO_EXTRA
-					|| (self.marks(a) == other.marks(b) && self.is_link(a) == other.is_link(b)))
+					|| (self.marks(a) == other.marks(b)
+						&& self.is_link(a) == other.is_link(b)
+						&& self.multicell(a) == other.multicell(b)))
 		})
 	}
 
@@ -79,7 +94,7 @@ impl Frame {
 		self
 			.extras
 			.get(cell.extra as usize)
-			.is_some_and(|&(link, _)| link)
+			.is_some_and(|extra| extra.link)
 	}
 }
 
@@ -127,14 +142,15 @@ impl Term {
 		// Copy the extras visible cells use instead of sharing the table: the
 		// parser updates it copy-on-write and would otherwise clone it.
 		frame.extras.clear();
-		frame.extras.push((false, Box::default()));
+		frame.extras.push(FrameExtra::default());
 		let mut local = HashMap::new();
 		for cell in frame.cells.iter_mut().filter(|cell| cell.extra != NO_EXTRA) {
 			cell.extra = *local.entry(cell.extra).or_insert_with(|| {
-				let link = self.extras.hyperlink(cell.extra) != 0;
-				frame
-					.extras
-					.push((link, self.extras.marks(cell.extra).into()));
+				frame.extras.push(FrameExtra {
+					link: self.extras.hyperlink(cell.extra) != 0,
+					marks: self.extras.marks(cell.extra).into(),
+					multicell: self.extras.multicell(cell.extra).cloned(),
+				});
 				(frame.extras.len() - 1) as u16
 			});
 		}
@@ -250,5 +266,24 @@ mod tests {
 		assert!(frame.is_link(&row[1]));
 		assert!(frame.marks(&row[2]).is_empty() && !frame.is_link(&row[2]));
 		assert_eq!(std::sync::Arc::strong_count(&term.extras), 1);
+	}
+
+	#[test]
+	fn rows_with_different_scaled_text_differ() {
+		let snapshot = |text| {
+			let mut frame = Frame::default();
+			term(4, 1, text).snapshot(&mut frame);
+			frame
+		};
+		let (ab, ac) = (
+			snapshot("\x1b]66;w=1;ab\x07"),
+			snapshot("\x1b]66;w=1;ac\x07"),
+		);
+		assert_eq!(
+			ab.multicell(&ab.row(0)[0]).map(|part| &*part.text),
+			Some("ab")
+		);
+		assert!(ab.row_matches(0, &snapshot("\x1b]66;w=1;ab\x07"), 0));
+		assert!(!ab.row_matches(0, &ac, 0));
 	}
 }
