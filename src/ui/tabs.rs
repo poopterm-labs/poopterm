@@ -175,17 +175,18 @@ pub(crate) fn tab_layout_with_compaction(
 	let (tab_width, compact_width, visible_count) = if compact_tabs && count > 1 {
 		let min_compact = 80 * scale;
 		let min_active = 144 * scale;
+		let preferred_active = 320 * scale;
 		let slots = (room.saturating_sub(min_active) / (min_compact + gap) + 1).max(1);
 		let visible_count = slots.min(count).max(1);
 		let base_room = room.saturating_sub(visible_count.saturating_sub(1) * gap);
 		let first_visible = scroll.min(count.saturating_sub(visible_count));
 		let active_visible = (first_visible..first_visible + visible_count).contains(&active_tab);
 		if active_visible && visible_count > 1 {
-			let compact_width = (base_room.saturating_sub(min_active) / (visible_count - 1))
+			let compact_width = (base_room.saturating_sub(preferred_active) / (visible_count - 1))
 				.clamp(min_compact, 180 * scale);
 			let active_width = base_room
 				.saturating_sub(compact_width * (visible_count - 1))
-				.min(320 * scale);
+				.min(preferred_active);
 			(active_width, compact_width, visible_count)
 		} else if active_visible {
 			(room.min(220 * scale), room.min(220 * scale), visible_count)
@@ -249,7 +250,7 @@ pub(crate) fn vertical_tab_layout(
 	let button_height = if compact_rail { 24 } else { 28 } * scale;
 	let button_width = if compact_rail { 24 } else { 32 } * scale;
 	let row_height = if compact_rail { 40 } else { 32 } * scale;
-	let compact_row_height = if compact_rail { row_height } else { 24 * scale };
+	let compact_row_height = row_height;
 	let tab_start_y = top_reserve + 8 * scale;
 	let bottom_buttons = show_plus || show_settings;
 	let button_y = bottom_buttons.then(|| {
@@ -336,6 +337,25 @@ mod tests {
 		assert_eq!(layout.plus_w, 0);
 		assert_eq!(layout.settings_w, 0);
 		assert!(layout.visible_count > tab_layout(980, 20, 1, 0, 0, true, true).visible_count);
+	}
+
+	#[test]
+	fn horizontal_compaction_keeps_the_active_tab_wider_when_room_allows() {
+		let layout = tab_layout_with_compaction(
+			1280,
+			6,
+			1,
+			TabStripOptions {
+				left_reserve: 0,
+				scroll: 0,
+				show_plus: true,
+				show_settings: true,
+				active_tab: 2,
+				compact_tabs: true,
+			},
+		);
+
+		assert!(layout.width > layout.compact_width);
 	}
 
 	#[test]
