@@ -1,0 +1,382 @@
+//! Differential tests: the parser must produce the same events as vte 0.15
+//! for any byte stream, however it is split into reads.
+use super::{Handler, Params, Parser};
+use crate::bench::corpus::Rng;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Event {
+	Print(String),
+	Execute(u8),
+	Csi(Vec<Vec<u16>>, Vec<u8>, bool, u8),
+	Esc(Vec<u8>, bool, u8),
+	Osc(Vec<Vec<u8>>, bool),
+	Hook(Vec<Vec<u16>>, Vec<u8>, bool, u8),
+	Put(Vec<u8>),
+	Unhook,
+	Apc(Vec<u8>, bool),
+}
+
+/// Records events, merging adjacent text and payload so that how either
+/// parser splits them does not matter.
+#[derive(Default)]
+struct Recorder {
+	events: Vec<Event>,
+	apc: Option<Vec<u8>>,
+}
+
+impl Recorder {
+	fn text(&mut self, text: &str) {
+		if let Some(Event::Print(last)) = self.events.last_mut() {
+			last.push_str(text);
+		} else {
+			self.events.push(Event::Print(text.to_owned()));
+		}
+	}
+
+	fn payload(&mut self, bytes: &[u8]) {
+		if let Some(Event::Put(last)) = self.events.last_mut() {
+			last.extend_from_slice(bytes);
+		} else {
+			self.events.push(Event::Put(bytes.to_vec()));
+		}
+	}
+
+	/// Events vte also reports: everything but APC strings.
+	fn without_apc(&self) -> Vec<Event> {
+		let mut recorder = Recorder::default();
+		for event in &self.events {
+			match event {
+				Event::Apc(..) => {}
+				Event::Print(text) => recorder.text(text),
+				Event::Put(bytes) => recorder.payload(bytes),
+				other => recorder.events.push(other.clone()),
+			}
+		}
+		recorder.events
+	}
+}
+
+fn groups(params: impl Iterator<Item = impl AsRef<[u16]>>) -> Vec<Vec<u16>> {
+	params.map(|group| group.as_ref().to_vec()).collect()
+}
+
+impl vte::Perform for Recorder {
+	fn print(&mut self, c: char) {
+		self.text(c.encode_utf8(&mut [0; 4]));
+	}
+	fn execute(&mut self, byte: u8) {
+		self.events.push(Event::Execute(byte));
+	}
+	fn hook(&mut self, params: &vte::Params, intermediates: &[u8], ignore: bool, action: char) {
+		let event = Event::Hook(
+			groups(params.iter()),
+			intermediates.to_vec(),
+			ignore,
+			action as u8,
+		);
+		self.events.push(event);
+	}
+	fn put(&mut self, byte: u8) {
+		self.payload(&[byte]);
+	}
+	fn unhook(&mut self) {
+		self.events.push(Event::Unhook);
+	}
+	fn osc_dispatch(&mut self, params: &[&[u8]], bell: bool) {
+		self.events.push(Event::Osc(
+			params.iter().map(|p| p.to_vec()).collect(),
+			bell,
+		));
+	}
+	fn csi_dispatch(
+		&mut self,
+		params: &vte::Params,
+		intermediates: &[u8],
+		ignore: bool,
+		action: char,
+	) {
+		let event = Event::Csi(
+			groups(params.iter()),
+			intermediates.to_vec(),
+			ignore,
+			action as u8,
+		);
+		self.events.push(event);
+	}
+	fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
+		self
+			.events
+			.push(Event::Esc(intermediates.to_vec(), ignore, byte));
+	}
+}
+
+impl Handler for Recorder {
+	fn print_ascii(&mut self, text: &[u8]) {
+		assert!(
+			text.iter().all(|byte| (0x20..0x7f).contains(byte)),
+			"{text:?}"
+		);
+		self.text(std::str::from_utf8(text).unwrap());
+	}
+	fn print(&mut self, text: &str) {
+		assert!(!text.is_empty());
+		assert!(
+			!text
+				.chars()
+				.any(|c| c < ' ' || ('\u{80}'..='\u{9f}').contains(&c)),
+			"{text:?}"
+		);
+		self.text(text);
+	}
+	fn execute(&mut self, byte: u8) {
+		self.events.push(Event::Execute(byte));
+	}
+	fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: u8) {
+		self.events.push(Event::Csi(
+			groups(params.iter()),
+			intermediates.to_vec(),
+			ignore,
+			action,
+		));
+	}
+	fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
+		self
+			.events
+			.push(Event::Esc(intermediates.to_vec(), ignore, byte));
+	}
+	fn osc_dispatch(&mut self, params: &[&[u8]], bell: bool) {
+		self.events.push(Event::Osc(
+			params.iter().map(|p| p.to_vec()).collect(),
+			bell,
+		));
+	}
+	fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: u8) {
+		self.events.push(Event::Hook(
+			groups(params.iter()),
+			intermediates.to_vec(),
+			ignore,
+			action,
+		));
+	}
+	fn put(&mut self, bytes: &[u8]) {
+		assert!(!bytes.is_empty());
+		self.payload(bytes);
+	}
+	fn unhook(&mut self) {
+		self.events.push(Event::Unhook);
+	}
+	fn apc_start(&mut self) {
+		assert!(self.apc.replace(Vec::new()).is_none(), "nested APC");
+	}
+	fn apc_put(&mut self, bytes: &[u8]) {
+		self
+			.apc
+			.as_mut()
+			.expect("APC started")
+			.extend_from_slice(bytes);
+	}
+	fn apc_end(&mut self, complete: bool) {
+		let apc = self.apc.take().expect("APC started");
+		self.events.push(Event::Apc(apc, complete));
+	}
+}
+
+fn reference(stream: &[u8]) -> Vec<Event> {
+	let mut recorder = Recorder::default();
+	vte::Parser::new().advance(&mut recorder, stream);
+	recorder.events
+}
+
+/// Feeds `stream` in reads that end at `splits`.
+fn ours(stream: &[u8], splits: &[usize]) -> Recorder {
+	let mut recorder = Recorder::default();
+	let mut parser = Parser::new();
+	let mut start = 0;
+	for &end in splits.iter().chain([&stream.len()]) {
+		parser.advance(&mut recorder, &stream[start..end]);
+		start = end;
+	}
+	recorder
+}
+
+fn agrees(stream: &[u8], splits: &[usize]) -> bool {
+	ours(stream, splits).without_apc() == reference(stream)
+}
+
+/// Panics with the smallest stream (removing bytes one at a time) that still
+/// disagrees, read whole or byte by byte as `bytewise` says.
+fn check_with(stream: &[u8], splits: &[usize], bytewise: bool) {
+	if agrees(stream, splits) {
+		return;
+	}
+	let all = |len: usize| {
+		if bytewise {
+			(1..len).collect()
+		} else {
+			Vec::new()
+		}
+	};
+	let mut stream = stream.to_vec();
+	if bytewise || splits.is_empty() {
+		let mut index = 0;
+		while index < stream.len() {
+			let mut smaller = stream.clone();
+			smaller.remove(index);
+			if !agrees(&smaller, &all(smaller.len())) {
+				stream = smaller;
+			} else {
+				index += 1;
+			}
+		}
+	}
+	let splits = if bytewise || splits.is_empty() {
+		all(stream.len())
+	} else {
+		splits.to_vec()
+	};
+	let actual = ours(&stream, &splits).without_apc();
+	let expected = reference(&stream);
+	panic!(
+		"stream {:?}\nsplits {splits:?}\nours {actual:#?}\nvte  {expected:#?}",
+		String::from_utf8_lossy(&stream).escape_debug().to_string() + &format!(" {stream:x?}")
+	);
+}
+
+fn check(stream: &[u8], splits: &[usize]) {
+	check_with(stream, splits, false);
+}
+
+/// Pieces that exercise every state and transition, joined at random.
+fn fragment(rng: &mut Rng, out: &mut Vec<u8>) {
+	const PIECES: &[&[u8]] = &[
+		b"hello world ",
+		b"\x1b[",
+		b"\x1b]",
+		b"\x1bP",
+		b"\x1b_",
+		b"\x1bX",
+		b"\x1b^",
+		b"\x1b\\",
+		b"\x1b(B",
+		b"\x1b#8",
+		b"\x1b !#M",
+		b"\x1b7",
+		b"\x1b[38:2::10:20:30m",
+		b"\x1b[?2026h",
+		b"\x1b[>4;2m",
+		b"\x1b[ q",
+		b"\x1b[1;2;3$|",
+		b"\x1b[?$p",
+		b"\x1b]0;title\x07",
+		b"\x1b]8;;http://x\x1b\\",
+		b"\x1b]52;c;aGk=\x1b\\",
+		b"\x1bP0;1;0q#0;2;0;0;0!10~-\x1b\\",
+		b"\x1bP$q\"p\x1b\\",
+		b"\x1b_Ga=T,f=32;AAAA\x1b\\",
+		b"\xc3\xa9",
+		b"\xe2\x94\x80",
+		b"\xf0\x9f\x98\x80",
+		b"\xe7\x8c\xab",
+		b"\xc2\x85",
+		b"\xc2\x9b",
+		b"\xed\xa0\x80",
+		b"\xc0\xaf",
+		b"\xf4\x90\x80\x80",
+	];
+	const BYTES: &[u8] = &[
+		0x00, 0x07, 0x08, 0x0a, 0x0d, 0x18, 0x1a, 0x1b, 0x1c, 0x1f, b' ', b'0', b'9', b':', b';', b'<',
+		b'?', b'!', b'$', b'@', b'm', b'~', b'\\', 0x7f, 0x80, 0x90, 0x9b, 0x9c, 0x9d, 0xa0, 0xbf,
+		0xc2, 0xe2, 0xf0, 0xf5, 0xff,
+	];
+	match rng.below(10) {
+		0..=4 => out.extend_from_slice(rng.pick(PIECES)),
+		5..=7 => out.push(*rng.pick(BYTES)),
+		8 => out.extend((0..rng.below(40)).map(|_| b'0' + rng.below(10) as u8)),
+		_ => {
+			// Long parameter lists overflow the parameter storage.
+			for _ in 0..rng.below(40) {
+				out.extend_from_slice(rng.pick(&[&b"1;"[..], b"22:", b"333", b";", b":"]));
+			}
+		}
+	}
+}
+
+#[test]
+fn matches_vte_on_random_streams_split_at_random() {
+	let mut rng = Rng::new(0x5eed);
+	for _ in 0..20_000 {
+		let mut stream = Vec::new();
+		for _ in 0..1 + rng.below(24) {
+			fragment(&mut rng, &mut stream);
+		}
+		let mut splits: Vec<usize> = (0..rng.below(4))
+			.map(|_| rng.below(stream.len() + 1))
+			.collect();
+		splits.sort_unstable();
+		check(&stream, &[]);
+		check(&stream, &splits);
+	}
+}
+
+#[test]
+fn matches_vte_when_every_byte_is_a_separate_read() {
+	let mut rng = Rng::new(7);
+	for _ in 0..2_000 {
+		let mut stream = Vec::new();
+		for _ in 0..1 + rng.below(12) {
+			fragment(&mut rng, &mut stream);
+		}
+		let splits: Vec<usize> = (1..stream.len()).collect();
+		check_with(&stream, &splits, true);
+	}
+}
+
+#[test]
+fn matches_vte_on_long_runs_across_vector_boundaries() {
+	let mut stream = Vec::new();
+	for len in [31, 32, 33, 63, 64, 65, 200] {
+		stream.extend(std::iter::repeat_n(b'a', len));
+		stream.extend_from_slice("é猫".as_bytes());
+		stream.extend(std::iter::repeat_n(b'b', len));
+		stream.extend_from_slice(b"\x1b]2;");
+		stream.extend(std::iter::repeat_n(b't', len));
+		stream.extend_from_slice(b"\x07\x1bPq");
+		stream.extend(std::iter::repeat_n(b'~', len));
+		stream.extend_from_slice(b"\x1b\\");
+	}
+	check(&stream, &[]);
+	check(&stream, &[1, 33, 100, 500]);
+}
+
+#[test]
+fn delivers_apc_strings_in_pieces() {
+	let stream = b"a\x1b_Gi=1;AAAA\x1b\\b\x1b_x\x18c";
+	for split in 0..stream.len() {
+		let events = ours(stream, &[split]).events;
+		assert_eq!(
+			events,
+			[
+				Event::Print("a".into()),
+				Event::Apc(b"Gi=1;AAAA".to_vec(), true),
+				Event::Esc(vec![], false, b'\\'),
+				Event::Print("b".into()),
+				Event::Apc(b"x".to_vec(), false),
+				Event::Execute(0x18),
+				Event::Print("c".into()),
+			],
+			"split at {split}"
+		);
+	}
+}
+
+#[test]
+fn oversized_osc_strings_are_dropped() {
+	let mut stream = b"\x1b]0;".to_vec();
+	stream.resize(super::MAX_OSC_BYTES + 10, b'x');
+	stream.extend_from_slice(b"\x07\x1b]0;ok\x07");
+	let events = ours(&stream, &[4096]).events;
+	assert_eq!(
+		events,
+		[Event::Osc(vec![b"0".to_vec(), b"ok".to_vec()], true)]
+	);
+}

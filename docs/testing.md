@@ -51,9 +51,10 @@ fn erase_line_keeps_the_current_background() {
 - Name tests after the behavior (`no_wrap_overwrites_last_column`), not the
   function.
 
-When fixing a parser bug, also consider adding the triggering sequence to
-the fragment list of `batched_printing_matches_per_character_printing`, so
-the fast path and vte stay in agreement.
+When fixing a parser bug, add the triggering sequence to the fragments in
+`vt/tests.rs` (tokenizer events against vte) and, when it affects terminal
+state, to `batched_printing_matches_per_character_printing`. A failing
+`vt/tests.rs` case is shrunk to a minimal stream automatically.
 
 ## Pure functions over UI state
 

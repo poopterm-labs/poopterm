@@ -93,7 +93,7 @@ CSI-heavy 59.5 → 110 MB/s.
 | Each line feed memmoved the whole screen. | Row-based `Grid`; scrolling rotates rows and moves scrolled-off rows into the scrollback. | `term/grid.rs` |
 | Cells were 52 bytes, because an inline `[char; 8]` was reserved for combining marks. | 16-byte cells; marks and hyperlinks interned in a side table. | `term/extras.rs` |
 | Every printed character re-derived its style and checked clusters and wide characters. | ASCII runs printed with one cell template per row segment. | `parser/print.rs` |
-| vte dispatches one callback per character. | SIMD ground-state fast path; batching on the vte path. | `parser/mod.rs`, `parser/scan.rs` |
+| vte dispatches one callback per character. | SIMD ground-state fast path; batching on the vte path. Later replaced by the in-house tokenizer. | `src/vt` |
 | Every erase repaired wide characters on every row. | Repair only the touched row. | `parser/csi.rs` |
 | Each drawn cell did two SipHash lookups plus a fontdue lookup. | One FxHash lookup per cell. | `render/glyphs.rs` |
 | `config.toml` was read from disk on every key press. | Shortcuts parsed once. | `input/shortcuts.rs` |
@@ -138,9 +138,10 @@ ranged 89–97 MB/s over the day).
 ## Where the time goes now
 
 During a flood the parser thread is the bottleneck: it is ~100% busy and the
-queue stays near full. On Unicode output, vte's `ground_dispatch` plus UTF-8
-validation take ~55% of parser time; on ASCII output, line feeds
-(`scroll_region_up`: scrollback `Arc` allocation and row blanking) take ~20%.
+queue stays near full. On Unicode output, `Term::print_text` (width lookup
+and cell writes) is ~60% of parser time and UTF-8 validation ~16%; on ASCII
+output, line feeds (`scroll_region_up`: scrollback `Arc` allocation and row
+blanking) take ~20%.
 The plan toward 200 MB/s is in [`TODO.md`](../TODO.md).
 
 ## Follow-up work (26.10)

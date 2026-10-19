@@ -61,30 +61,41 @@ deadlock, so debug builds track held locks and panic instead.
 - The alternate screen swaps in a fresh `Grid` and keeps the primary one in
   `primary_screen`.
 
-## Parsing (`src/parser`)
+## Tokenizing (`src/vt`)
 
-`vte` turns bytes into callbacks (`print`, `execute`, `csi_dispatch`, …).
-The plan to replace it with an in-house parser is in [`vte-design.md`](vte-design.md).
-Poopterm adds three layers around it, all in `parser/mod.rs`:
+`vt::Parser` is poopterm's own escape-sequence tokenizer: the DEC/ECMA-48
+state machine, written from the specifications, with SIMD scans
+(`vt/simd.rs`, `u8x32`) that find where bulk work ends. It calls a
+`vt::Handler`:
 
-1. **Split UTF-8 carry.** A trailing incomplete UTF-8 sequence is held back
-   and completed from the next read. vte 0.15 drops up to two bytes after a
-   character split across `advance` calls, so it must only see whole
-   characters.
-2. **Ground-state fast path.** While vte is known to be in its ground state,
-   `Parser::feed` scans with `u8x32` SIMD compares (`parser/scan.rs`) and
-   handles printable ASCII runs (`Term::print_ascii`) and C0 controls itself.
-   On ESC or a non-ASCII byte it hands over to vte with
-   `advance_until_terminated`, stopping at the first callback after which vte
-   is always back in ground state: CSI or ESC dispatch, a BEL-terminated OSC,
-   or CAN/SUB. Any other path keeps using vte, which is always correct.
-3. **Batching.** On the vte path, `Batch` collects consecutive printable ASCII
-   `print` calls into runs for `Term::print_ascii`.
+- **Text in runs.** Ground state scans to the next C0 control in one pass.
+  Pure printable ASCII goes to `print_ascii(&[u8])`; anything else is
+  validated once (`str::from_utf8`) and goes to `print(&str)`, with C1
+  controls (U+0080–U+009F) split out and executed.
+- **Payloads in slices.** OSC fields, DCS payloads (`put(&[u8])`, Sixel) and
+  APC strings (`apc_start` / `apc_put` / `apc_end`, the kitty graphics
+  protocol) are scanned in bulk, not byte by byte. OSC strings over 4 MiB
+  are dropped.
+- **CSI parameters in a tight loop** (`sequence.rs`), entered straight from
+  ground state on `ESC [`. Anything unusual falls back to the general
+  per-byte state machine, so both paths always agree.
+- **Split reads.** A UTF-8 character split across reads is completed from
+  the next one; sequences carry their state across reads.
 
-The per-family handlers (`csi.rs`, `esc.rs`, `osc.rs`, `sgr.rs`, `print.rs`)
-are `impl Term` blocks. A differential test feeds random streams through the
-fast path and through vte driving `Term` directly, and requires identical
-results.
+Semantics match vte 0.15, which stays as a dev-dependency: `vt/tests.rs`
+feeds random streams through both and requires identical events, with our
+side split into random reads (and byte-by-byte). Known differences on
+purpose: APC strings are delivered (vte drops them), and characters split
+across reads are not corrupted (vte 0.15 drops bytes after them).
+
+## Applying sequences (`src/parser`)
+
+`parser::Parser` wraps `vt::Parser` with `Term` as the handler. The
+per-family handlers (`csi.rs`, `esc.rs`, `osc.rs`, `sgr.rs`, `print.rs`)
+are `impl Term` blocks. `batched_printing_matches_per_character_printing`
+feeds random streams through `parser::Parser` and through vte driving
+`Term` one character at a time (`parser::PerCharacter`), and requires
+identical terminal state.
 
 ## Rendering (`src/render`, `src/app/draw*.rs`)
 

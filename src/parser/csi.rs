@@ -53,20 +53,11 @@ impl Term {
 			self.wrap_pending = false;
 		}
 
-		// Optimized parameter extraction helper avoiding heavy iterator re-allocations
-		let p = |i: usize, d: u16| {
-			params
-				.iter()
-				.nth(i)
-				.and_then(|s| s.first().copied())
-				.filter(|&v| v != 0)
-				.unwrap_or(d) as usize
-		};
-		let raw0 = params
-			.iter()
-			.next()
-			.and_then(|s| s.first().copied())
-			.unwrap_or(0);
+		// These sequences read at most two parameters; 0 and a missing value
+		// both mean the default `d`.
+		let leading = [0, 1].map(|i| params.get(i).and_then(|s| s.first().copied()).unwrap_or(0));
+		let p = |i: usize, d: u16| usize::from(if leading[i] == 0 { d } else { leading[i] });
+		let raw0 = leading[0];
 
 		if private && matches!(action, 'h' | 'l') {
 			let enabled = action == 'h';

@@ -1,7 +1,10 @@
 # Replacing vte: design for an in-house escape-sequence parser
 
-Status: **plan**. Nothing here is implemented yet. This document describes
-how Poopterm will replace the `vte` crate (currently `vte = "^0.15"`) with
+Status: **implemented** in `src/vt` (phases 0–3: tokenizer, differential
+tests, switch-over; vte is now a dev-dependency only). APC delivery for the
+kitty graphics protocol is in place. The text below is the original plan,
+kept for its reasoning; `docs/architecture.md` describes what was built.
+This document describes how Poopterm will replace the `vte` crate (currently `vte = "^0.15"`) with
 its own batch-oriented, SIMD-accelerated parser, and how to get there in
 small steps that each ship on `main`.
 

@@ -1,6 +1,6 @@
 //! Terminal-emulation tests: bytes in, grid state out.
 use crate::{
-	parser::Parser,
+	parser::{Parser, PerCharacter},
 	shell_integration::{self, decode_uri_path},
 	term::{Cell, Term},
 	theme::{Theme, ThemeKind},
@@ -583,7 +583,7 @@ fn batched_printing_matches_per_character_printing() {
 		for chunk in stream.chunks(7) {
 			parser.advance(&mut batched, chunk);
 		}
-		vte::Parser::new().advance(&mut reference, &stream);
+		vte::Parser::new().advance(&mut PerCharacter(&mut reference), &stream);
 		assert_eq!(
 			(batched.cx, batched.cy, batched.wrap_pending),
 			(reference.cx, reference.cy, reference.wrap_pending),
@@ -767,7 +767,7 @@ fn utf8_and_common_csi_match_vte_at_every_read_boundary() {
 	)
 	.as_bytes();
 	let mut reference = terminal(9, 5);
-	vte::Parser::new().advance(&mut reference, stream);
+	vte::Parser::new().advance(&mut PerCharacter(&mut reference), stream);
 	let mut expected = super::Frame::default();
 	reference.snapshot(&mut expected);
 	for boundary in 0..=stream.len() {

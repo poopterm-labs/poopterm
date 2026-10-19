@@ -6,7 +6,7 @@ other agent-specific files only point here.
 
 Poopterm is a software-rendered terminal emulator written in Rust: winit for
 windows, softbuffer for pixels, fontdue for glyphs, portable-pty for shells,
-and vte for tokenizing escape sequences.
+and its own SIMD escape-sequence tokenizer (`src/vt`), tested against vte.
 
 ## Quick reference
 
@@ -53,7 +53,7 @@ show a reproducible gain.
 
 ```
 PTY reader thread ──► pty::OutputQueue ──► parser thread (pty::pump) ──► term::SharedTerm
-                        (backpressure)        parser::Parser (vte + SIMD)     (Mutex<Term>)
+                        (backpressure)        parser::Parser (vt + SIMD)      (Mutex<Term>)
                                                    │ wake once per batch          │
                                                    ▼                              │ snapshot
 input events ──► App (UI thread) ──► input::{keys,mouse,paste} ──► pty::PtyWriter ──► shell
@@ -65,7 +65,8 @@ input events ──► App (UI thread) ──► input::{keys,mouse,paste} ─�
 | Path | Responsibility |
 |------|----------------|
 | `src/term/` | Terminal state: `Grid` (one `Vec<Cell>` per row), scrollback, cursor, modes, Sixel placement, synchronized output. `Cell` is 16 bytes; combining marks and hyperlinks live in `term::extras`. `SharedTerm` is the lock shared with the parser thread; `Frame` is the copy the renderer draws. |
-| `src/parser/` | Applies escape sequences to `Term`. `mod.rs` holds the ground-state SIMD fast path and the vte bridge; `csi`, `esc`, `osc`, `sgr`, `print` apply each family. |
+| `src/vt/` | Escape-sequence tokenizer: the DEC state machine with SIMD scans, handing text, CSI/ESC/OSC/DCS/APC events to a `vt::Handler`. vte is only a test oracle. |
+| `src/parser/` | Applies `vt` events to `Term` (`impl Handler for Term`); `csi`, `esc`, `osc`, `sgr`, `print` apply each family. |
 | `src/pty/` | Shell process, reader and parser threads (`pump`), `OutputQueue`, non-blocking `PtyWriter`. |
 | `src/input/` | Pure encoders: keys, mouse reports, paste, scroll, shortcuts. |
 | `src/render/` | Pure drawing: `Painter`, `FontSet` glyph cache, grid renderer, row damage, SIMD blending. |
@@ -91,10 +92,11 @@ Details: [`docs/architecture.md`](docs/architecture.md).
   (debug builds panic instead of deadlocking). Watch for temporaries:
   `let x = a(self.active_term().y) && self.b()` keeps the guard alive for
   the whole statement. Render from a `term::Frame`, never under the lock.
-- **The parser fast path must agree with vte.** Any change to
-  `parser::Parser::feed`, `Batch`, or `Term::print_ascii` must keep
-  `batched_printing_matches_per_character_printing` green; extend its
-  fragment list when you add new cases.
+- **The tokenizer must agree with vte.** Any change to `src/vt` must keep
+  the differential tests in `vt/tests.rs` green, and any change to
+  `Term::print_ascii` / `print_text` must keep
+  `batched_printing_matches_per_character_printing` green; extend their
+  fragment lists when you add new cases.
 - **Bounds on untrusted input.** Escape sequences come from arbitrary
   programs. Keep explicit limits (Sixel size, OSC 52 size, hyperlink count,
   titles) and never answer requests that leak data (OSC 52 reads are ignored

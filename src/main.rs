@@ -24,6 +24,7 @@ mod term;
 mod terminfo;
 mod theme;
 mod ui;
+mod vt;
 mod wallpaper;
 
 use std::{env, error::Error};
