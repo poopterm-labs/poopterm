@@ -21,6 +21,7 @@ mod params;
 mod print;
 mod sgr;
 mod utf8;
+mod window_ops;
 
 use crate::{
 	term::Term,

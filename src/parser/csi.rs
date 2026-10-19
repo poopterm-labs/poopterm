@@ -71,7 +71,7 @@ impl Term {
 			}
 			return;
 		}
-		if !matches!(action, 'm' | 'n' | 'c' | 'h' | 'l' | 's' | 'u') {
+		if !matches!(action, 'm' | 'n' | 'c' | 'h' | 'l' | 's' | 'u' | 't') {
 			self.wrap_pending = false;
 		}
 
@@ -265,6 +265,7 @@ impl Term {
 				_ => {}
 			},
 			'c' => self.responses.push(b"\x1b[?62;4;6c".to_vec()),
+			't' if !private => self.window_op(leading[0], leading[1]),
 			'b' => {
 				if let Some(c) = self.last_printed {
 					for _ in 0..p(0, 1).min(self.cols * self.rows) {

@@ -62,9 +62,8 @@ impl Term {
 				if params[0] != b"2" {
 					self.icon_name.clone_from(&title);
 				}
-				if params[0] != b"1" && self.title != title {
-					self.title = title;
-					self.title_generation = self.title_generation.wrapping_add(1);
+				if params[0] != b"1" {
+					self.set_title(title);
 				}
 			}
 			b"7" if params.len() >= 2 => self.osc_cwd_uri(params[1]),
@@ -73,6 +72,16 @@ impl Term {
 			b"1337" if params.len() >= 2 => self.osc_iterm(&params[1..], bell),
 			b"21337" => self.osc_session_status(&params[1..]),
 			_ => {}
+		}
+	}
+}
+
+impl Term {
+	/// Sets the window title, redrawing the tab if it changed.
+	pub(super) fn set_title(&mut self, title: String) {
+		if self.title != title {
+			self.title = title;
+			self.title_generation = self.title_generation.wrapping_add(1);
 		}
 	}
 }
