@@ -93,19 +93,49 @@ prompts, 10% on emoji).
 
 ## Results
 
-Intel i3-N305 (8 E-cores, AVX2), Linux, X11 window at 100×30 cells.
+Intel i3-N305 (8 E-cores, AVX2), Linux, 26.10.3 plus the synchronized-output
+and combining-mark changes below (`d48ebd6`), plain release build (no PGO).
+**End to end** is `scripts/bench-throughput.py --mib 16 --repeat 3` in a
+poopterm window of 100×30 cells (median MB/s); **headless** is
+`poopterm --benchmark --mib 16 --no-render` at 120×40, starting from a full
+scrollback.
 
-| Payload | Before (0.43.0) | After | Main change |
-|---------|---------------:|------:|-------------|
+| Workload | End to end | Headless |
+|----------|-----------:|---------:|
+| log (plain ASCII) | 86 | 204 |
+| compiler (colors, hyperlinks) | 77 | 122 |
+| ls --color | 86 | 143 |
+| source (highlighted) | 105 | 131 |
+| unicode (accented, Greek, Cyrillic) | 83 | 92 |
+| cjk | 86 | 102 |
+| emoji (ZWJ, combining marks) | 63 | 69 |
+| tui (sync blocks, htop-like) | 161 | 175 |
+| editor (scroll regions) | 159 | 165 |
+| progress bars | 175 | 190 |
+| truecolor half blocks | 248 | 261 |
+| cursor motion | 119 | 123 |
+| shell prompts (OSC 133/7/0/8) | 90 | 115 |
+| sixel | 72 | 76 |
+| kitty-rgba | 301 | 1021 |
+| kitty-png | 108 | 111 |
+| kitty-zlib | 224 | 233 |
+| **overall** | **108** | **133** |
+
+End-to-end figures sit below headless ones where the PTY and the window
+cost more than parsing: plain ASCII parses at 200 MB/s but arrives at
+86 MB/s, and raw kitty RGBA is limited by the PTY, not the decoder. Where
+parsing dominates (emoji, Unicode, tui) the two are close.
+
+### Before 26.10
+
+The first round of work, 0.43.0 to 26.10.0, on an X11 window at 100×30:
+
+| Payload | 0.43.0 | 26.10.0 | Main change |
+|---------|-------:|--------:|-------------|
 | ASCII | 0.3 MB/s | ~100 MB/s | pipeline, pacing, row grid, SIMD fast path |
 | Unicode | 0.3 MB/s | ~65 MB/s | pipeline, pacing, row grid, 16-byte cells |
 | CSI-heavy | 0.3 MB/s | ~112 MB/s | pipeline, pacing |
 | Cursor movement | 0.3 MB/s | ~58 MB/s | pipeline, pacing |
-
-The ASCII figure is the median of 64 MiB runs; 16 MiB runs read around 87 MB/s.
-
-Parser alone (200×50 grid): ASCII 4.4 → 131 MB/s, Unicode 3.0 → 57 MB/s,
-CSI-heavy 59.5 → 110 MB/s.
 
 ## What changed, and why
 
@@ -157,13 +187,32 @@ either:
 These differences are within run-to-run noise (the baseline's ASCII figure
 ranged 89–97 MB/s over the day).
 
+## Synchronized output and combining marks (26.10)
+
+- **History-dependent costs were invisible.** Each headless run used a
+  fresh terminal, so tui read 188 MB/s while a real terminal with a full
+  scrollback managed 30. Every `?2026` block cloned the whole `Term`,
+  scrollback and image stores included. Runs now start from a full
+  scrollback, and a block freezes one `Frame` of the visible screen instead
+  (`term/sync.rs`): tui went from 32 to about 180 MB/s headless.
+- **Interning combining marks** hashed a freshly built entry with SipHash
+  for every mark. Hashing in one write and looking up once (`term/extras.rs`)
+  recovered a 10% regression; a 256-slot cache of `(id, mark) → id` in front
+  of the table took emoji from 43 to 69 MB/s headless. SipHash stays,
+  because programs choose the hashed content.
+- **Titles** set by prompts on every line were filtered character by
+  character; short printable-ASCII titles are now copied whole (shell +7%).
+- **Profile-guided optimization** (`make pgo`) adds about 6% overall on top
+  of all this.
+
 ## Where the time goes now
 
 During a flood the parser thread is the bottleneck: it is ~100% busy and the
-queue stays near full. On Unicode output, `Term::print_text` (width lookup
-and cell writes) is ~60% of parser time and UTF-8 validation ~16%; on ASCII
-output, line feeds (`scroll_region_up`: scrollback `Arc` allocation and row
-blanking) take ~20%.
+queue stays near full. On emoji output, `Term::print_text` is ~22% of
+parser time, UTF-8 validation ~9%, line feeds (`scroll_region_up`) ~8% and
+attaching marks ~7%; the interning that used to dominate is mostly gone. On
+Unicode output, `print_text` (width lookup and cell writes) dominates; on
+ASCII output, line feeds take ~20%.
 The plan toward 200 MB/s is in [`TODO.md`](../TODO.md).
 
 ## Follow-up work (26.10)

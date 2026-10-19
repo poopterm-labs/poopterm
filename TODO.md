@@ -12,8 +12,9 @@ correct. The numbers below are minimums, not finish lines.
 CSI-heavy, cursor movement). 200 MB/s is the floor, not the ceiling: go
 higher wherever that stays safe (bounded memory, no skipped state, output
 identical to the slower path). Measured with `scripts/bench-throughput.py` in a real
-window. Latest i3-N305 numbers are ~55–110 MB/s depending on the payload;
-see [`docs/performance.md`](docs/performance.md).
+window. Latest i3-N305 numbers are 63–248 MB/s depending on the workload
+(108 overall); emoji, compiler output, Unicode, ls and plain logs are
+furthest below the floor. See [`docs/performance.md`](docs/performance.md).
 
 **Images: as fast as possible** for Sixel and the kitty graphics protocol,
 from first byte to pixels on screen. There is no target to stop at; at least

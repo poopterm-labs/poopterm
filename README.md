@@ -1,6 +1,6 @@
 # poopterm 💩
 
-Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it parses plain text at about 100 MB/s end to end on a low-power laptop CPU (see [performance](docs/performance.md)). It opens your default shell in a native window, with tabs, clipboard support, and seven built-in color themes. Terminal compatibility is growing and is not yet a complete xterm implementation.
+Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it handles real-world text output at 63–248 MB/s end to end (108 MB/s overall, images included) on a low-power laptop CPU (see [performance](docs/performance.md)). It opens your default shell in a native window, with tabs, clipboard support, and seven built-in color themes. Terminal compatibility is growing and is not yet a complete xterm implementation.
 
 ![Poopterm app icon](assets/icon.png)
 
@@ -30,7 +30,7 @@ Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it
 - Supports PNG, JPEG, and WebP terminal wallpapers with adjustable strength in Settings.
 - Lets macOS users adjust main-window opacity from Settings.
 - Includes a desktop launcher and icon for Linux and FreeBSD.
-- **Fast output:** a background PTY reader with backpressure, redraws paced to the display, an O(columns) row-based grid with 16-byte cells, and a portable-SIMD fast path for plain text. Run `scripts/bench-throughput.py` in any terminal to compare.
+- **Fast output:** a background PTY reader with backpressure, redraws paced to the display, an O(columns) row-based grid with 16-byte cells, a portable-SIMD fast path for plain text, and synchronized updates that cost one screen copy however long the scrollback is. Run `scripts/bench-throughput.py` in any terminal to compare.
 
 ## Build and run
 
