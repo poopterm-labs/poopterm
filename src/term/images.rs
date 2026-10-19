@@ -1,15 +1,22 @@
-//! Sixel image placement, scrolling and eviction.
+//! Image placement, scrolling and eviction (Sixel; kitty images are in
+//! `kitty.rs`).
 use std::sync::Arc;
 
 use super::Term;
 
 impl Term {
+	/// Cell size used to work out how many cells an image covers.
+	pub(crate) fn cell_size(&self) -> (usize, usize) {
+		(self.cell_width.max(1), self.cell_height.max(1))
+	}
+
 	pub(crate) fn scroll_images(&mut self, amount: isize) {
 		let top = self.scroll_top as isize;
 		let bottom = self.scroll_bottom as isize;
-		let cell_height = self.cell_height.max(1);
+		let cell = self.cell_size();
 		self.images.retain_mut(|image| {
-			let last_row = image.row + image.bitmap.height.div_ceil(cell_height) as isize - 1;
+			let rows = image.cells(cell).1 as isize;
+			let last_row = image.row + rows - 1;
 			if image.row > bottom || last_row < top {
 				return true;
 			}
@@ -17,8 +24,7 @@ impl Term {
 				return false;
 			}
 			image.row += amount;
-			image.row >= top
-				&& image.row + image.bitmap.height.div_ceil(cell_height) as isize - 1 <= bottom
+			image.row >= top && image.row + rows - 1 <= bottom
 		});
 	}
 
@@ -27,12 +33,16 @@ impl Term {
 			return;
 		}
 		let cols = self.cols;
-		let cw = self.cell_width.max(1);
-		let ch = self.cell_height.max(1);
+		let cell = self.cell_size();
+		// Text erases Sixel images under it; kitty images stay.
 		self.images.retain(|image| {
+			if image.kitty.is_some() {
+				return true;
+			}
+			let (width, height) = image.cells(cell);
 			let first_row = image.row.max(0) as usize;
-			let end_row = first_row + image.bitmap.height.div_ceil(ch);
-			let end_col = (image.col + image.bitmap.width.div_ceil(cw)).min(cols);
+			let end_row = first_row + height;
+			let end_col = (image.col + width).min(cols);
 			!(first_row..end_row).any(|row| from < row * cols + end_col && to > row * cols + image.col)
 		});
 	}
@@ -44,7 +54,7 @@ impl Term {
 		let Some(bitmap) = transfer.finish(self.bg, self.fg) else {
 			return;
 		};
-		let rows = bitmap.height.div_ceil(self.cell_height.max(1));
+		let rows = bitmap.height.div_ceil(self.cell_size().1);
 		let (mut row, col) = if self.sixel_scrolling {
 			(self.cy as isize, self.cx)
 		} else {
@@ -73,10 +83,10 @@ impl Term {
 			self.cx = 0;
 			self.wrap_pending = false;
 		}
-		self.images.push(crate::sixel::Placement {
-			bitmap: Arc::new(bitmap),
-			row,
+		self.images.push(crate::graphics::Placement::natural(
+			Arc::new(bitmap),
 			col,
-		});
+			row,
+		));
 	}
 }

@@ -429,7 +429,7 @@ fn sixel_dcs_is_incremental_and_cursor_advances_at_termination() {
 	parser.advance(&mut t, b"\x1b\\");
 	assert_eq!(t.images.len(), 1);
 	assert_eq!(t.images[0].bitmap.width, 12);
-	assert_eq!(t.images[0].bitmap.pixels[0], 0xff0000);
+	assert_eq!(t.images[0].bitmap.pixels[0], 0xffff0000);
 	assert_eq!((t.cx, t.cy), (0, 1));
 	feed(&mut t, b"\x1b[2J");
 	assert!(t.images.is_empty());

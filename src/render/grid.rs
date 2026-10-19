@@ -1,10 +1,11 @@
-//! Draws the visible part of a terminal grid (cells, cursor, highlights, Sixel images).
+//! Draws the visible part of a terminal grid (cells, cursor, highlights, images).
 use super::{
 	glyphs::FontSet,
+	images::draw_placement,
 	painter::{Painter, glyph_top},
 };
 use crate::{
-	sixel,
+	graphics::Rect,
 	term::{Cell, CursorShape, Frame, NO_EXTRA, attr},
 	ui::selection::CellPoint,
 };
@@ -43,6 +44,8 @@ pub(crate) fn draw_grid(
 	rows: Option<&[bool]>,
 ) {
 	let frame = view.frame;
+	// Negative z-index: under text, over the default background.
+	draw_images(p, view, |z| z < 0);
 	let wanted = |row: usize| rows.is_none_or(|rows| rows[row]);
 	for row in (0..frame.rows).filter(|&row| wanted(row)) {
 		let absolute_row = frame.first_row + row;
@@ -70,7 +73,7 @@ pub(crate) fn draw_grid(
 			}
 		}
 	}
-	draw_images(p, view);
+	draw_images(p, view, |z| z >= 0);
 }
 
 fn draw_cell(
@@ -168,35 +171,25 @@ fn draw_cursor(p: &mut Painter, view: &GridView, cell: &Cell, (col, row): (usize
 	}
 }
 
-fn draw_images(p: &mut Painter, view: &GridView) {
+/// Draws the images whose z-index is in `layer`, in z order.
+fn draw_images(p: &mut Painter, view: &GridView, layer: impl Fn(i32) -> bool) {
 	let frame = view.frame;
 	let (cw, ch) = view.cell;
 	let (left, top) = view.origin;
-	let bottom = (top + frame.rows * ch).min(p.height) as isize;
-	for image in &frame.images {
-		let image_x = left + image.col * cw;
-		if image_x >= p.width {
-			continue;
-		}
-		let image_y = top as isize + (image.row + frame.scroll_offset as isize) * ch as isize;
-		let draw_width = image.bitmap.width.min(p.width - image_x);
-		for sy in 0..image.bitmap.height {
-			let y = image_y + sy as isize;
-			if y < top as isize || y >= bottom {
-				continue;
-			}
-			let src = &image.bitmap.pixels[sy * image.bitmap.width..][..draw_width];
-			let dst_start = y as usize * p.width + image_x;
-			let dst = &mut p.pixels[dst_start..dst_start + draw_width];
-			if image.bitmap.opaque {
-				dst.copy_from_slice(src);
-			} else {
-				for (out, &pixel) in dst.iter_mut().zip(src) {
-					if pixel != sixel::TRANSPARENT {
-						*out = pixel;
-					}
-				}
-			}
-		}
+	let clip = Rect {
+		x: left,
+		y: top,
+		width: (frame.cols * cw).min(p.width.saturating_sub(left)),
+		height: (frame.rows * ch).min(p.height.saturating_sub(top)),
+	};
+	let mut images: Vec<_> = frame.images.iter().filter(|image| layer(image.z)).collect();
+	// Stable, so equal z keeps the order images arrived in.
+	images.sort_by_key(|image| image.z);
+	for image in images {
+		let at = (
+			(left + image.col * cw) as isize,
+			top as isize + (image.row + frame.scroll_offset as isize) * ch as isize,
+		);
+		draw_placement(p.pixels, p.width, clip, image, at, view.cell);
 	}
 }

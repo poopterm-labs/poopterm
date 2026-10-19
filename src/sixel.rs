@@ -1,24 +1,12 @@
-//! Bounded DEC Sixel decoder. Coordinates are pixels; transparent pixels use u32::MAX.
-use std::sync::Arc;
+//! Bounded DEC Sixel decoder. Coordinates are pixels; while decoding,
+//! colors are `0xRRGGBB` and transparent pixels are [`TRANSPARENT`].
+use crate::graphics::Bitmap;
 
-pub(crate) const TRANSPARENT: u32 = u32::MAX;
+const TRANSPARENT: u32 = u32::MAX;
 const MAX_SIDE: usize = 4096;
 const MAX_PIXELS: usize = 16 * 1024 * 1024;
 pub(crate) const MAX_PAYLOAD: usize = 4 * 1024 * 1024;
 
-#[derive(Clone)]
-pub(crate) struct Bitmap {
-	pub width: usize,
-	pub height: usize,
-	pub opaque: bool,
-	pub pixels: Vec<u32>,
-}
-#[derive(Clone)]
-pub(crate) struct Placement {
-	pub bitmap: Arc<Bitmap>,
-	pub col: usize,
-	pub row: isize,
-}
 #[derive(Clone)]
 pub(crate) struct Transfer {
 	pub bytes: Vec<u8>,
@@ -207,12 +195,14 @@ impl Decoder {
 				pixels[y * self.width..y * self.width + copy_len].copy_from_slice(&row[..copy_len]);
 			}
 		}
-		Some(Bitmap {
-			width: self.width,
-			height: self.height,
-			opaque: self.background != TRANSPARENT,
-			pixels,
-		})
+		for pixel in &mut pixels {
+			*pixel = if *pixel == TRANSPARENT {
+				0
+			} else {
+				*pixel | 0xff00_0000
+			};
+		}
+		Some(Bitmap::new(self.width, self.height, pixels))
 	}
 }
 fn number(bytes: &[u8], i: &mut usize) -> usize {
@@ -262,17 +252,17 @@ mod tests {
 	fn repeats_planes_and_transparency() {
 		let image = decode(b"#1;2;100;0;0!3~$#2;2;0;100;0?@").unwrap();
 		assert_eq!((image.width, image.height), (3, 6));
-		assert_eq!(image.pixels[0], 0xff0000);
-		assert_eq!(image.pixels[1], 0x00ff00);
-		assert_eq!(image.pixels[4], 0xff0000);
-		assert_eq!(decode(b"?").unwrap().pixels[0], TRANSPARENT);
+		assert_eq!(image.pixels[0], 0xffff0000);
+		assert_eq!(image.pixels[1], 0xff00ff00);
+		assert_eq!(image.pixels[4], 0xffff0000);
+		assert_eq!(decode(b"?").unwrap().pixels[0], 0);
 	}
 	#[test]
 	fn raster_attributes_and_aspect_ratio() {
 		let image = decode(b"\"2;1;4;6#1;2;0;0;100@").unwrap();
 		assert_eq!((image.width, image.height), (4, 12));
-		assert_eq!(image.pixels[0], 0x0000ff);
-		assert_eq!(image.pixels[4], 0x0000ff);
+		assert_eq!(image.pixels[0], 0xff0000ff);
+		assert_eq!(image.pixels[4], 0xff0000ff);
 	}
 	#[test]
 	fn hls_primary_checks() {

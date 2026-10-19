@@ -12,6 +12,7 @@ mod bench;
 mod clipboard;
 mod config;
 mod fonts;
+mod graphics;
 mod input;
 mod parser;
 mod platform;

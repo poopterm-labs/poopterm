@@ -4,4 +4,5 @@ pub(crate) mod damage;
 pub(crate) mod fxhash;
 pub(crate) mod glyphs;
 pub(crate) mod grid;
+pub(crate) mod images;
 pub(crate) mod painter;

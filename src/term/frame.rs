@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use super::{Cell, CursorShape, NO_EXTRA, Term};
-use crate::sixel::Placement;
+use crate::graphics::Placement;
 
 /// The visible rows of a [`Term`] plus what the renderer needs to draw them.
 /// Buffers are reused between frames.

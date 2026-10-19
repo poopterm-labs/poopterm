@@ -82,8 +82,8 @@ pub(crate) struct SavedCursor {
 
 #[derive(Clone)]
 pub(crate) struct Term {
-	pub(crate) images: Vec<crate::sixel::Placement>,
-	pub(crate) primary_images: Vec<crate::sixel::Placement>,
+	pub(crate) images: Vec<crate::graphics::Placement>,
+	pub(crate) primary_images: Vec<crate::graphics::Placement>,
 	pub(crate) sixel_transfer: Option<crate::sixel::Transfer>,
 	pub(crate) sixel_scrolling: bool,
 	pub(crate) cell_width: usize,
