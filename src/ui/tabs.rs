@@ -1,4 +1,5 @@
-//! Tab-strip geometry.
+//! Tab-strip geometry and markers.
+use crate::term::status::State;
 
 pub(crate) struct TabLayout {
 	pub(crate) start: usize,
@@ -84,5 +85,60 @@ mod tests {
 		assert!(layout.visible_count >= 1);
 		assert!(layout.first_visible < 20);
 		assert!(layout.first_visible + layout.visible_count <= 20);
+	}
+}
+
+/// The sign before a tab's title.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Marker {
+	Bell,
+	Blocked,
+	Error,
+	Done,
+	Working,
+	Activity,
+}
+
+/// What a tab's marker shows: what most needs the user first.
+pub(crate) fn tab_marker(bell: bool, status: Option<State>, activity: bool) -> Option<Marker> {
+	if bell {
+		return Some(Marker::Bell);
+	}
+	match status {
+		Some(State::Blocked) => Some(Marker::Blocked),
+		Some(State::Error) => Some(Marker::Error),
+		Some(State::Done) => Some(Marker::Done),
+		Some(State::Working) => Some(Marker::Working),
+		Some(State::Idle) | None => activity.then_some(Marker::Activity),
+	}
+}
+
+#[cfg(test)]
+mod marker_tests {
+	use super::*;
+
+	#[test]
+	fn markers_put_what_needs_the_user_first() {
+		assert_eq!(
+			tab_marker(true, Some(State::Blocked), true),
+			Some(Marker::Bell)
+		);
+		assert_eq!(
+			tab_marker(false, Some(State::Blocked), true),
+			Some(Marker::Blocked)
+		);
+		assert_eq!(
+			tab_marker(false, Some(State::Done), false),
+			Some(Marker::Done)
+		);
+		assert_eq!(
+			tab_marker(false, Some(State::Working), true),
+			Some(Marker::Working)
+		);
+		assert_eq!(
+			tab_marker(false, Some(State::Idle), true),
+			Some(Marker::Activity)
+		);
+		assert_eq!(tab_marker(false, None, false), None);
 	}
 }

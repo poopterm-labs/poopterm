@@ -1,6 +1,11 @@
-//! The tab strip: tabs with activity markers, scroll arrows, new-tab and settings buttons.
+//! The tab strip: tabs with status markers and progress, scroll arrows,
+//! new-tab and settings buttons.
 use super::{draw::UiFont, *};
-use crate::render::painter::Painter;
+use crate::{
+	render::painter::Painter,
+	term::status::{Progress, ProgressState},
+	ui::tabs::{Marker, tab_marker},
+};
 
 fn hit(cursor: (f64, f64), (x, y, w, h): (usize, usize, usize, usize)) -> bool {
 	cursor.0 >= x as f64
@@ -73,25 +78,34 @@ impl App {
 			let session = &self.sessions[index];
 			let max_chars = (layout.width.saturating_sub(42 * scale) / ui.cw.max(1)).max(1);
 			let label = ellipsize(&session.title(), max_chars);
-			let marker = if session.term().bell {
-				Some("!")
-			} else if session.activity {
-				Some("•")
-			} else {
-				None
+			let (marker, progress) = {
+				let term = session.term();
+				let marker = tab_marker(term.bell, term.status.summary(), session.activity);
+				(marker, term.status.shown_progress())
 			};
 			if let Some(marker) = marker {
+				let (glyph, color) = match marker {
+					Marker::Bell => ("!", accent),
+					Marker::Blocked => ("•", self.theme.palette[3]),
+					Marker::Error => ("•", self.theme.palette[1]),
+					Marker::Done => ("•", self.theme.palette[2]),
+					Marker::Working => ("•", accent),
+					Marker::Activity => ("•", blend(bg, fg, 150)),
+				};
 				p.text(
 					&mut self.fonts,
 					x + 10 * scale,
 					text_y,
-					marker,
+					glyph,
 					ui.px * 0.62,
 					ui.ascent,
-					accent,
+					color,
 				);
 			}
-			let label_x = x + if session.activity { 22 } else { 12 } * scale;
+			if let Some(progress) = progress {
+				self.draw_tab_progress(p, (x, tab_y, layout.width), scale, progress);
+			}
+			let label_x = x + if marker.is_some() { 22 } else { 12 } * scale;
 			p.text(
 				&mut self.fonts,
 				label_x,
@@ -160,6 +174,32 @@ impl App {
 				fg,
 			);
 		}
+	}
+
+	/// A thin bar under a tab's title: the share done, or a dim full bar
+	/// when the program cannot say.
+	fn draw_tab_progress(
+		&self,
+		p: &mut Painter,
+		(x, tab_y, width): (usize, usize, usize),
+		scale: usize,
+		progress: Progress,
+	) {
+		let color = match progress.state {
+			ProgressState::Error => self.theme.palette[1],
+			ProgressState::Paused => self.theme.palette[3],
+			_ => self.theme.palette[4],
+		};
+		let (left, track) = (x + 12 * scale, width.saturating_sub(24 * scale));
+		let y = tab_y + self.tab_height.saturating_sub(10 * scale);
+		let bg = self.theme.bg;
+		p.rect(left, y, track, 2 * scale, blend(bg, color, 60));
+		let done = match progress.percent {
+			Some(percent) => track * usize::from(percent) / 100,
+			None => track,
+		};
+		let shade = if progress.percent.is_some() { 255 } else { 140 };
+		p.rect(left, y, done, 2 * scale, blend(bg, color, shade));
 	}
 }
 

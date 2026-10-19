@@ -59,6 +59,7 @@ pub(crate) struct Seen {
 	pub bell: bool,
 	pub title: u64,
 	pub cwd: u64,
+	pub status: u64,
 }
 
 impl Seen {
@@ -67,6 +68,7 @@ impl Seen {
 			bell: term.bell,
 			title: term.title_generation,
 			cwd: term.cwd_generation,
+			status: term.status.generation,
 		}
 	}
 }

@@ -17,11 +17,14 @@ const SUPPORT: &str = "a=focus,report:c=1:o=always,unfocused,invisible:\
 
 impl Term {
 	/// OSC 9: a notification, unless the first parameter is a number, which
-	/// makes it a ConEmu command.
+	/// makes it a ConEmu command; 4 is progress.
 	pub(super) fn osc_notify(&mut self, params: &[&[u8]]) {
 		let Some(first) = params.first() else {
 			return;
 		};
+		if *first == b"4" {
+			return self.osc_progress(&params[1..]);
+		}
 		if !first.is_empty() && first.iter().all(u8::is_ascii_digit) {
 			return;
 		}

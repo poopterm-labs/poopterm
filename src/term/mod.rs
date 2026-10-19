@@ -21,6 +21,9 @@ pub(crate) mod notifications;
 mod screen;
 mod shared;
 mod shell;
+pub(crate) mod status;
+#[cfg(test)]
+mod status_tests;
 mod sync;
 #[cfg(test)]
 mod tests;
@@ -178,6 +181,8 @@ pub(crate) struct Term {
 	pub(crate) clipboard_upload: Option<clipboard::Upload>,
 	/// Desktop notifications: requests for the UI thread and live state.
 	pub(crate) notifications: notifications::Notifications,
+	/// What programs report they are doing (OSC 7501, OSC 9;4).
+	pub(crate) status: status::Status,
 	pub(crate) title: String,
 	pub(crate) title_generation: u64,
 	pub(crate) cwd: PathBuf,
@@ -332,6 +337,7 @@ impl Term {
 			clipboard_writes: Vec::new(),
 			clipboard_upload: None,
 			notifications: notifications::Notifications::default(),
+			status: status::Status::default(),
 			title: "Shell".into(),
 			title_generation: 0,
 			cwd,

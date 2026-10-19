@@ -22,6 +22,7 @@ impl Term {
 			}
 			b"9" => self.osc_notify(&params[1..]),
 			b"777" => self.osc_notify_777(&params[1..]),
+			b"7501" => self.osc_program_status(&params[1..], bell),
 			b"99" if params.len() >= 3 => self.osc_kitty_notify(params[1], &params[2..], bell),
 			b"8" if params.len() >= 3 => {
 				let uri = params[2];
@@ -40,12 +41,20 @@ impl Term {
 						.unwrap_or_default();
 				}
 			}
-			b"133" => self.shell.record(
-				params,
-				self.history_base + self.scrollback.len() + self.cy,
-				self.cx,
-				std::time::Instant::now(),
-			),
+			b"133" => {
+				if params
+					.get(1)
+					.is_some_and(|marker| marker.first() == Some(&b'A'))
+				{
+					self.status.prompt();
+				}
+				self.shell.record(
+					params,
+					self.history_base + self.scrollback.len() + self.cy,
+					self.cx,
+					std::time::Instant::now(),
+				);
+			}
 			b"0" | b"1" | b"2" if params.len() >= 2 => {
 				let title = String::from_utf8_lossy(params[1]);
 				let title: String = title.chars().filter(|c| !c.is_control()).take(64).collect();

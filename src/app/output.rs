@@ -42,7 +42,8 @@ impl App {
 		}
 		let seen = std::mem::replace(&mut session.seen, now);
 		let cwd_changed = now.cwd != seen.cwd;
-		let mut tab_changed = now.bell != seen.bell || now.title != seen.title;
+		let mut tab_changed =
+			now.bell != seen.bell || now.title != seen.title || now.status != seen.status;
 		let is_active = Some(id) == active_id;
 		let visible = is_active && !synchronized;
 		if is_active {
