@@ -161,7 +161,7 @@ change, however small, goes through a branch and a pull request.
    below): it becomes the squashed commit on `main` and its changelog line.
    The body explains *why*, links the issue, and carries the evidence:
    benchmark numbers for performance work, screenshots for rendering
-   changes.
+   changes. Add no tool footers ("Generated with …") or session links.
 4. **Required checks** must all pass: CI (Linux, macOS, FreeBSD, Debian
    package), CodeQL, and the pull request rules (title and 3:1 ratio). No
    approval is required; ask for review when a second pair of eyes helps.
