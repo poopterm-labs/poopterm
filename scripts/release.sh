@@ -11,14 +11,25 @@ if [[ "$remote" == "$GITHUB_SHA" ]]; then
   release=$(python3 scripts/release.py)
   version=${release%%$'\n'*}
   codename=${release#*$'\n'}
-  git add Cargo.toml Cargo.lock CHANGELOG.md
+  # Homebrew builds from the tag, which lands with this commit, so the
+  # formula goes in it too: a release pushes to main exactly once.
+  python3 scripts/release.py --formula "$version"
+  git add Cargo.toml Cargo.lock CHANGELOG.md Formula/poopterm.rb
   # Pushed with the deploy key, which triggers workflows: [skip ci] stops
   # this commit from releasing again.
   git commit -m "chore(release): ${version} after green CI" -m "[skip ci]" -m "Poopterm-Release-For: ${GITHUB_SHA}"
   git tag "v${version}"
   # Atomic publication plus a lease closes the race between the fetch and push.
   # This is a fast-forward; the lease also rejects a newer main in the meantime.
-  git push --atomic --force-with-lease="refs/heads/main:${GITHUB_SHA}" origin HEAD:main "refs/tags/v${version}"
+  if ! git push --atomic --force-with-lease="refs/heads/main:${GITHUB_SHA}" origin HEAD:main "refs/tags/v${version}"; then
+    # Losing the race to a merge is a skip: that commit's own run releases.
+    git fetch origin main
+    if [[ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]]; then
+      echo 'main moved while releasing; skipping release.'
+      exit 0
+    fi
+    exit 1
+  fi
 elif [[ "$(git log -1 --format=%B origin/main)" == *"Poopterm-Release-For: ${GITHUB_SHA}"* ]]; then
   # A rerun after a publishing failure resumes this release, without another bump.
   git checkout --detach origin/main
@@ -29,16 +40,25 @@ else
   echo 'main moved since this CI run; skipping release.'
   exit 0
 fi
-# Package the release commit itself, so the .deb and the binary in it carry
-# the new version; a failed build stops before the GitHub release exists.
-cargo build --release --locked
-bash scripts/package-deb.sh
-# Create only when absent; API failures other than 404 must stop publication.
+# Look the release up first; API failures other than 404 must stop publication.
+released=yes
 if ! gh api "repos/${GH_REPO}/releases/tags/v${version}" > /tmp/poopterm-release.json 2> /tmp/poopterm-release-error; then
   if ! grep -q 'HTTP 404' /tmp/poopterm-release-error; then
     cat /tmp/poopterm-release-error >&2
     exit 1
   fi
+  released=no
+fi
+# A rerun of a finished release has nothing left to do.
+if [[ $released == yes ]] && grep -q "\"poopterm_${version}-1_" /tmp/poopterm-release.json; then
+  echo "v${version} is already published."
+  exit 0
+fi
+# Package the release commit itself, so the .deb and the binary in it carry
+# the new version; a failed build stops before the GitHub release exists.
+cargo build --release --locked
+bash scripts/package-deb.sh
+if [[ $released == no ]]; then
   python3 -c 'from pathlib import Path; s=Path("CHANGELOG.md").read_text(); print("## " + s.split("\n## ", 2)[1])' > /tmp/poopterm-release-notes.md
   gh release create "v${version}" --verify-tag --title "Poopterm ${version} \"${codename}\"" --notes-file /tmp/poopterm-release-notes.md
 fi
@@ -50,11 +70,3 @@ if ((${#packages[@]} != 1)); then
   exit 1
 fi
 gh release upload "v${version}" "${packages[0]}" --clobber
-# The tag now exists. Update Homebrew in a separate commit, also guarded.
-release_commit=$(git rev-parse HEAD)
-python3 scripts/release.py --formula "$version"
-git add Formula/poopterm.rb
-if ! git diff --cached --quiet; then
-  git commit -m "chore(homebrew): point formula at published v${version}" -m "[skip ci]"
-  git push --force-with-lease="refs/heads/main:${release_commit}" origin HEAD:main
-fi

@@ -72,8 +72,14 @@ if (root / 'fail-api').exists():
 if sys.argv[1] == 'api' and not (root / 'released').exists():
     sys.stderr.write('HTTP 404 Not Found\\n')
     sys.exit(1)
+if sys.argv[1] == 'api':
+    assets = (root / 'assets').read_text().split() if (root / 'assets').exists() else []
+    print('{"assets": [' + ', '.join(f'{{"name": "{name}"}}' for name in assets) + ']}')
 if sys.argv[1:3] == ['release', 'create']:
     (root / 'released').touch()
+if sys.argv[1:3] == ['release', 'upload']:
+    with (root / 'assets').open('a') as assets:
+        assets.write(Path(sys.argv[4]).name + '\\n')
 ''')
         gh.chmod(0o755)
         cargo = fakebin / 'cargo'
@@ -99,19 +105,61 @@ echo "cargo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_G
         version = self.version.rsplit('.', 1)[0] + '.1'
         self.assertIn(f'version = "{version}"', self.git('show', f'v{version}:Cargo.toml'))
         self.assertIn(f'tag: "v{version}"', self.git('show', 'origin/main:Formula/poopterm.rb'))
-        self.assertIn('v0.43.0', self.git('show', f'v{version}:Formula/poopterm.rb'))
-        self.assertEqual(self.publish().returncode, 0)
+        rerun = self.publish()
+        self.assertEqual(rerun.returncode, 0)
+        self.assertIn('already published', rerun.stdout)
         self.assertEqual((self.root / 'api.log').read_text().count('release create'), 1)
         self.assertEqual((self.root / 'api.log').read_text().count('release upload'), 1)
+        self.assertEqual(len((self.root / 'build.log').read_text().splitlines()), 2)
+
+    def test_a_release_without_its_package_gets_it_on_a_rerun(self):
+        # Created, but the upload failed: the rerun builds and uploads only.
+        (self.root / 'released').touch()
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        log = (self.root / 'api.log').read_text()
+        self.assertEqual(log.count('release create'), 0)
+        self.assertEqual(log.count('release upload'), 1)
 
     def test_release_commits_do_not_start_another_ci_run(self):
         # The deploy key's pushes trigger workflows, unlike GITHUB_TOKEN's;
         # without the marker each release commit would release again.
         self.assertEqual(self.publish().returncode, 0)
-        for commit in ['origin/main', 'origin/main~1']:
-            message = self.git('log', '-1', '--format=%B', commit)
-            self.assertIn('[skip ci]', message, message)
-            self.assertTrue(message.startswith('chore('), message)
+        message = self.git('log', '-1', '--format=%B', 'origin/main')
+        self.assertIn('[skip ci]', message, message)
+        self.assertTrue(message.startswith('chore(release): '), message)
+
+    def test_a_release_pushes_to_main_once_with_the_formula_in_the_tagged_commit(self):
+        # A second push, after publishing, raced every merge made meanwhile.
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        version = self.version.rsplit('.', 1)[0] + '.1'
+        self.assertEqual(self.git('rev-parse', 'origin/main~1').strip(), self.sha)
+        self.assertEqual(self.git('rev-parse', 'origin/main').strip(),
+                         self.git('rev-parse', f'v{version}^{{commit}}').strip())
+        formula = self.git('show', f'v{version}:Formula/poopterm.rb')
+        self.assertIn(f'tag: "v{version}"', formula)
+        self.assertIn(f'version "{version}"', formula)
+        changed = self.git('show', '--name-only', '--format=', 'origin/main').split()
+        self.assertEqual(sorted(changed), ['CHANGELOG.md', 'Cargo.lock', 'Cargo.toml', 'Formula/poopterm.rb'])
+
+    def test_a_rerun_after_a_publishing_failure_pushes_nothing_more(self):
+        failure = self.root / 'fail-api'
+        failure.touch()
+        self.assertNotEqual(self.publish().returncode, 0)
+        pushed = self.git('ls-remote', str(self.remote))
+        failure.unlink()
+        self.assertEqual(self.publish().returncode, 0)
+        self.assertEqual(self.git('ls-remote', str(self.remote)), pushed)
+
+    def test_a_push_refused_for_another_reason_still_fails(self):
+        hook = self.remote / 'hooks/pre-receive'
+        hook.write_text('#!/bin/sh\necho refused by policy >&2\nexit 1\n')
+        hook.chmod(0o755)
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('main moved', result.stdout)
+        self.assertFalse((self.root / 'api.log').exists())
 
     def uploads(self):
         log = (self.root / 'api.log').read_text().splitlines()
@@ -135,7 +183,7 @@ echo "cargo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_G
     def test_a_failed_build_stops_before_the_github_release(self):
         (self.root / 'fail-build').touch()
         self.assertNotEqual(self.publish().returncode, 0)
-        self.assertFalse((self.root / 'api.log').exists())
+        self.assertNotIn('release create', (self.root / 'api.log').read_text())
         (self.root / 'fail-build').unlink()
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -188,12 +236,16 @@ if '--atomic' in sys.argv:
 os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])
 ''')
         wrapper.chmod(0o755)
+        # Losing the race is a skip, like a main that moved before the run:
+        # the racing commit's own run releases it.
         result = self.publish()
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('main moved', result.stdout)
         actual = subprocess.check_output([real_git, '--git-dir', str(self.remote), 'rev-parse', 'main'], text=True).strip()
         self.assertEqual(actual, race_sha)
         self.assertEqual(subprocess.check_output([real_git, '--git-dir', str(self.remote), 'tag'], text=True), '')
         self.assertFalse((self.root / 'api.log').exists())
+        self.assertFalse((self.root / 'build.log').exists())
 
 
 if __name__ == '__main__':
