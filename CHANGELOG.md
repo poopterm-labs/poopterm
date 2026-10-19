@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.9 "Giga Fly" — 2026-10-19
+
+### Maintenance
+
+- Create dependabot.yml.
+
 ## 26.10.8 "Giga Fly" — 2026-10-19
 
 ### Added
