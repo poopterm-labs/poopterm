@@ -83,6 +83,18 @@ impl Cache {
 			})
 			.map(|(found, _)| found)
 	}
+
+	/// Monospace family names, sorted and deduplicated ignoring case.
+	pub(crate) fn monospace_families(&self) -> Vec<String> {
+		let mut names: Vec<&str> = self
+			.faces()
+			.filter(|(_, face)| face.monospace)
+			.map(|(_, face)| face.family.as_str())
+			.collect();
+		names.sort_by_cached_key(|name| (name.to_lowercase(), *name));
+		names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+		names.into_iter().map(str::to_owned).collect()
+	}
 }
 
 /// The installed fonts, from the cache file when it is fresh. A stale or

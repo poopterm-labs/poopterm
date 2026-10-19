@@ -1,11 +1,12 @@
 //! The Settings window: editable preferences, saving, and input handling.
 use super::{
-	settings_hit::{SettingsPage, SettingsTarget, settings_target},
+	settings_fonts::FontPicker,
+	settings_hit::{SettingsPage, SettingsTarget, font_list_rows, settings_target},
 	settings_view::*,
 	*,
 };
-use crate::input::shortcuts::{Shortcut, ShortcutAction, Shortcuts};
-use winit::{dpi::LogicalSize, event::KeyEvent};
+use crate::input::shortcuts::{ShortcutAction, Shortcuts};
+use winit::{dpi::LogicalSize, event::MouseScrollDelta};
 
 /// Unsaved preference edits shown in the Settings window.
 pub(crate) struct SettingsEditor {
@@ -17,6 +18,8 @@ pub(crate) struct SettingsEditor {
 	pub(crate) page: SettingsPage,
 	pub(crate) recording_shortcut: Option<ShortcutAction>,
 	pub(crate) shortcuts: Shortcuts,
+	/// Installed families are listed when the Fonts page first opens.
+	pub(crate) fonts: FontPicker,
 }
 
 impl SettingsEditor {
@@ -35,6 +38,25 @@ impl SettingsEditor {
 			page: SettingsPage::Main,
 			recording_shortcut: None,
 			shortcuts: Shortcuts::load(),
+			fonts: FontPicker::new(
+				Vec::new(),
+				&read_config_value("font_family").unwrap_or_default(),
+			),
+		}
+	}
+
+	/// Shows `page`, listing the installed fonts the first time the Fonts
+	/// page opens.
+	pub(super) fn open(&mut self, page: SettingsPage) {
+		self.page = page;
+		self.recording_shortcut = None;
+		if page == SettingsPage::Fonts && self.fonts.families.is_empty() {
+			self.fonts.families = crate::fonts::system_fonts().monospace_families();
+			if std::env::var_os("POOPTERM_FONT").is_some()
+				|| read_config_value("font_path").is_some_and(|path| !path.trim().is_empty())
+			{
+				self.status = "POOPTERM_FONT or font_path overrides the font chosen here.".into();
+			}
 		}
 	}
 
@@ -112,13 +134,13 @@ impl App {
 		window.request_redraw();
 	}
 
-	fn close_settings_window(&mut self) {
+	pub(super) fn close_settings_window(&mut self) {
 		self.settings_window = None;
 		self.settings_surface = None;
 		self._settings_context = None;
 	}
 
-	fn redraw_settings(&self) {
+	pub(super) fn redraw_settings(&self) {
 		if let Some(window) = &self.settings_window {
 			window.request_redraw();
 		}
@@ -150,7 +172,10 @@ impl App {
 			("show_bottom_bar", preferences.show_bottom_bar.to_string()),
 			("wallpaper", wallpaper_path),
 			("wallpaper_strength", editor.wallpaper_strength.to_string()),
+			("font_family", quote_config_string(&editor.fonts.chosen)),
 		];
+		let font_changed =
+			read_config_value("font_family").unwrap_or_default().trim() != editor.fonts.chosen;
 		for action in ShortcutAction::ALL {
 			values.push((
 				action.config_key(),
@@ -161,13 +186,13 @@ impl App {
 		if let Err(error) = result {
 			self.settings_editor.status = format!("Could not save: {error}");
 		} else {
-			self.apply_saved_settings(preferences);
+			self.apply_saved_settings(preferences, font_changed);
 		}
 		self.redraw_settings();
 		self.request_redraw();
 	}
 
-	fn apply_saved_settings(&mut self, preferences: Preferences) {
+	fn apply_saved_settings(&mut self, preferences: Preferences, font_changed: bool) {
 		self.preferences = preferences;
 		self.update_chrome_layout(self.scale());
 		self.theme = Theme::load();
@@ -190,14 +215,20 @@ impl App {
 			term.set_theme(self.theme);
 			term.set_scrollback_limit(preferences.scrollback_lines);
 		}
+		if font_changed {
+			let (font, fallbacks) = crate::fonts::load_fonts();
+			self.fonts = crate::render::glyphs::FontSet::new(font, fallbacks);
+		}
 		let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
 		self.set_font_px(preferences.font_size as f32 * scale);
 		self.selection = None;
 		self.end_search();
 		self.resize(self.width, self.height);
 		let page = self.settings_editor.page;
+		let fonts = std::mem::take(&mut self.settings_editor.fonts);
 		self.settings_editor = SettingsEditor::load();
 		self.settings_editor.page = page;
+		self.settings_editor.fonts = fonts;
 		self.settings_editor.status = status;
 	}
 
@@ -225,6 +256,18 @@ impl App {
 				button: MouseButton::Left,
 				..
 			} => self.settings_click(),
+			WindowEvent::MouseWheel { delta, .. } if self.settings_editor.page == SettingsPage::Fonts => {
+				let scale = self.settings_scale();
+				let lines = match delta {
+					MouseScrollDelta::LineDelta(_, y) => -y.round() as isize,
+					MouseScrollDelta::PixelDelta(position) => {
+						-(position.y / (FONT_LIST_STRIDE * scale) as f64).round() as isize
+					}
+				};
+				let visible = font_list_rows(self.settings_height as usize, scale);
+				self.settings_editor.fonts.scroll_by(lines, visible);
+				self.redraw_settings();
+			}
 			WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
 				self.settings_key(&event)
 			}
@@ -242,12 +285,16 @@ impl App {
 		}
 	}
 
-	fn settings_click(&mut self) {
-		let scale = self
+	pub(super) fn settings_scale(&self) -> usize {
+		self
 			.settings_window
 			.as_ref()
 			.map_or(1, |window| window.scale_factor().round() as usize)
-			.max(1);
+			.max(1)
+	}
+
+	fn settings_click(&mut self) {
+		let scale = self.settings_scale();
 		let point = (
 			self.settings_cursor_pos.0.max(0.0) as usize,
 			self.settings_cursor_pos.1.max(0.0) as usize,
@@ -255,9 +302,12 @@ impl App {
 		let size = (self.settings_width as usize, self.settings_height as usize);
 		let editor = &mut self.settings_editor;
 		match settings_target(point, size, scale, editor.page) {
-			Some(SettingsTarget::Open(page)) => {
-				editor.page = page;
-				editor.recording_shortcut = None;
+			Some(SettingsTarget::Open(page)) => editor.open(page),
+			Some(SettingsTarget::FontRow(row)) => {
+				if let Some(entry) = editor.fonts.entry_at(row) {
+					editor.fonts.select(entry);
+					editor.status = "Font selected. Click Save to apply.".into();
+				}
 			}
 			Some(SettingsTarget::Back) => {
 				editor.page = SettingsPage::Main;
@@ -317,46 +367,5 @@ impl App {
 			}
 			Err(error) => editor.status = format!("Could not use wallpaper: {error}"),
 		}
-	}
-
-	fn settings_key(&mut self, event: &KeyEvent) {
-		let key = &event.logical_key;
-		if let Some(action) = self.settings_editor.recording_shortcut {
-			if matches!(key, Key::Named(NamedKey::Escape)) {
-				self.settings_editor.recording_shortcut = None;
-				self.settings_editor.status = "Shortcut change cancelled.".into();
-			} else if let Some(shortcut) = Shortcut::from_event(key, self.settings_mods) {
-				if let Some(conflict) = self.settings_editor.shortcuts.conflict(action, &shortcut) {
-					self.settings_editor.status =
-						format!("That shortcut is already assigned to {}.", conflict.label());
-				} else {
-					self.settings_editor.shortcuts.set(action, shortcut);
-					self.settings_editor.recording_shortcut = None;
-					self.settings_editor.status = "Shortcut changed. Click Save to apply.".into();
-				}
-			} else {
-				self.settings_editor.status =
-					"Use a character or supported navigation key with at least one modifier.".into();
-			}
-			return self.redraw_settings();
-		}
-		let is_save = (self.settings_mods.ctrl || self.settings_mods.super_key)
-			&& matches!(key, Key::Character(s) if s.eq_ignore_ascii_case("s"));
-		match key {
-			_ if is_save => return self.save_settings_config(),
-			Key::Named(NamedKey::Enter) => return self.save_settings_config(),
-			Key::Named(NamedKey::Escape) if self.settings_editor.page != SettingsPage::Main => {
-				self.settings_editor.page = SettingsPage::Main
-			}
-			Key::Named(NamedKey::Escape) => return self.close_settings_window(),
-			Key::Named(NamedKey::ArrowLeft) => {
-				self.settings_editor.theme = step_theme(self.settings_editor.theme, -1)
-			}
-			Key::Named(NamedKey::ArrowRight) => {
-				self.settings_editor.theme = step_theme(self.settings_editor.theme, 1)
-			}
-			_ => {}
-		}
-		self.redraw_settings();
 	}
 }

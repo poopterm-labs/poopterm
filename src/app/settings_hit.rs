@@ -10,6 +10,7 @@ pub(crate) enum SettingsPage {
 	Layout,
 	Shortcuts,
 	About,
+	Fonts,
 }
 
 /// A clickable control in the Settings window.
@@ -29,6 +30,8 @@ pub(super) enum SettingsTarget {
 	ToggleSettingsButton,
 	ToggleBottomBar,
 	SetShortcut(ShortcutAction),
+	/// A visible row of the font list, counted from the top.
+	FontRow(usize),
 	/// A stepper button: the row constant and -1 or +1.
 	Step(usize, isize),
 	/// A theme arrow: -1 or +1.
@@ -37,11 +40,18 @@ pub(super) enum SettingsTarget {
 
 /// Header buttons of the main page: page, distance of the left edge from
 /// the window's right edge, and width, in logical pixels.
-pub(super) const HEADER_BUTTONS: [(SettingsPage, usize, usize, &str); 3] = [
-	(SettingsPage::Layout, 412, 124, "Layout"),
-	(SettingsPage::Shortcuts, 280, 124, "Shortcuts"),
-	(SettingsPage::About, 140, 116, "About"),
+pub(super) const HEADER_BUTTONS: [(SettingsPage, usize, usize, &str); 4] = [
+	(SettingsPage::Fonts, 464, 104, "Fonts"),
+	(SettingsPage::Layout, 352, 104, "Layout"),
+	(SettingsPage::Shortcuts, 240, 104, "Shortcuts"),
+	(SettingsPage::About, 128, 104, "About"),
 ];
+
+/// How many font list rows fit above the footer of a window `height`
+/// physical pixels tall.
+pub(super) fn font_list_rows(height: usize, scale: usize) -> usize {
+	(height / scale.max(1)).saturating_sub(64 + FONT_LIST_TOP) / FONT_LIST_STRIDE
+}
 
 /// Toggles on the Layout page.
 pub(super) const LAYOUT_TOGGLES: [(usize, SettingsTarget); 5] = [
@@ -69,9 +79,24 @@ pub(super) fn settings_target(
 		if in_header && (right(164)..right(24)).contains(&x) {
 			return Some(SettingsTarget::Back);
 		}
+		if page == SettingsPage::Fonts {
+			let top = FONT_LIST_TOP * s;
+			let (row, within) = (
+				y.saturating_sub(top) / (FONT_LIST_STRIDE * s),
+				y.saturating_sub(top) % (FONT_LIST_STRIDE * s),
+			);
+			if y >= top
+				&& within < ROW_HEIGHT * s
+				&& row < font_list_rows(height, s)
+				&& (24 * s..right(24)).contains(&x)
+			{
+				return Some(SettingsTarget::FontRow(row));
+			}
+		}
 		let rows: &[(usize, SettingsTarget)] = match page {
 			SettingsPage::Layout => &LAYOUT_TOGGLES,
 			SettingsPage::Shortcuts => &SHORTCUT_TARGETS,
+			SettingsPage::Fonts => &[],
 			_ => return None,
 		};
 		if let Some(&(_, target)) = rows
@@ -155,17 +180,22 @@ mod tests {
 	fn clicks_map_to_main_page_controls() {
 		let target = |x, y| settings_target((x, y), SIZE, 1, SettingsPage::Main);
 		assert_eq!(
-			target(630, 30),
+			target(680, 30),
 			Some(SettingsTarget::Open(SettingsPage::About))
 		);
 		assert_eq!(
-			target(550, 30),
+			target(570, 30),
 			Some(SettingsTarget::Open(SettingsPage::Shortcuts))
 		);
 		assert_eq!(
-			target(400, 30),
+			target(460, 30),
 			Some(SettingsTarget::Open(SettingsPage::Layout))
 		);
+		assert_eq!(
+			target(350, 30),
+			Some(SettingsTarget::Open(SettingsPage::Fonts))
+		);
+		assert_eq!(target(250, 30), None);
 		assert_eq!(target(630, 600), Some(SettingsTarget::Save));
 		assert_eq!(target(30, 240), Some(SettingsTarget::ChooseWallpaper));
 		assert_eq!(target(200, 240), Some(SettingsTarget::ClearWallpaper));
@@ -232,6 +262,41 @@ mod tests {
 		assert_eq!(target(630, 600), None);
 		assert_eq!(target(750, 30), None);
 		assert_eq!(target(610, 30), Some(SettingsTarget::Back));
+	}
+
+	#[test]
+	fn header_buttons_clear_the_title_in_a_small_window() {
+		// "Poopterm Settings" ends near x = 210 at the base size.
+		let leftmost = HEADER_BUTTONS
+			.iter()
+			.map(|(_, offset, ..)| offset)
+			.max()
+			.unwrap();
+		assert!(MIN_SIZE.0 - leftmost >= 212);
+	}
+
+	#[test]
+	fn font_list_rows_are_clickable() {
+		let target = |x, y| settings_target((x, y), SIZE, 1, SettingsPage::Fonts);
+		assert_eq!(target(690, 30), Some(SettingsTarget::Back));
+		assert_eq!(
+			target(40, FONT_LIST_TOP + 4),
+			Some(SettingsTarget::FontRow(0))
+		);
+		assert_eq!(
+			target(700, FONT_LIST_TOP + 2 * FONT_LIST_STRIDE + 20),
+			Some(SettingsTarget::FontRow(2))
+		);
+		// The gap between rows and the margins are not rows.
+		assert_eq!(target(40, FONT_LIST_TOP + ROW_HEIGHT + 1), None);
+		assert_eq!(target(10, FONT_LIST_TOP + 4), None);
+		assert_eq!(target(630, 600), Some(SettingsTarget::Save));
+		let rows = font_list_rows(SIZE.1, 1);
+		assert_eq!(rows, 10);
+		let below = FONT_LIST_TOP + rows * FONT_LIST_STRIDE + 4;
+		assert_eq!(target(40, below), None, "rows end above the footer");
+		assert!(FONT_LIST_TOP + rows * FONT_LIST_STRIDE <= SIZE.1 - 64);
+		assert_eq!(font_list_rows(SIZE.1 * 2, 2), rows);
 	}
 
 	#[test]

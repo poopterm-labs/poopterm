@@ -160,3 +160,15 @@ fn matching_prefers_the_slant_then_the_nearest_weight() {
 	);
 	assert_eq!(path(cache.find("Missing", 400, false)), None);
 }
+
+#[test]
+fn monospace_families_are_listed_once_in_order() {
+	let cache = synthetic(&[
+		face("Zeta Mono", 400, false, true),
+		face("alpha mono", 700, false, true),
+		face("Zeta Mono", 700, false, true),
+		face("Sans", 400, false, false),
+	]);
+	assert_eq!(cache.monospace_families(), ["alpha mono", "Zeta Mono"]);
+	assert_eq!(cache.faces().count(), 4);
+}

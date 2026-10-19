@@ -3,7 +3,7 @@
 //! constants.
 use super::*;
 use super::{
-	settings_hit::{HEADER_BUTTONS, SettingsPage},
+	settings_hit::{HEADER_BUTTONS, SettingsPage, font_list_rows},
 	settings_pen::Pen,
 };
 use crate::input::shortcuts::ShortcutAction;
@@ -30,6 +30,9 @@ pub(super) const SHORTCUT_ROWS: [(ShortcutAction, usize); 7] = [
 	(ShortcutAction::PreviousPrompt, 344),
 	(ShortcutAction::NextPrompt, 392),
 ];
+/// Top of the Fonts page's list and the distance between its rows.
+pub(super) const FONT_LIST_TOP: usize = 104;
+pub(super) const FONT_LIST_STRIDE: usize = 44;
 /// Default and minimum Settings window size, in logical pixels.
 pub(super) const DEFAULT_SIZE: (usize, usize) = (760, 640);
 pub(super) const MIN_SIZE: (usize, usize) = (680, 600);
@@ -192,6 +195,34 @@ impl App {
 				] {
 					pen.text(p, x, row + 8, label, 0.82);
 					pen.toggle(p, style, row, enabled);
+				}
+			}
+			SettingsPage::Fonts => {
+				pen.text(p, x, 28, "Fonts", 1.0);
+				let visible = font_list_rows(p.height, scale);
+				let fonts = &editor.fonts;
+				let hint = if fonts.len() > visible {
+					"Monospace fonts on this system. Scroll or use ↑ ↓ for more."
+				} else {
+					"Monospace fonts installed on this system."
+				};
+				pen.text(p, x, 68, hint, 0.72);
+				pen.back_button(p, style, &hovered);
+				let selected = fonts.selected();
+				for row in 0..visible {
+					let Some(entry) = fonts.entry_at(row) else {
+						break;
+					};
+					let top = FONT_LIST_TOP + row * FONT_LIST_STRIDE;
+					let rect = (
+						x,
+						top * scale,
+						p.width.saturating_sub(48 * scale),
+						ROW_HEIGHT * scale,
+					);
+					let lit = selected == Some(entry) || hovered(rect.0, rect.1, rect.2, rect.3);
+					p.button(rect, style, lit);
+					pen.text(p, x + 16 * scale, top + 9, fonts.label(entry), 0.82);
 				}
 			}
 			SettingsPage::Main => compose_main_settings(editor, style, p, &mut pen, &hovered),
