@@ -95,23 +95,19 @@ impl Term {
 			let cols = self.cols;
 			let mut x = self.cx;
 			let row = &mut self.grid[self.cy][..cols];
+			// Cells inside the segment are all rewritten; only wide characters
+			// cut by its edges need repair.
+			if row[x].width == 0 && x > 0 {
+				row[x - 1] = blank;
+			}
 			let (mut c, mut width) = (c, width);
 			loop {
-				if row[x].width == 0 && x > 0 {
-					row[x - 1] = blank;
-				}
-				if row[x].width == 2 && x + 1 < cols {
-					row[x + 1] = blank;
-				}
-				if width == 2 && x + 2 < cols && row[x + 1].width == 2 {
-					row[x + 2] = blank;
-				}
 				row[x] = Cell {
 					ch: c,
 					width: width as u8,
 					..template
 				};
-				if width == 2 && x + 1 < cols {
+				if width == 2 {
 					row[x + 1] = Cell {
 						width: 0,
 						..template
@@ -129,6 +125,9 @@ impl Term {
 					break;
 				}
 				(c, width) = (next, next_width);
+			}
+			if x < cols && row[x].width == 0 {
+				row[x] = blank;
 			}
 			self.last_printed = Some(c);
 			self.wrap_pending = x >= cols;
