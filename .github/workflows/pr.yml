@@ -1,0 +1,26 @@
+name: Pull request rules
+
+# Runs on every pull request, and again when its title is edited: the title
+# becomes the squashed commit on main and its changelog line.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  rules:
+    name: Title and 3:1 test ratio
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check the title and the ratio of test lines to code lines
+        env:
+          # Through the environment, so a title cannot inject shell code.
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/pr_check.py --base "$BASE" --title "$TITLE"
