@@ -105,7 +105,18 @@ Details: [`docs/architecture.md`](docs/architecture.md).
 - **Config compatibility.** `config.toml` keys are user-facing; keep old
   names working (see `ThemeKind::parse`) and preserve unknown keys on save.
 - Match surrounding style: comment density, naming, and the existing `pub(crate)`
-  / `pub(super)` visibility patterns. No new dependencies without a reason.
+  / `pub(super)` visibility patterns.
+- **No new crates; write our own.** Implement features in-house, from the
+  specifications (clean room: never read or copy another implementation's
+  source), so we keep fine-grained control over speed, limits and security.
+  This holds for protocols, platform integration (notifications, D-Bus,
+  clipboard formats) and decoders alike. Existing dependencies are being
+  replaced over time (see `TODO.md`); never add one, and test each
+  replacement differentially against the crate it replaces.
+- **Standards compliance.** Implement escape sequences completely, as their
+  specifications define them (xterm ctlseqs, kitty, iTerm2, OSC 133/7501…),
+  including queries and replies, with the bounds above. Unsupported or
+  unknown sequences are ignored silently, never echoed.
 
 ## Commits and releases
 
