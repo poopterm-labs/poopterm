@@ -218,9 +218,11 @@ mod tests {
 		let dir = TempDir::new("keys");
 		assert!(compile_into(&dir.0));
 		let caps = capabilities(&dir.0);
-		// ncurses enables application cursor mode (smkx) before reading keys.
+		// ncurses enables application cursor and keypad modes (smkx)
+		// before reading keys.
 		let app = KeyModes {
 			application_cursor: true,
+			application_keypad: true,
 			kitty: false,
 		};
 		let shift = Modifiers {
@@ -258,6 +260,28 @@ mod tests {
 				Some(sent.as_slice()),
 				"{cap}"
 			);
+		}
+		use crate::input::keypad::encode_keypad;
+		let text = |s: &str| Key::Character(s.into());
+		for (cap, key) in [
+			("kent", Key::Named(NamedKey::Enter)),
+			("kb2", Key::Named(NamedKey::Clear)),
+			("kp5", Key::Named(NamedKey::Clear)),
+			("kpADD", text("+")),
+			("kpSUB", text("-")),
+			("kpMUL", text("*")),
+			("kpDIV", text("/")),
+			("kpCMA", text(",")),
+		] {
+			let sent = encode_keypad(&key, none, app).unwrap();
+			assert_eq!(
+				caps.get(cap).map(String::as_bytes),
+				Some(sent.as_slice()),
+				"{cap}"
+			);
+		}
+		for unsent in ["ka2", "kb1", "kb3", "kc2", "kpDOT", "kpZRO"] {
+			assert!(!caps.contains_key(unsent), "{unsent} is never sent");
 		}
 	}
 

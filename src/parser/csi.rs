@@ -86,6 +86,7 @@ impl Term {
 			for p in params.iter().filter_map(|s| s.first().copied()) {
 				match p {
 					1 => self.application_cursor = enabled,
+					66 => self.application_keypad = enabled,
 					6 => {
 						self.origin_mode = enabled;
 						self.cx = 0;
@@ -303,6 +304,7 @@ impl Term {
 	pub(crate) fn private_mode(&self, mode: u16) -> Option<bool> {
 		Some(match mode {
 			1 => self.application_cursor,
+			66 => self.application_keypad,
 			6 => self.origin_mode,
 			7 => self.auto_wrap,
 			25 => self.cursor_visible,
@@ -335,6 +337,7 @@ impl Term {
 		self.origin_mode = false;
 		self.auto_wrap = true;
 		self.application_cursor = false;
+		self.application_keypad = false;
 		self.scroll_top = 0;
 		self.scroll_bottom = self.rows - 1;
 		self.charsets = [false; 2];
