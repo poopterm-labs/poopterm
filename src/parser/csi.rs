@@ -174,19 +174,23 @@ impl Term {
 				};
 				self.cx = 0;
 			}
-			'A' => {
+			// CUU, and VPB from ECMA-48.
+			'A' | 'k' => {
 				let top = if self.origin_mode { self.scroll_top } else { 0 };
 				self.cy = self.cy.saturating_sub(p(0, 1)).max(top);
 			}
-			'B' => {
+			// CUD and VPR.
+			'B' | 'e' => {
 				self.cy = (self.cy + p(0, 1)).min(if self.origin_mode {
 					self.scroll_bottom
 				} else {
 					self.rows - 1
 				})
 			}
-			'C' => self.cx = (self.cx + p(0, 1)).min(self.cols - 1),
-			'D' => self.cx = self.cx.saturating_sub(p(0, 1)),
+			// CUF and HPR.
+			'C' | 'a' => self.cx = (self.cx + p(0, 1)).min(self.cols - 1),
+			// CUB, and HPB from ECMA-48.
+			'D' | 'j' => self.cx = self.cx.saturating_sub(p(0, 1)),
 			'G' | '`' => self.cx = (p(0, 1) - 1).min(self.cols - 1),
 			'H' | 'f' => {
 				let row = p(0, 1) - 1 + if self.origin_mode { self.scroll_top } else { 0 };

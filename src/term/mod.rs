@@ -29,6 +29,8 @@ mod kitty_animation;
 mod kitty_animation_tests;
 #[cfg(test)]
 mod kitty_tests;
+#[cfg(test)]
+mod movement_tests;
 pub(crate) mod multicell;
 #[cfg(test)]
 mod multicell_tests;

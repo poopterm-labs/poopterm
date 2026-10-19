@@ -1,6 +1,6 @@
 //! Two-byte `ESC` sequences: charsets, index, reset and cursor save.
 use crate::{
-	term::Term,
+	term::{Cell, Term},
 	theme::{Theme, ThemeKind},
 };
 
@@ -12,6 +12,12 @@ impl Term {
 		if matches!(intermediates, b"(" | b")") {
 			if matches!(byte, b'0' | b'B') {
 				self.charsets[usize::from(intermediates == b")")] = byte == b'0';
+			}
+			return;
+		}
+		if intermediates == b"#" {
+			if byte == b'8' {
+				self.screen_alignment();
 			}
 			return;
 		}
@@ -56,5 +62,28 @@ impl Term {
 			b'8' => self.restore_cursor(),
 			_ => {}
 		}
+	}
+}
+
+impl Term {
+	/// DECALN: fills the screen with `E` in the default rendition, resets the
+	/// margins and homes the cursor.
+	fn screen_alignment(&mut self) {
+		self.erase_images(0, self.rows * self.cols);
+		self.clear_kitty_placements(false);
+		let cell = Cell {
+			ch: 'E',
+			fg: self.default_fg,
+			bg: self.default_bg,
+			..Cell::default()
+		};
+		for row in self.grid.iter_mut() {
+			row.fill(cell);
+		}
+		self.scroll_top = 0;
+		self.scroll_bottom = self.rows - 1;
+		self.cx = 0;
+		self.cy = 0;
+		self.wrap_pending = false;
 	}
 }
