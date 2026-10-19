@@ -89,9 +89,30 @@ impl Term {
 
 /// A title or icon name without control characters, at most 64 characters.
 pub(super) fn clean_title(text: &[u8]) -> String {
+	// Most titles are short printable ASCII, copied as they are.
+	if text.len() <= 64 && text.iter().all(|&byte| matches!(byte, b' '..=b'~')) {
+		return String::from_utf8_lossy(text).into_owned();
+	}
 	String::from_utf8_lossy(text)
 		.chars()
 		.filter(|c| !c.is_control())
 		.take(64)
 		.collect()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::clean_title;
+
+	#[test]
+	fn titles_lose_controls_and_stop_at_64_characters() {
+		assert_eq!(clean_title(b"vim main.rs"), "vim main.rs");
+		assert_eq!(clean_title(b"a\x7fb\tc"), "abc");
+		assert_eq!(clean_title("é\u{85}ü".as_bytes()), "éü");
+		assert_eq!(clean_title(b"bad \xff byte"), "bad \u{fffd} byte");
+		let long = "x".repeat(70);
+		assert_eq!(clean_title(long.as_bytes()), "x".repeat(64));
+		let wide = "é".repeat(70);
+		assert_eq!(clean_title(wide.as_bytes()), "é".repeat(64));
+	}
 }
