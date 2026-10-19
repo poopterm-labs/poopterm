@@ -61,10 +61,22 @@ refresh() {
 	return 0
 }
 
+# ncurses reads entries only from its own search path, which may leave out
+# $PREFIX/share/terminfo (Fedora searches /usr/share/terminfo and
+# /etc/terminfo only). Use that directory when ncurses searches it, else the
+# first system directory ncurses does. A prefix chosen on purpose is kept.
+terminfo=$datadir/terminfo
+if [ "$PREFIX" = /usr/local ] && command -v infocmp >/dev/null 2>&1; then
+	searched=$(infocmp -D 2>/dev/null | grep -v "^$HOME/" || true)
+	if [ -n "$searched" ] && ! printf '%s\n' "$searched" | grep -qx "$terminfo"; then
+		terminfo=$(printf '%s\n' "$searched" | head -n 1)
+	fi
+fi
+
 if [ "$action" = uninstall ]; then
 	run rm -f "$DESTDIR$bindir/poopterm" "$DESTDIR$datadir/applications/poopterm.desktop" \
-		"$DESTDIR$datadir/terminfo/x/xterm-poopterm" "$DESTDIR$datadir/terminfo/p/poopterm" \
-		"$DESTDIR$datadir/terminfo/78/xterm-poopterm" "$DESTDIR$datadir/terminfo/70/poopterm"
+		"$DESTDIR$terminfo/x/xterm-poopterm" "$DESTDIR$terminfo/p/poopterm" \
+		"$DESTDIR$terminfo/78/xterm-poopterm" "$DESTDIR$terminfo/70/poopterm"
 	for icon in $icons; do
 		run rm -f "$DESTDIR$datadir/icons/hicolor/${icon%%:*}/apps/poopterm.png"
 	done
@@ -101,8 +113,8 @@ for icon in $icons; do
 done
 # Shells get TERM=xterm-poopterm only with this entry; see src/terminfo.rs.
 if command -v tic >/dev/null 2>&1; then
-	run install -d "$DESTDIR$datadir/terminfo"
-	run tic -x -o "$DESTDIR$datadir/terminfo" "$root/terminfo/poopterm.terminfo"
+	run install -d "$DESTDIR$terminfo"
+	run tic -x -o "$DESTDIR$terminfo" "$root/terminfo/poopterm.terminfo"
 else
 	echo "Note: tic not found; shells will use TERM=xterm-256color."
 fi

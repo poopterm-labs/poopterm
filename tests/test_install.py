@@ -18,12 +18,21 @@ class Install(unittest.TestCase):
         self.binary = self.root / 'poopterm'
         self.binary.write_text('#!/bin/sh\n')
         self.stage = self.root / 'stage'
+        # ncurses' search path, faked so results do not depend on the host.
+        self.tools = self.root / 'tools'
+        self.tools.mkdir()
+        self.searched('/usr/local/share/terminfo')
+
+    def searched(self, *dirs):
+        listing = ''.join(f'{d}\\n' for d in dirs)
+        (self.tools / 'infocmp').write_text(f'#!/bin/sh\n[ "$1" = -D ] && printf "{listing}"\n')
+        (self.tools / 'infocmp').chmod(0o755)
 
     def tearDown(self):
         shutil.rmtree(self.root)
 
     def run_script(self, *args, **env):
-        environment = {'PATH': os.environ['PATH'], 'HOME': str(self.home), 'POOPTERM_BIN': str(self.binary),
+        environment = {'PATH': f"{self.tools}:{os.environ['PATH']}", 'HOME': str(self.home), 'POOPTERM_BIN': str(self.binary),
                        'DESTDIR': str(self.stage)}
         environment.update(env)
         return subprocess.run(['sh', str(SCRIPT), '--no-build', *args], env=environment,
@@ -51,6 +60,19 @@ class Install(unittest.TestCase):
         self.run_script('--uninstall')
         leftovers = [path for path in self.stage.rglob('*poopterm*')]
         self.assertEqual(leftovers, [])
+
+    @unittest.skipUnless(shutil.which('tic'), 'needs tic')
+    def test_terminfo_goes_where_ncurses_looks(self):
+        # Fedora's ncurses searches only these, not /usr/local/share/terminfo.
+        self.searched(f'{self.home}/.terminfo', '/usr/share/terminfo', '/etc/terminfo')
+        self.run_script()
+        self.assertTrue(any((self.stage / 'usr/share/terminfo').rglob('xterm-poopterm')))
+        self.assertFalse((self.stage / 'usr/local/share/terminfo').exists())
+        self.run_script('--uninstall')
+        self.assertEqual(list(self.stage.rglob('*poopterm*')), [])
+        # A prefix chosen on purpose is kept.
+        self.run_script(PREFIX='/opt/poopterm')
+        self.assertTrue(any((self.stage / 'opt/poopterm/share/terminfo').rglob('xterm-poopterm')))
 
     def test_prefix_moves_everything(self):
         self.run_script(PREFIX='/opt/poopterm')
