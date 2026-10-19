@@ -1,5 +1,22 @@
 # Changelog
 
+## 26.10.11 "Giga Fly" — 2026-10-19
+
+### Fixed
+
+- Fit the settings window on small screens again (ui).
+- Parse XTVERSION replies in linear time (bench).
+
+### Performance
+
+- Redraw only changed rows with vertical tabs (render).
+
+### Maintenance
+
+- Run the release codename parser's tests (build).
+- Switch to a project-tuned CodeQL setup (codeql).
+- Add contributing guide, code of conduct and security policy.
+
 ## 26.10.10 "Giga Fly" — 2026-10-19
 
 ### Added
