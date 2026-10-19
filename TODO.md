@@ -134,11 +134,3 @@ gain), `image` (wallpapers and iTerm2 inline images need JPEG and WebP), and `rf
   kitty animation frames.
 - **OSC 176 (application id)** is ignored: a Wayland app id is fixed once
   the window exists, so it cannot follow a program's request.
-
-## CI and platforms
-
-- **First automatic release.** The release job (version bump, GitHub
-  release, Homebrew formula update) has never run: the FreeBSD job hung on
-  an interactive-bash test until it was fixed. Confirm the next green `main`
-  run publishes a release and points `Formula/poopterm.rb` at it (it is still
-  at 0.43.0).
