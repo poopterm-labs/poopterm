@@ -21,6 +21,8 @@ pub(crate) struct FaceInfo {
 	/// CSS-style weight class, 1–1000 (400 regular, 700 bold).
 	pub weight: u16,
 	pub italic: bool,
+	/// A fixed-pitch text font: every glyph has one width and ASCII letters
+	/// and digits are mapped, which rules out emoji and symbol fonts.
 	pub monospace: bool,
 }
 
@@ -110,7 +112,7 @@ fn read_face<R: Read + Seek>(file: &mut R, start: u64, index: u32) -> io::Result
 	// keep their source's "monospaced" byte.
 	let fixed_pitch = post.len() >= 16 && be32(&post, 12) != 0;
 	// Fonts like Roboto Mono do not set it; measure their glyphs instead.
-	let monospace = fixed_pitch
+	let fixed_width = fixed_pitch
 		|| match (find(b"hmtx"), hhea.len() >= 36) {
 			(Some((offset, length)), true) => {
 				let metrics = u64::from(be16(&hhea, 34)) * 4;
@@ -119,6 +121,10 @@ fn read_face<R: Read + Seek>(file: &mut R, start: u64, index: u32) -> io::Result
 			}
 			_ => false,
 		};
+	// Emoji and symbol fonts are fixed pitch too; a terminal font needs text.
+	let monospace = fixed_width
+		&& find(b"cmap")
+			.is_some_and(|(offset, length)| covers_latin(file, offset, length).unwrap_or(false));
 	Ok(Some(FaceInfo {
 		index,
 		postscript: names.get(6).unwrap_or_default(),
@@ -200,6 +206,89 @@ fn rank(platform: u16, encoding: u16, language: u16) -> Option<u8> {
 		(3, 0 | 1 | 10, _) => Some(4),
 		_ => None,
 	}
+}
+
+/// Characters a terminal font must map: ASCII letters and digits.
+fn latin() -> impl Iterator<Item = u32> {
+	(u32::from(b'0')..=u32::from(b'9'))
+		.chain(u32::from(b'A')..=u32::from(b'Z'))
+		.chain(u32::from(b'a')..=u32::from(b'z'))
+}
+
+/// Whether the `cmap` table at `offset` maps every [`latin`] character to
+/// a glyph, using its best Unicode subtable (format 12 or format 4).
+fn covers_latin<R: Read + Seek>(file: &mut R, offset: u64, length: u32) -> io::Result<bool> {
+	let header = read_at(file, offset, 4)?;
+	let count = usize::from(be16(&header, 2)).min(256);
+	let records = read_at(file, offset + 4, 8 * count)?;
+	let best = records
+		.as_chunks::<8>()
+		.0
+		.iter()
+		.filter_map(|record| {
+			let rank = match (be16(record, 0), be16(record, 2)) {
+				(3, 10) | (0, 4 | 6) => 0,
+				(3, 1) | (0, 0..=3) => 1,
+				_ => return None,
+			};
+			Some((rank, be32(record, 4)))
+		})
+		.filter(|&(_, at)| at < length)
+		.min();
+	let Some((_, at)) = best else {
+		return Ok(false);
+	};
+	let start = offset + u64::from(at);
+	let head = read_at(file, start, 4)?;
+	Ok(match be16(&head, 0) {
+		4 => {
+			let size = usize::from(be16(&head, 2)).min((length - at) as usize);
+			let table = read_at(file, start, size)?;
+			latin().all(|ch| format4_glyph(&table, ch).is_some_and(|glyph| glyph != 0))
+		}
+		12 => {
+			let head = read_at(file, start, 16)?;
+			// Groups are sorted, so ASCII is in the first few.
+			let groups = (be32(&head, 12) as usize).min(64);
+			let groups = read_at(file, start + 16, 12 * groups)?;
+			let groups = groups.as_chunks::<12>().0;
+			latin().all(|ch| {
+				groups.iter().any(|group| {
+					let (first, last) = (be32(group, 0), be32(group, 4));
+					(first..=last).contains(&ch) && be32(group, 8).wrapping_add(ch - first) != 0
+				})
+			})
+		}
+		_ => false,
+	})
+}
+
+/// The glyph a format 4 `cmap` subtable maps `ch` to; `None` if malformed.
+fn format4_glyph(table: &[u8], ch: u32) -> Option<u16> {
+	let get = |at: usize| {
+		table
+			.get(at..at + 2)
+			.map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
+	};
+	let ch = u16::try_from(ch).ok()?;
+	let segments = usize::from(get(6)? / 2);
+	let (ends, starts) = (14, 16 + 2 * segments);
+	let (deltas, ranges) = (starts + 2 * segments, starts + 4 * segments);
+	let segment = (0..segments).find(|&i| get(ends + 2 * i).is_some_and(|end| end >= ch))?;
+	let start = get(starts + 2 * segment)?;
+	if ch < start {
+		return Some(0);
+	}
+	let delta = get(deltas + 2 * segment)?;
+	let range = get(ranges + 2 * segment)?;
+	if range == 0 {
+		return Some(ch.wrapping_add(delta));
+	}
+	let at = ranges + 2 * segment + usize::from(range) + 2 * usize::from(ch - start);
+	Some(match get(at)? {
+		0 => 0,
+		glyph => glyph.wrapping_add(delta),
+	})
 }
 
 /// Whether every non-zero advance width among the `len` bytes of `hmtx`

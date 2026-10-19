@@ -61,6 +61,64 @@ fn head(mac_style: u16) -> Vec<u8> {
 	table
 }
 
+/// A `cmap` with one subtable under `(platform, encoding)`.
+fn cmap(platform: u16, encoding: u16, subtable: Vec<u8>) -> Vec<u8> {
+	let mut table = Vec::new();
+	for value in [0, 1, platform, encoding] {
+		table.extend(u16::to_be_bytes(value));
+	}
+	table.extend(12u32.to_be_bytes());
+	table.extend(subtable);
+	table
+}
+
+/// A format 4 subtable mapping each inclusive range to glyphs from 1.
+fn format4(ranges: &[(u16, u16)]) -> Vec<u8> {
+	let mut segments = ranges.to_vec();
+	segments.push((0xffff, 0xffff));
+	let count = segments.len() as u16;
+	let mut table = Vec::new();
+	for value in [4, 0, 0, 2 * count, 0, 0, 0] {
+		table.extend(u16::to_be_bytes(value));
+	}
+	segments
+		.iter()
+		.for_each(|&(_, end)| table.extend(end.to_be_bytes()));
+	table.extend([0, 0]);
+	segments
+		.iter()
+		.for_each(|&(start, _)| table.extend(start.to_be_bytes()));
+	// idDelta maps each segment's first character to glyph 1.
+	segments
+		.iter()
+		.for_each(|&(start, _)| table.extend(1u16.wrapping_sub(start).to_be_bytes()));
+	segments.iter().for_each(|_| table.extend([0, 0]));
+	let length = table.len() as u16;
+	table[2..4].copy_from_slice(&length.to_be_bytes());
+	table
+}
+
+/// A format 12 subtable mapping each inclusive range to glyphs from 1.
+fn format12(groups: &[(u32, u32)]) -> Vec<u8> {
+	let mut table = Vec::new();
+	table.extend(12u16.to_be_bytes());
+	table.extend([0, 0]);
+	table.extend((16 + 12 * groups.len() as u32).to_be_bytes());
+	table.extend(0u32.to_be_bytes());
+	table.extend((groups.len() as u32).to_be_bytes());
+	for &(start, end) in groups {
+		for value in [start, end, 1] {
+			table.extend(value.to_be_bytes());
+		}
+	}
+	table
+}
+
+/// Printable ASCII, as text fonts map it.
+fn latin() -> (&'static [u8; 4], Vec<u8>) {
+	(b"cmap", cmap(3, 1, format4(&[(0x20, 0x7e)])))
+}
+
 /// An sfnt with `tables`, as if it started at `base` in its file.
 fn sfnt(tables: &[(&[u8; 4], Vec<u8>)], base: usize) -> Vec<u8> {
 	let mut out = Vec::new();
@@ -213,6 +271,7 @@ fn monospace_comes_from_post_not_panose() {
 		&[
 			(b"name", name_table(&[(3, 1, 0x409, 1, "F")])),
 			(b"post", post(true)),
+			latin(),
 		],
 		0,
 	);
@@ -276,6 +335,7 @@ fn unflagged(advances: &[u16]) -> Vec<u8> {
 			(b"name", name_table(&[(3, 1, 0x409, 1, "Unflagged")])),
 			hhea,
 			hmtx,
+			latin(),
 		],
 		0,
 	)
@@ -297,4 +357,54 @@ fn equal_advance_widths_make_an_unflagged_font_monospace() {
 	}
 	assert!(!faces(&unflagged(&[0, 0, 0])).unwrap()[0].monospace);
 	assert!(!faces(&unflagged(&[])).unwrap()[0].monospace);
+}
+
+/// A fixed-pitch font with this `cmap` table, if any.
+fn fixed_with(cmap: Option<Vec<u8>>) -> Vec<u8> {
+	let mut tables = vec![
+		(b"name", name_table(&[(3, 1, 0x409, 1, "Glyphs")])),
+		(b"post", post(true)),
+	];
+	tables.extend(cmap.map(|table| (b"cmap", table)));
+	sfnt(&tables, 0)
+}
+
+fn monospace(font: &[u8]) -> bool {
+	faces(font).unwrap()[0].monospace
+}
+
+#[test]
+fn monospace_fonts_must_map_latin_letters_and_digits() {
+	// Emoji and symbol fonts are fixed pitch too, but cannot be the
+	// terminal font: Noto Color Emoji maps digits and '#' but no letters.
+	let letters = [(0x30, 0x39), (0x41, 0x5a), (0x61, 0x7a)];
+	assert!(monospace(&fixed_with(Some(cmap(3, 1, format4(&letters))))));
+	assert!(monospace(&fixed_with(Some(cmap(
+		0,
+		3,
+		format4(&[(0x20, 0x7e)])
+	)))));
+	let emoji = format4(&[(0x23, 0x23), (0x30, 0x39), (0x2600, 0x27bf)]);
+	assert!(!monospace(&fixed_with(Some(cmap(3, 1, emoji)))));
+	assert!(!monospace(&fixed_with(Some(cmap(
+		3,
+		1,
+		format4(&[(0x41, 0x5a)])
+	)))));
+	assert!(!monospace(&fixed_with(None)));
+	// Full-repertoire fonts use format 12.
+	let wide = format12(&[(0x20, 0x7e), (0x1f600, 0x1f64f)]);
+	assert!(monospace(&fixed_with(Some(cmap(3, 10, wide)))));
+	let symbols = format12(&[(0xe000, 0xf8ff)]);
+	assert!(!monospace(&fixed_with(Some(cmap(3, 10, symbols)))));
+	// A character mapped to glyph 0 (.notdef) is not covered: shift the
+	// digits' segment so that '0' lands on it.
+	let mut notdef = format4(&letters);
+	let deltas = 14 + 2 * 4 + 2 + 2 * 4; // header, endCode, pad, startCode
+	notdef[deltas..deltas + 2].copy_from_slice(&0u16.wrapping_sub(0x30).to_be_bytes());
+	assert!(!monospace(&fixed_with(Some(cmap(3, 1, notdef)))));
+	// Malformed subtables are not coverage, and not panics.
+	let mut cut = cmap(3, 1, format4(&[(0x20, 0x7e)]));
+	cut.truncate(30);
+	assert!(!monospace(&fixed_with(Some(cut))));
 }
