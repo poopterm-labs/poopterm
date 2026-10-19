@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.24 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Add hpr, vpr, hpb, vpb and decaln (#13) (parser).
+
 ## 26.10.23 "Giga Fly" — 2026-10-19
 
 ### Fixed
