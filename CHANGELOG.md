@@ -1,5 +1,15 @@
 # Changelog
 
+## 26.10.6 "Giga Fly" — 2026-10-19
+
+### Fixed
+
+- Put the terminfo entry where ncurses looks for it (install).
+
+### Performance
+
+- Use mimalloc as the global allocator.
+
 ## 26.10.5 "Giga Fly" — 2026-10-19
 
 ### Performance
