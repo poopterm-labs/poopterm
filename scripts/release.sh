@@ -29,6 +29,10 @@ else
   echo 'main moved since this CI run; skipping release.'
   exit 0
 fi
+# Package the release commit itself, so the .deb and the binary in it carry
+# the new version; a failed build stops before the GitHub release exists.
+cargo build --release --locked
+bash scripts/package-deb.sh
 # Create only when absent; API failures other than 404 must stop publication.
 if ! gh api "repos/${GH_REPO}/releases/tags/v${version}" > /tmp/poopterm-release.json 2> /tmp/poopterm-release-error; then
   if ! grep -q 'HTTP 404' /tmp/poopterm-release-error; then
@@ -40,9 +44,9 @@ if ! gh api "repos/${GH_REPO}/releases/tags/v${version}" > /tmp/poopterm-release
 fi
 # The APT feed polls this release asset and republishes it from GitHub Pages.
 shopt -s nullglob
-packages=(dist/*.deb)
+packages=(dist/poopterm_"${version}"-1_*.deb)
 if ((${#packages[@]} != 1)); then
-  echo "expected exactly one Debian package in dist/, found ${#packages[@]}" >&2
+  echo "expected exactly one Debian package of ${version} in dist/, found ${#packages[@]}" >&2
   exit 1
 fi
 gh release upload "v${version}" "${packages[0]}" --clobber

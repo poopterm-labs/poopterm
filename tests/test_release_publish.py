@@ -38,9 +38,20 @@ class Publish(unittest.TestCase):
         (self.repo / 'Cargo.lock').write_text(f'version = 4\n[[package]]\nname = "poopterm"\nversion = "{self.version}"\n')
         (self.repo / 'CHANGELOG.md').write_text('# Changelog\n\n## Old\n')
         (self.repo / 'Formula/poopterm.rb').write_text('  tag: "v0.43.0",\n  version "0.43.0"\n')
+        # A package left over from before the bump, as CI artifacts used to be.
         dist = self.repo / 'dist'
         dist.mkdir()
-        (dist / f'poopterm_{self.version}-1_amd64.deb').write_bytes(b'test package')
+        (dist / f'poopterm_{self.version}-1_amd64.deb').write_bytes(b'stale package')
+        # Packages whatever version Cargo.toml holds, or FAKE_DEB_VERSION.
+        package = self.repo / 'scripts/package-deb.sh'
+        package.write_text('''#!/usr/bin/env bash
+set -euo pipefail
+version=${FAKE_DEB_VERSION:-$(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)}
+rm -f dist/poopterm_*.deb
+echo "package $version" >> "$FAKE_GH_ROOT/build.log"
+echo built > "dist/poopterm_${version}-1_amd64.deb"
+''')
+        package.chmod(0o755)
         self.git('add', '.')
         self.git('commit', '-m', 'Initial checked revision')
         self.sha = self.git('rev-parse', 'HEAD').strip()
@@ -65,6 +76,12 @@ if sys.argv[1:3] == ['release', 'create']:
     (root / 'released').touch()
 ''')
         gh.chmod(0o755)
+        cargo = fakebin / 'cargo'
+        cargo.write_text('''#!/usr/bin/env bash
+echo "cargo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_ROOT/build.log"
+[[ ! -e "$FAKE_GH_ROOT/fail-build" ]]
+''')
+        cargo.chmod(0o755)
         self.env = dict(os.environ, GITHUB_SHA=self.sha, GH_REPO='test/poopterm',
                         GH_TOKEN='fake-local-test-token', FAKE_GH_ROOT=str(self.root),
                         PATH=str(fakebin) + os.pathsep + os.environ['PATH'])
@@ -96,6 +113,36 @@ if sys.argv[1:3] == ['release', 'create']:
             self.assertIn('[skip ci]', message, message)
             self.assertTrue(message.startswith('chore('), message)
 
+    def uploads(self):
+        log = (self.root / 'api.log').read_text().splitlines()
+        return [line.split()[-2] for line in log if line.startswith('release upload')]
+
+    def test_the_package_is_built_from_the_bumped_release_commit(self):
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        version = self.version.rsplit('.', 1)[0] + '.1'
+        self.assertEqual(self.uploads(), [f'dist/poopterm_{version}-1_amd64.deb'])
+        build = (self.root / 'build.log').read_text().splitlines()
+        self.assertEqual(build, [f'cargo build --release --locked {version}', f'package {version}'])
+
+    def test_a_package_of_another_version_is_never_uploaded(self):
+        self.env['FAKE_DEB_VERSION'] = self.version
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('expected exactly one', result.stderr)
+        self.assertEqual(self.uploads(), [])
+
+    def test_a_failed_build_stops_before_the_github_release(self):
+        (self.root / 'fail-build').touch()
+        self.assertNotEqual(self.publish().returncode, 0)
+        self.assertFalse((self.root / 'api.log').exists())
+        (self.root / 'fail-build').unlink()
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        version = self.version.rsplit('.', 1)[0] + '.1'
+        self.assertEqual(self.uploads(), [f'dist/poopterm_{version}-1_amd64.deb'])
+        self.assertEqual(len(self.git('tag').splitlines()), 1)
+
     def test_moved_main_skips_every_release_mutation(self):
         (self.repo / 'new').touch()
         self.git('add', 'new')
@@ -106,6 +153,7 @@ if sys.argv[1:3] == ['release', 'create']:
         self.assertIn('main moved', result.stdout)
         self.assertEqual(self.git('tag'), '')
         self.assertFalse((self.root / 'api.log').exists())
+        self.assertFalse((self.root / 'build.log').exists())
 
     def test_api_failure_stops_and_rerun_resumes_without_another_bump(self):
         failure = self.root / 'fail-api'
@@ -117,6 +165,8 @@ if sys.argv[1:3] == ['release', 'create']:
         self.assertEqual(len(self.git('tag').splitlines()), 1)
         self.assertEqual((self.root / 'api.log').read_text().count('release create'), 1)
         self.assertEqual((self.root / 'api.log').read_text().count('release upload'), 1)
+        version = self.version.rsplit('.', 1)[0] + '.1'
+        self.assertEqual(self.uploads(), [f'dist/poopterm_{version}-1_amd64.deb'])
 
     def test_a_push_race_cannot_publish_a_tag_or_overwrite_main(self):
         racer = self.root / 'racer'
