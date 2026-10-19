@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.25 "Giga Fly" — 2026-10-19
+
+### Fixed
+
+- Attach the package before publishing the release (#15) (release).
+
 ## 26.10.24 "Giga Fly" — 2026-10-19
 
 ### Added
