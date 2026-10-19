@@ -1,6 +1,7 @@
 //! Boundary tests for horizontal tab strips.
 use super::tabs::{TabStripOptions, tab_layout_with_compaction};
 
+#[allow(clippy::too_many_arguments)] // Keep each layout input explicit in boundary cases.
 fn strip(
 	width: usize,
 	count: usize,
