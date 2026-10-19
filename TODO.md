@@ -66,6 +66,17 @@ which is why floods are capped at 30 fps. Parse throughput stays CPU work.
 
 ## Resource management and memory
 
+- **Migrate the global allocator to mimalloc.** Decided by the maintainer
+  as an exception to the no-new-crates rule. Throughput depends on the
+  system allocator: musl (Alpine) is 23% slower overall than glibc on the
+  same build (headless `--benchmark`: 99.5 vs 129 MB/s). It loses most on
+  kitty-rgba (552 vs 1042), kitty-png (79 vs 113), kitty-zlib (178 vs 236),
+  sixel (58 vs 77) and editor (127 vs 161). Before `cd3ede9`, tui on musl
+  ran at 32 MB/s against 185, because a buffer allocated on every redraw
+  went through `mmap`. Set mimalloc as `#[global_allocator]` on every
+  platform. Benchmark glibc, musl (`--target x86_64-unknown-linux-musl`),
+  macOS and FreeBSD before and after, and compare RSS at idle and after a
+  flood. Keep removing allocations from hot paths either way.
 - **cgroups v2 per tab, fully automatic (Linux).** Like Ghostty, put
   each shell in its own cgroup, so a runaway program in one tab cannot
   starve the terminal or the other tabs. The terminal process keeps its
