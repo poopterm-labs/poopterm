@@ -125,4 +125,5 @@ Questions go to [Discussions](https://github.com/poopterm-labs/poopterm/discussi
 ## License
 
 By contributing, you agree that your contributions are licensed under the
-project's [MIT License](LICENSE).
+project's license, the [GNU Affero General Public License, version 3 or
+later](LICENSE) (`AGPL-3.0-or-later`).

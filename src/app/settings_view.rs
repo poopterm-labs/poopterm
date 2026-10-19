@@ -75,6 +75,21 @@ fn theme_label(kind: ThemeKind) -> String {
 	}
 }
 
+/// The About page below the release line: (row, text). The AGPL asks an
+/// interactive program to show its copyright, that there is no warranty,
+/// and where the license is.
+const ABOUT_LINES: [(usize, &str); 6] = [
+	(148, "A small, native terminal emulator written in Rust."),
+	(184, "Copyright © 2026 poopware-labs and contributors"),
+	(220, "Licensed under the GNU AGPL, version 3 or later."),
+	(
+		256,
+		"Free software with ABSOLUTELY NO WARRANTY; see LICENSE.",
+	),
+	(292, "Source: github.com/poopterm-labs/poopterm"),
+	(328, "Built with Rust, winit, and softbuffer."),
+];
+
 fn about_release_line(version: &str, codename: &str) -> String {
 	format!("Version {version} \"{codename}\"")
 }
@@ -141,13 +156,7 @@ impl App {
 					&about_release_line(env!("CARGO_PKG_VERSION"), env!("POOPTERM_CODENAME")),
 					0.82,
 				);
-				for (line, text) in [
-					(148, "A small, native terminal emulator written in Rust."),
-					(184, "Copyright © 2026 poopware-labs"),
-					(220, "Licensed under the MIT License."),
-					(256, "Source: github.com/poopterm-labs/poopterm"),
-					(292, "Built with Rust, winit, and softbuffer."),
-				] {
+				for (line, text) in ABOUT_LINES {
 					pen.text(p, x, line, text, 0.82);
 				}
 				pen.back_button(p, style, &hovered);
@@ -344,5 +353,50 @@ mod tests {
 			about_release_line("26.10.8", "Giga Fly"),
 			"Version 26.10.8 \"Giga Fly\""
 		);
+	}
+
+	fn about_text() -> Vec<&'static str> {
+		ABOUT_LINES.iter().map(|&(_, text)| text).collect()
+	}
+
+	#[test]
+	fn about_names_the_license_cargo_declares() {
+		assert_eq!(env!("CARGO_PKG_LICENSE"), "AGPL-3.0-or-later");
+		let license: Vec<_> = about_text()
+			.into_iter()
+			.filter(|text| text.contains("Licensed"))
+			.collect();
+		assert_eq!(
+			license,
+			["Licensed under the GNU AGPL, version 3 or later."]
+		);
+		assert!(about_text().iter().all(|text| !text.contains("MIT")));
+	}
+
+	#[test]
+	fn about_shows_the_legal_notices_the_agpl_asks_of_interactive_programs() {
+		// Section 0 and 5(d): a copyright notice, that there is no warranty,
+		// and where to find the license.
+		let text = about_text().join("\n");
+		assert!(text.contains("Copyright © 2026"), "{text}");
+		assert!(text.contains("NO WARRANTY"), "{text}");
+		assert!(text.contains("LICENSE"), "{text}");
+		assert!(text.contains("github.com/poopterm-labs/poopterm"), "{text}");
+	}
+
+	#[test]
+	fn about_lines_are_evenly_spaced_below_the_release_line() {
+		let rows: Vec<_> = ABOUT_LINES.iter().map(|&(row, _)| row).collect();
+		assert_eq!(rows[0], 148);
+		assert!(
+			rows.windows(2).all(|pair| pair[1] - pair[0] == 36),
+			"{rows:?}"
+		);
+	}
+
+	#[test]
+	fn about_lines_fit_above_the_bottom_of_the_smallest_window() {
+		let &(last, _) = ABOUT_LINES.last().unwrap();
+		assert!(last + 36 <= MIN_SIZE.1 - 52, "{last}");
 	}
 }

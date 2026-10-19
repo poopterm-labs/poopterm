@@ -2,7 +2,7 @@
 name = "poopterm"
 version = "26.10.20"
 edition = "2024"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 
 [package.metadata.poopterm]
 # Versions are YEAR.MONTH.PATCH; each month gets a random codename, patches keep it.
