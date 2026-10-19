@@ -1,5 +1,28 @@
 # Changelog
 
+## 26.10.17 "Giga Fly" — 2026-10-19
+
+### Added
+
+- Add our own font engine, checked against fontdue (fonts).
+- Draw glyphs with our own font engine instead of fontdue (fonts).
+
+### Fixed
+
+- Leave one-point contours out of glyph bounds (fonts).
+
+### Performance
+
+- Avoid floor and ceil library calls in the rasterizer (fonts).
+- Solve for curve extremes only when a control point sticks out (fonts).
+- Walk rows incrementally and drop NaN handling in line drawing (fonts).
+- Decode TrueType points into one buffer (fonts).
+
+### Maintenance
+
+- Account for fontdue's own bugs in the installed-font sweep (fonts).
+- Compare the font engine's speed with fontdue (fonts).
+
 ## 26.10.16 "Giga Fly" — 2026-10-19
 
 ### Maintenance
