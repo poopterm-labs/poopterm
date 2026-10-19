@@ -1,5 +1,6 @@
 """Pin the parts of the CI workflow that other steps and people rely on."""
 from pathlib import Path
+import re
 import unittest
 
 WORKFLOW = (Path(__file__).parents[1] / '.github/workflows/ci.yml').read_text()
@@ -44,6 +45,50 @@ class DebianPackage(unittest.TestCase):
     def test_the_step_lookup_stops_at_the_next_step_or_job(self):
         self.assertNotIn('run:', step('Install nightly Rust').split('run:', 1)[1])
         self.assertNotIn('release:', step('Upload Debian package'))
+
+
+def job(name):
+    """The lines of the workflow job called `name`, up to the next job."""
+    match = WORKFLOW.split(f'\n  {name}:\n', 1)
+    if len(match) != 2:
+        raise AssertionError(f'no job {name!r}')
+    body = []
+    for line in match[1].splitlines(keepends=True):
+        if line.strip() and len(line) - len(line.lstrip()) <= 2:
+            break
+        body.append(line)
+    return ''.join(body)
+
+
+class Release(unittest.TestCase):
+    def test_the_release_job_installs_a_python_with_tomllib(self):
+        # Ubuntu 22.04, kept for the package's glibc floor, ships Python 3.10;
+        # the release scripts read Cargo.toml with tomllib, new in 3.11.
+        release = job('release')
+        self.assertIn('runs-on: ubuntu-22.04', release)
+        setup = step('Install Python for the release scripts')
+        self.assertIn('actions/setup-python@v7', setup)
+        version = re.search(r"python-version: '3\.(\d+)'", setup)
+        self.assertIsNotNone(version, setup)
+        self.assertGreaterEqual(int(version[1]), 11)
+
+    def test_python_is_installed_before_the_release_scripts_run(self):
+        release = job('release')
+        self.assertIn('- name: Install Python for the release scripts', release)
+        self.assertLess(release.index('- name: Install Python for the release scripts'),
+                        release.index('- name: Publish the checked main revision'))
+
+    def test_the_release_scripts_need_tomllib(self):
+        # If they stop needing it, the setup step above can go.
+        scripts = Path(__file__).parents[1] / 'scripts'
+        self.assertIn('import tomllib', (scripts / 'release.py').read_text())
+        self.assertIn('import tomllib', (scripts / 'release.sh').read_text())
+
+    def test_the_job_lookup_stops_at_the_next_job(self):
+        self.assertNotIn('release:', job('debian-package'))
+        self.assertIn('scripts/release.sh', job('release'))
+        with self.assertRaises(AssertionError):
+            job('no-such-job')
 
 
 if __name__ == '__main__':
