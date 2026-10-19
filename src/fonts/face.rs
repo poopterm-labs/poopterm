@@ -68,7 +68,6 @@ pub(crate) struct Face {
 	pub(crate) glyf: Table,
 	pub(crate) long_loca: bool,
 	cff: Option<Cff>,
-	pub(crate) gsub: Option<Table>,
 }
 
 /// Why a font could not be loaded.
@@ -150,7 +149,6 @@ impl Face {
 			glyf,
 			long_loca: head.i16_at(50) == Some(1),
 			cff,
-			gsub: find(b"GSUB"),
 			data: Cow::Borrowed(&[]),
 		};
 		Ok(Self { data, ..face })

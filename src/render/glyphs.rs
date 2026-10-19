@@ -1,5 +1,5 @@
 //! Font fallback resolution and the rasterized-glyph cache.
-use fontdue::{Font, Metrics};
+use crate::fonts::{Font, Metrics};
 
 use super::fxhash::FxHashMap;
 
@@ -75,14 +75,9 @@ impl FontSet {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use fontdue::FontSettings;
 
 	fn bundled() -> Font {
-		Font::from_bytes(
-			include_bytes!("../../assets/font.ttf") as &[u8],
-			FontSettings::default(),
-		)
-		.unwrap()
+		Font::from_bytes(crate::fonts::BUNDLED, 0).unwrap()
 	}
 
 	#[test]

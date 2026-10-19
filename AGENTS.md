@@ -5,8 +5,9 @@ on Poopterm. This file is the single source of truth; `CLAUDE.md` and any
 other agent-specific files only point here.
 
 Poopterm is a software-rendered terminal emulator written in Rust: winit for
-windows, softbuffer for pixels, fontdue for glyphs, portable-pty for shells,
-and its own SIMD escape-sequence tokenizer (`src/vt`), tested against vte.
+windows, softbuffer for pixels, portable-pty for shells, its own font engine
+(`src/fonts`, tested against fontdue), and its own SIMD escape-sequence
+tokenizer (`src/vt`), tested against vte.
 
 ## Quick reference
 

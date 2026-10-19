@@ -150,11 +150,7 @@ mod tests {
 			}),
 		};
 		let mut fonts = FontSet::new(
-			fontdue::Font::from_bytes(
-				include_bytes!("../../assets/font.ttf") as &[u8],
-				fontdue::FontSettings::default(),
-			)
-			.unwrap(),
+			crate::fonts::Font::from_bytes(crate::fonts::BUNDLED, 0).unwrap(),
 			Vec::new(),
 		);
 		crate::render::grid::draw_grid(&mut painter, &mut fonts, &view, rows);

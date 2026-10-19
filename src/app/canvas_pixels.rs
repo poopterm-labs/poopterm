@@ -22,11 +22,7 @@ const KEY: DrawKey = DrawKey {
 
 fn fonts() -> FontSet {
 	FontSet::new(
-		fontdue::Font::from_bytes(
-			include_bytes!("../../assets/font.ttf") as &[u8],
-			fontdue::FontSettings::default(),
-		)
-		.unwrap(),
+		crate::fonts::Font::from_bytes(crate::fonts::BUNDLED, 0).unwrap(),
 		Vec::new(),
 	)
 }

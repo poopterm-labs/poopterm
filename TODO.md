@@ -114,10 +114,14 @@ least as fast.
   fuzzed against `miniz_oxide`. Faster decoding (streaming fused with
   base64, wide Huffman tables, SIMD copies) is kept only where it is
   safe. Otherwise we keep matching miniz rather than taking risks.
-- **`fontdue` → our own rasterizer:** TrueType/OpenType parsing (cmap,
-  glyf, CFF, kerning) and a SIMD coverage rasterizer, designed to feed the
-  GPU glyph atlas. Compare glyph coverage against fontdue during the
-  transition. Color emoji (COLR/CBDT/sbix) is a separate step.
+- **`fontdue` → our own rasterizer:** done for drawing (`src/fonts`: cmap,
+  glyf, CFF/CFF2, a SIMD coverage rasterizer), with fontdue kept as the
+  test oracle (`font_tests.rs`). Loading is lazy, so startup no longer
+  parses every glyph of every fallback font (about 400 ms on a desktop
+  with Nerd Fonts). Still to do: per-glyph rasterization, which is slower
+  than fontdue's precomputed outlines (`font_engine_speed`); kerning;
+  feeding the GPU glyph atlas. Color emoji (COLR/CBDT/sbix) is a separate
+  step.
 - **`softbuffer` → our own present path** (X11 MIT-SHM, Wayland `wl_shm`,
   macOS CALayer) for the software renderer, which becomes the fallback
   beside Vulkan/Metal. Do it together with the GPU work so presentation and

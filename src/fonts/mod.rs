@@ -1,43 +1,15 @@
 //! Terminal font loading with bundled and system symbol-font fallbacks.
-#[allow(
-	dead_code,
-	reason = "the renderer switches to this engine in a later commit"
-)]
 mod cff;
-#[allow(
-	dead_code,
-	reason = "the renderer switches to this engine in a later commit"
-)]
 mod cmap;
 pub(crate) mod db;
 #[cfg(test)]
 mod db_tests;
-#[allow(
-	dead_code,
-	reason = "the renderer switches to this engine in a later commit"
-)]
 mod face;
-#[allow(
-	dead_code,
-	reason = "the renderer switches to this engine in a later commit"
-)]
 mod font;
 #[cfg(test)]
 mod font_tests;
-#[allow(
-	dead_code,
-	reason = "the renderer switches to this engine in a later commit"
-)]
 mod glyf;
-#[allow(
-	dead_code,
-	reason = "the renderer switches to this engine in a later commit"
-)]
 mod raster;
-#[allow(
-	dead_code,
-	reason = "the renderer switches to this engine in a later commit"
-)]
 mod read;
 mod sfnt;
 #[cfg(test)]
@@ -50,19 +22,18 @@ use std::{
 	path::{Path, PathBuf},
 };
 
-use fontdue::{Font, FontSettings};
+pub(crate) use font::{Font, Metrics};
 
 use crate::{
 	config::{cache_dir, read_config_value, xdg_base},
 	session_store::default_cwd,
 };
 
+/// The font that ships inside the binary.
+pub(crate) const BUNDLED: &[u8] = include_bytes!("../../assets/font.ttf");
+
 pub(crate) fn load_fonts() -> (Font, Vec<Font>) {
-	let bundled = Font::from_bytes(
-		include_bytes!("../../assets/font.ttf") as &[u8],
-		FontSettings::default(),
-	)
-	.expect("bundled font is valid");
+	let bundled = Font::from_bytes(BUNDLED, 0).expect("bundled font is valid");
 	let source = font_source(
 		env::var("POOPTERM_FONT").ok(),
 		read_config_value("font_path"),
@@ -89,7 +60,7 @@ pub(crate) fn load_fonts() -> (Font, Vec<Font>) {
 		if bytes.len() > 64 * 1024 * 1024 {
 			continue;
 		}
-		if let Ok(font) = Font::from_bytes(bytes, FontSettings::default()) {
+		if let Ok(font) = Font::from_bytes(bytes, 0) {
 			fallback_fonts.push(font);
 		}
 	}
@@ -145,11 +116,7 @@ fn locate(source: FontSource) -> Option<(PathBuf, u32)> {
 
 fn load_font(path: &Path, collection_index: u32) -> Result<Font, String> {
 	let bytes = fs::read(path).map_err(|error| error.to_string())?;
-	let settings = FontSettings {
-		collection_index,
-		..FontSettings::default()
-	};
-	Font::from_bytes(bytes, settings).map_err(|error| error.to_string())
+	Font::from_bytes(bytes, collection_index).map_err(|error| error.to_string())
 }
 
 /// The installed fonts, from the cache in `$XDG_CACHE_HOME/poopterm`.

@@ -235,7 +235,7 @@ mod tests {
 	#[test]
 	fn glyphs_are_clipped_to_a_rectangle() {
 		let glyph = Glyph {
-			metrics: fontdue::Metrics {
+			metrics: crate::fonts::Metrics {
 				width: 2,
 				height: 3,
 				..Default::default()
@@ -254,11 +254,7 @@ mod tests {
 
 	#[test]
 	fn text_is_clipped_to_its_tab_label_area() {
-		let font = fontdue::Font::from_bytes(
-			include_bytes!("../../assets/font.ttf") as &[u8],
-			fontdue::FontSettings::default(),
-		)
-		.unwrap();
+		let font = crate::fonts::Font::from_bytes(crate::fonts::BUNDLED, 0).unwrap();
 		let mut fonts = FontSet::new(font, Vec::new());
 		let mut pixels = vec![0u32; 30 * 20];
 		let mut painter = Painter::new(&mut pixels, 30, 20);

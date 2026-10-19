@@ -79,11 +79,8 @@ fn options(args: impl Iterator<Item = String>) -> Result<Options, Box<dyn Error>
 }
 
 fn fonts() -> FontSet {
-	let font = fontdue::Font::from_bytes(
-		include_bytes!("../../assets/font.ttf") as &[u8],
-		fontdue::FontSettings::default(),
-	)
-	.expect("bundled font is valid");
+	let font =
+		crate::fonts::Font::from_bytes(crate::fonts::BUNDLED, 0).expect("bundled font is valid");
 	FontSet::new(font, Vec::new())
 }
 

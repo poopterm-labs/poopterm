@@ -143,7 +143,7 @@ impl App {
 					(184, "Copyright © 2026 poopware-labs"),
 					(220, "Licensed under the MIT License."),
 					(256, "Source: github.com/poopterm-labs/poopterm"),
-					(292, "Built with Rust, winit, softbuffer, and fontdue."),
+					(292, "Built with Rust, winit, and softbuffer."),
 				] {
 					pen.text(p, x, line, text, 0.82);
 				}
