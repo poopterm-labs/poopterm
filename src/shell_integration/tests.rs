@@ -271,14 +271,23 @@ fn bash_injection_loads_profiles_and_hooks_once_and_respects_off() {
 	.unwrap();
 	install_scripts(&scripts).unwrap();
 	let env = injection_env(Shell::Bash, &scripts, |_| None);
+	// Without a terminal, interactive bash checks who owns its stderr. On
+	// FreeBSD a pipe reports process group 0, so bash stops itself with
+	// SIGTTIN as if in the background; a file fails the check instead.
+	let stderr = scratch.0.join("stderr");
 	let output = shell_command("bash")
 		.args(shell_args(Shell::Bash, &env))
 		.args(["-c", "printf 'probe=%s:%s:%s:%s' \"$PROFILE\" \"$RC_COUNT\" \"$__POOPTERM_INTEGRATION_LOADED\" \"${POOPTERM_BASH_RCFILE-unset}\""])
 		.env("HOME", &home)
 		.envs(env)
+		.stderr(std::fs::File::create(&stderr).unwrap())
 		.output().unwrap();
 	let stdout = String::from_utf8_lossy(&output.stdout);
-	assert!(stdout.contains("probe=yes:1:1:unset"), "{stdout:?}");
+	let stderr = std::fs::read_to_string(stderr).unwrap();
+	assert!(
+		stdout.contains("probe=yes:1:1:unset"),
+		"{stdout:?}, stderr: {stderr}"
+	);
 	assert_eq!(
 		shell_args(Shell::Bash, &[]),
 		[std::ffi::OsString::from("-l")]
