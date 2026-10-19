@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.7 "Giga Fly" — 2026-10-19
+
+### Fixed
+
+- Scroll back to the bottom when a key is typed (input).
+
 ## 26.10.6 "Giga Fly" — 2026-10-19
 
 ### Fixed
