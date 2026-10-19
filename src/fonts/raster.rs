@@ -254,15 +254,16 @@ impl Raster {
 			(-1.0, p1, p0)
 		};
 		let dxdy = (bx - tx) / (by - ty);
-		let first = ty.max(0.0) as usize;
-		let last = ceil(by).min(self.height);
-		for row in first..last {
-			let (ya, yb) = (ty.max(row as f32), by.min(row as f32 + 1.0));
-			if yb <= ya {
-				continue;
-			}
-			let (xa, xb) = (tx + (ya - ty) * dxdy, tx + (yb - ty) * dxdy);
-			self.span(row, xa, xb, (yb - ya) * direction);
+		// Walk the rows the line crosses, carrying x from one boundary to
+		// the next.
+		let (mut y, end) = (ty.max(0.0), by.min(self.height as f32));
+		let mut x = tx + (y - ty) * dxdy;
+		let mut row = y as usize;
+		while y < end {
+			let next = end.min((row + 1) as f32);
+			let next_x = x + (next - y) * dxdy;
+			self.span(row, x, next_x, (next - y) * direction);
+			(x, y, row) = (next_x, next, row + 1);
 		}
 	}
 
@@ -270,25 +271,33 @@ impl Raster {
 	/// `dy`. In each column it covers, the pixel gets the area right of the
 	/// piece, and every pixel further right the full `dy`; the prefix sum
 	/// supplies the latter from the cell after it.
+	/// Lines arrive finite, so plain comparisons replace the NaN-aware
+	/// `min`, `max` and `clamp`, which cost several instructions each.
 	fn span(&mut self, row: usize, xa: f32, xb: f32, dy: f32) {
-		if self.width == 0 {
+		let right = self.width as f32;
+		let (lo, hi) = if xa < xb { (xa, xb) } else { (xb, xa) };
+		// Area left of the bitmap lands in column 0; right of it, nowhere.
+		let lo = if lo > 0.0 { lo } else { 0.0 };
+		let hi = if hi < right { hi } else { right };
+		if lo >= right {
 			return;
 		}
-		let right = self.width as f32;
-		let (lo, hi) = (xa.min(xb).clamp(0.0, right), xa.max(xb).clamp(0.0, right));
 		let cells = &mut self.cells[row * self.stride..][..self.stride];
-		let first = (lo as usize).min(self.width - 1);
-		let last = ceil(hi).clamp(first + 1, self.width) - 1;
-		if first == last {
-			let mid = (lo + hi) * 0.5 - first as f32;
+		let first = lo as usize;
+		let first_x = first as f32;
+		if hi <= first_x + 1.0 {
+			let mid = (lo + hi) * 0.5 - first_x;
 			cells[first] += dy * (1.0 - mid);
 			cells[first + 1] += dy * mid;
 			return;
 		}
 		let per_x = dy / (hi - lo);
+		let last = ceil(hi) - 1;
 		for column in first..=last {
-			let (l, r) = (lo.max(column as f32), hi.min(column as f32 + 1.0));
-			let (part, mid) = (per_x * (r - l), (l + r) * 0.5 - column as f32);
+			let x = column as f32;
+			let l = if lo > x { lo } else { x };
+			let r = if hi < x + 1.0 { hi } else { x + 1.0 };
+			let (part, mid) = (per_x * (r - l), (l + r) * 0.5 - x);
 			cells[column] += part * (1.0 - mid);
 			cells[column + 1] += part * mid;
 		}
