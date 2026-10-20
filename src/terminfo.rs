@@ -468,4 +468,49 @@ mod tests {
 		parser.advance(&mut term, &flash[on.len()..]);
 		assert!(!term.reverse_screen, "and back");
 	}
+
+	#[test]
+	fn meta_mode_capabilities_switch_alt_between_the_eighth_bit_and_escape() {
+		if !have("tic") || !have("tput") {
+			return;
+		}
+		use crate::{
+			input::keys::{KeyModes, Modifiers, encode_key},
+			parser::Parser,
+			term::Term,
+			theme::{Theme, ThemeKind},
+		};
+		let dir = TempDir::new("meta");
+		assert!(compile_into(&dir.0));
+		let tput = |cap: &str| {
+			let output = Command::new("tput")
+				.env("TERMINFO", &dir.0)
+				.arg("-T")
+				.arg(NAME)
+				.arg(cap)
+				.output()
+				.unwrap();
+			assert!(output.status.success(), "{cap} is advertised");
+			output.stdout
+		};
+		let mut term = Term::new(10, 4, Theme::from_kind(ThemeKind::Poop), "/".into());
+		let mut parser = Parser::new();
+		let alt_a = |term: &Term| {
+			let modes = KeyModes {
+				keyboard: term.keyboard,
+				..KeyModes::default()
+			};
+			let alt = Modifiers {
+				alt: true,
+				..Modifiers::default()
+			};
+			encode_key(&winit::keyboard::Key::Character("a".into()), alt, modes).unwrap()
+		};
+		assert_eq!(alt_a(&term), b"\x1ba", "Alt sends ESC by default");
+		parser.advance(&mut term, &tput("smm"));
+		assert_eq!(alt_a(&term), "\u{e1}".as_bytes(), "smm sets the eighth bit");
+		parser.advance(&mut term, &tput("rmm"));
+		assert_eq!(alt_a(&term), b"\x1ba", "rmm goes back to ESC");
+		assert!(!term.keyboard.eight_bit_meta, "and clears the eighth bit");
+	}
 }
