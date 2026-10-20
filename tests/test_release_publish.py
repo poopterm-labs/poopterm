@@ -38,6 +38,8 @@ class Publish(unittest.TestCase):
         (self.repo / 'Cargo.lock').write_text(f'version = 4\n[[package]]\nname = "poopterm"\nversion = "{self.version}"\n')
         (self.repo / 'CHANGELOG.md').write_text('# Changelog\n\n## Old\n')
         (self.repo / 'Formula/poopterm.rb').write_text('  tag: "v0.43.0",\n  version "0.43.0"\n')
+        (self.repo / 'packaging/arch').mkdir(parents=True)
+        (self.repo / 'packaging/arch/PKGBUILD').write_text('pkgname=poopterm\npkgver=0.43.0\npkgrel=2\n')
         # A package left over from before the bump, as CI artifacts used to be.
         dist = self.repo / 'dist'
         dist.mkdir()
@@ -165,7 +167,25 @@ echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_
         self.assertIn(f'tag: "v{version}"', formula)
         self.assertIn(f'version "{version}"', formula)
         changed = self.git('show', '--name-only', '--format=', 'origin/main').split()
-        self.assertEqual(sorted(changed), ['CHANGELOG.md', 'Cargo.lock', 'Cargo.toml', 'Formula/poopterm.rb'])
+        self.assertEqual(sorted(changed), ['CHANGELOG.md', 'Cargo.lock', 'Cargo.toml', 'Formula/poopterm.rb',
+                                           'packaging/arch/PKGBUILD'])
+
+    def test_the_tagged_commit_points_the_pkgbuild_at_its_own_tag(self):
+        # makepkg builds tag v$pkgver, so the tag must name itself.
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        pkgbuild = self.git('show', f'v{self.next_version()}:packaging/arch/PKGBUILD')
+        self.assertEqual(pkgbuild, f'pkgname=poopterm\npkgver={self.next_version()}\npkgrel=1\n')
+
+    def test_a_broken_pkgbuild_stops_the_release_before_any_push(self):
+        (self.repo / 'packaging/arch/PKGBUILD').write_text('pkgname=poopterm\n')
+        self.git('commit', '-qam', 'Lose pkgver')
+        self.git('push', '-q', 'origin', 'main')
+        self.env['GITHUB_SHA'] = self.git('rev-parse', 'HEAD').strip()
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('expected one PKGBUILD pkgver', result.stderr)
+        self.assertEqual(self.git('ls-remote', '--tags', str(self.remote)), '')
 
     def test_a_rerun_after_a_publishing_failure_pushes_nothing_more(self):
         failure = self.root / 'fail-api'

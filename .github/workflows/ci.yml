@@ -176,8 +176,40 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Builds the PKGBUILD with makepkg and installs the result on Arch Linux.
+  arch-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: archlinux:latest
+    steps:
+      # Before checkout, which needs git to clone rather than download.
+      - name: Install Arch packaging tools
+        run: pacman -Syu --noconfirm --needed base-devel git rustup ncurses libxkbcommon
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # makepkg refuses to run as root and builds the tag v$pkgver; point it
+      # at this checkout instead, so pull requests build their own code.
+      - name: Build the Arch package from this checkout
+        run: |
+          git config --system --add safe.directory '*'
+          git branch -f arch-ci HEAD
+          useradd -m builder
+          install -d -o builder /tmp/arch
+          cp packaging/arch/PKGBUILD /tmp/arch/
+          sed -i "s|^source=.*|source=(\"\$pkgname::git+file://$GITHUB_WORKSPACE#branch=arch-ci\")|" /tmp/arch/PKGBUILD
+          cd /tmp/arch && su builder -c 'makepkg --noconfirm'
+
+      - name: Install the Arch package and run it
+        run: |
+          pacman -U --noconfirm /tmp/arch/poopterm-[0-9]*.pkg.tar.zst
+          poopterm --version
+          infocmp xterm-poopterm >/dev/null
+
   release:
-    needs: [check, freebsd, alpine, debian-package, fedora-package]
+    needs: [check, freebsd, alpine, debian-package, fedora-package, arch-package]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     # Builds the Debian and RPM packages after the version bump, on the same
     # old glibc as the debian-package job.

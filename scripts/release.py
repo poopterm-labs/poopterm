@@ -104,14 +104,26 @@ def update_formula(root, version):
     path.write_text(formula)
 
 
+def update_pkgbuild(root, version):
+    path = root / 'packaging/arch/PKGBUILD'
+    pkgbuild, versions = re.subn(r'(?m)^pkgver=.*$', f'pkgver={version}', path.read_text())
+    pkgbuild, releases = re.subn(r'(?m)^pkgrel=.*$', 'pkgrel=1', pkgbuild)
+    if versions != 1 or releases != 1:
+        raise ValueError('expected one PKGBUILD pkgver and pkgrel')
+    path.write_text(pkgbuild)
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--formula', metavar='VERSION')
+    parser.add_argument('--pkgbuild', metavar='VERSION')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.formula:
         update_formula(root, args.formula)
+    elif args.pkgbuild:
+        update_pkgbuild(root, args.pkgbuild)
     else:
         today = datetime.datetime.now(datetime.timezone.utc).date()
         version, codename = prepare(root, today, commits_since_last_release(root))

@@ -153,12 +153,35 @@ class FedoraPackage(unittest.TestCase):
         self.assertRegex(upload, r'if-no-files-found: error\n')
 
     def test_releases_wait_for_the_fedora_package(self):
-        self.assertIn('needs: [check, freebsd, alpine, debian-package, fedora-package]', job('release'))
+        self.assertRegex(job('release'), r'needs: \[[^]]*fedora-package[^]]*\]')
 
     def test_the_release_job_can_build_rpms_on_ubuntu(self):
         # release.sh packages the RPM from the same PGO binary as the .deb.
         self.assertRegex(step('Install Linux, Debian and RPM packaging libraries'), r' rpm\n')
         self.assertIn('bash scripts/package-rpm.sh', (Path(__file__).parents[1] / 'scripts/release.sh').read_text())
+class ArchPackage(unittest.TestCase):
+    def test_git_is_installed_before_checkout_so_the_repository_is_cloned(self):
+        # Without git, checkout downloads a tarball and makepkg has nothing to clone.
+        arch = job('arch-package')
+        self.assertIn('container: archlinux:latest', arch)
+        self.assertIn(' git ', step('Install Arch packaging tools'))
+        self.assertLess(arch.index('Install Arch packaging tools'), arch.index('actions/checkout@v7'))
+        self.assertIn('fetch-depth: 0', arch)
+
+    def test_pull_requests_build_their_own_code_not_the_released_tag(self):
+        build = step('Build the Arch package from this checkout')
+        self.assertIn('git branch -f arch-ci HEAD', build)
+        self.assertIn('git+file://$GITHUB_WORKSPACE#branch=arch-ci', build)
+        self.assertIn("su builder -c 'makepkg --noconfirm'", build)
+
+    def test_the_package_is_installed_and_run_without_its_debug_package(self):
+        install = step('Install the Arch package and run it')
+        self.assertIn('pacman -U --noconfirm /tmp/arch/poopterm-[0-9]*.pkg.tar.zst', install)
+        self.assertIn('poopterm --version', install)
+        self.assertIn('infocmp xterm-poopterm', install)
+
+    def test_releases_wait_for_the_arch_package(self):
+        self.assertRegex(job('release'), r'needs: \[[^]]*arch-package[^]]*\]')
 
 
 class FreeBSD(unittest.TestCase):

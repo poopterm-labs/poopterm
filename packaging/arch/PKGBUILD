@@ -1,0 +1,47 @@
+# Maintainer: Poopterm Labs <poopterm-labs@users.noreply.github.com>
+# Builds the tagged release from source; each release bumps pkgver.
+pkgname=poopterm
+pkgver=26.10.59
+pkgrel=1
+pkgdesc='Fast software-rendered terminal emulator'
+arch=('x86_64' 'aarch64')
+url='https://github.com/poopterm-labs/poopterm'
+license=('AGPL-3.0-or-later')
+# winit loads the display libraries at run time; xkbcommon serves both.
+depends=('gcc-libs' 'glibc' 'libxkbcommon')
+optdepends=('wayland: Wayland support'
+	'libx11: X11 support'
+	'libxkbcommon-x11: X11 keyboard support'
+	'libxcursor: X11 cursors'
+	'libxi: X11 input'
+	'libxrandr: X11 scaling')
+makedepends=('git' 'rustup' 'ncurses')
+# GCC LTO objects from mimalloc's C code break rust-lld; Cargo's LTO still applies.
+options=('!lto')
+source=("$pkgname::git+$url.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+prepare() {
+	cd "$pkgname"
+	# The nightly toolchain lives in $srcdir, so building changes nothing in $HOME.
+	export RUSTUP_HOME="$srcdir/rustup" CARGO_HOME="$srcdir/cargo"
+	rustup toolchain install nightly --profile minimal
+	rustup run nightly cargo fetch --locked
+}
+
+build() {
+	cd "$pkgname"
+	export RUSTUP_HOME="$srcdir/rustup" CARGO_HOME="$srcdir/cargo"
+	rustup run nightly cargo build --release --frozen
+}
+
+check() {
+	"$srcdir/$pkgname/target/release/poopterm" --version | grep -qx "poopterm $pkgver"
+}
+
+package() {
+	cd "$pkgname"
+	DESTDIR="$pkgdir" PREFIX=/usr POOPTERM_BIN=target/release/poopterm sh scripts/install.sh --no-build
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	install -Dm644 THIRD_PARTY_NOTICES "$pkgdir/usr/share/doc/$pkgname/THIRD_PARTY_NOTICES"
+}

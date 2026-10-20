@@ -43,6 +43,28 @@ match text throughput, within the explicit size limits on untrusted input.
   same session; the benchmark now names terminals by XTVERSION and no longer
   aborts in kitty.
 
+## Packaging
+
+Every package installs through `scripts/install.sh` (desktop entry, icons,
+terminfo) and is built, installed and run in CI. Releases bump versions in
+packaging files through `scripts/release.py`, in the release commit.
+
+- **Gentoo ebuild.** `x11-terms/poopterm` in an overlay (in this repository
+  or a separate `poopterm-overlay`), built from the release tag. Cargo
+  ebuilds list every crate in `CRATES`; generate that from `Cargo.lock`
+  with our own script, have `release.py` rename the ebuild per release,
+  and build and install it in a `gentoo/stage3` CI job. The nightly
+  toolchain is the hard part: Portage's Rust is stable only.
+- **Nix flake.** A `flake.nix` with a `packages.default` built by
+  `rustPlatform.buildRustPackage` from `Cargo.lock` (no vendor hash to
+  bump), a nightly toolchain from a pinned overlay, the display libraries
+  winit loads added to the runtime path (`patchelf --add-rpath`, since
+  NixOS has no global library path), and a `devShell`. CI runs
+  `nix build` and `nix flake check`; a scheduled job updates `flake.lock`
+  through a pull request.
+- **AUR.** Publish `packaging/arch/PKGBUILD` (with a generated `.SRCINFO`)
+  to the AUR from the release job, with its own deploy key.
+
 ## Build and layout optimizations
 
 Heavier, stable optimizations of the shipped binary and of our data layout.
