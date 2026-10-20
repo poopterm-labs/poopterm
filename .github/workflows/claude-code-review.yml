@@ -1,0 +1,47 @@
+name: Claude Code Review
+
+# Reviews a pull request once, when it is opened or marked ready, not on every
+# push: each review spends the maintainers' Claude usage. For another pass,
+# comment `@claude review this again` (see claude.yml). The review checks the
+# diff against CLAUDE.md, which points at AGENTS.md.
+on:
+  pull_request:
+    types: [opened, ready_for_review, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    # Drafts wait until they are ready. Forks get no secrets, so their runs
+    # could only fail; Dependabot's version bumps need no review.
+    if: |
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      # Exchanged for the Claude GitHub app's token, which posts the comments.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        # Third-party: pinned to a commit; Dependabot updates the pin.
+        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1.0.254
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          claude_args: '--allowed-tools "mcp__github_inline_comment__create_inline_comment"'
