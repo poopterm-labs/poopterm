@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.43 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Decode zlib streams with our own SIMD inflate (#57) (inflate).
+
 ## 26.10.42 "Giga Fly" — 2026-10-20
 
 ### Performance
