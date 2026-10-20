@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.35 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Look widths up in a table generated from the unicode data (#49) (parser).
+
 ## 26.10.34 "Giga Fly" — 2026-10-20
 
 ### Performance
