@@ -81,7 +81,7 @@ impl Term {
 			..Cell::default()
 		};
 		for row in self.grid.iter_mut() {
-			row.fill(cell);
+			Cell::fill(row, cell);
 		}
 		self.scroll_top = 0;
 		self.scroll_bottom = self.rows - 1;

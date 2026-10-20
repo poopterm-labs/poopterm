@@ -569,6 +569,45 @@ fn mode_queries_report_set_and_reset_states() {
 #[test]
 fn cells_stay_compact() {
 	assert_eq!(std::mem::size_of::<Cell>(), 16);
+	// One aligned vector store or compare per cell.
+	assert_eq!(std::mem::align_of::<Cell>(), 16);
+}
+
+#[test]
+fn filling_cells_sets_every_field_of_every_cell_in_range() {
+	let mut cells = vec![Cell::default(); 5];
+	let styled = Cell {
+		ch: 'q',
+		fg: 0x0102_0304,
+		bg: 0x0506_0708,
+		attrs: 9,
+		width: 2,
+		extra: 0x0a0b,
+	};
+	Cell::fill(&mut cells[1..4], styled);
+	assert_eq!(
+		cells,
+		[Cell::default(), styled, styled, styled, Cell::default()]
+	);
+	Cell::fill(&mut [], styled);
+}
+
+#[test]
+fn cell_bits_compare_like_cells() {
+	let base = Cell::default();
+	let variants = [
+		Cell { ch: 'x', ..base },
+		Cell { fg: 1, ..base },
+		Cell { bg: 1, ..base },
+		Cell { attrs: 1, ..base },
+		Cell { width: 2, ..base },
+		Cell { extra: 1, ..base },
+	];
+	assert_eq!(base.bits(), Cell::default().bits());
+	for variant in variants {
+		assert_ne!(variant.bits(), base.bits(), "{variant:?}");
+		assert_eq!(variant.bits(), { variant }.bits());
+	}
 }
 
 /// Feeds the same random streams through the batched `Parser` and through
@@ -673,7 +712,7 @@ fn batched_printing_matches_per_character_printing() {
 			);
 		}
 		assert_eq!(batched.scrollback.len(), reference.scrollback.len());
-		for (a, b) in batched.scrollback.iter().zip(&reference.scrollback) {
+		for (a, b) in batched.scrollback.iter().zip(reference.scrollback.iter()) {
 			assert_eq!(
 				resolve(&batched, a),
 				resolve(&reference, b),
@@ -796,21 +835,6 @@ fn prompt_jumps_scroll_the_view_to_the_prompt() {
 	assert!(!t.jump_to_prompt(-1), "no earlier prompt");
 	assert!(t.jump_to_prompt(1));
 	assert_eq!(view_row(&t, 0).trim_end(), "$ b");
-}
-
-#[test]
-fn recycling_scrollback_keeps_shared_rows_immutable() {
-	let mut t = terminal(4, 1);
-	t.scrollback_limit = 1;
-	feed(&mut t, b"old\r\n");
-	let shared = t.scrollback[0].clone();
-	feed(&mut t, b"new\r\nlast\r\n");
-	assert_eq!(shared.iter().map(|c| c.ch).collect::<String>(), "old ");
-	assert_eq!(
-		t.scrollback[0].iter().map(|c| c.ch).collect::<String>(),
-		"last"
-	);
-	assert_eq!(t.history_base, 2);
 }
 
 #[test]

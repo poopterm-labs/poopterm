@@ -1,7 +1,5 @@
 //! Grid geometry: resize, scrolling, alternate screen and erasing.
-use std::sync::Arc;
-
-use super::{Term, grid::Grid};
+use super::{Cell, Term, grid::Grid};
 
 impl Term {
 	/// Shows the live screen again after scrolling back; whether it moved.
@@ -20,11 +18,7 @@ impl Term {
 		for (col, val) in self.tab_stops.iter_mut().enumerate().skip(old_cols) {
 			*val = col > 0 && col % 8 == 0;
 		}
-		for line in &mut self.scrollback {
-			if line.len() != cols {
-				Arc::make_mut(line).resize(cols, blank);
-			}
-		}
+		self.scrollback.truncate_cols(cols);
 		self.cols = cols;
 		self.rows = rows;
 		self.wrap_pending = false;
@@ -141,9 +135,10 @@ impl Term {
 		self.scroll_images(-(count as isize));
 		let blank = self.blank();
 		if top != 0 || bottom + 1 != self.rows || self.primary_screen.is_some() {
-			self.grid.scroll_up(top, bottom, count, blank, Some);
+			self.grid.scroll_up(top, bottom, count, blank, |_| {});
 			return;
 		}
+		let pad = self.padding();
 		let Self {
 			grid,
 			scrollback,
@@ -155,26 +150,10 @@ impl Term {
 			if *scrollback_limit == 0 {
 				*history_base = history_base.saturating_add(scrollback.len() + 1);
 				scrollback.clear();
-				return Some(row);
+				return;
 			}
-			let mut reusable = None;
-			while scrollback.len() >= *scrollback_limit {
-				*history_base = history_base.saturating_add(1);
-				if let Some(mut oldest) = scrollback.pop_front() {
-					// Reuse both allocations when no clone shares the history
-					// entry. Shared rows remain immutable.
-					if let Some(cells) = Arc::get_mut(&mut oldest)
-						&& scrollback.len() < *scrollback_limit
-					{
-						let reusable = std::mem::replace(cells, row);
-						scrollback.push_back(oldest);
-						return Some(reusable);
-					}
-					reusable = Arc::try_unwrap(oldest).ok();
-				}
-			}
-			scrollback.push_back(Arc::new(row));
-			reusable
+			let evicted = scrollback.push(row, pad, *scrollback_limit);
+			*history_base = history_base.saturating_add(evicted);
 		});
 		if self.scroll_offset > 0 {
 			self.scroll_offset += count;
@@ -186,7 +165,7 @@ impl Term {
 	pub(crate) fn set_scrollback_limit(&mut self, limit: usize) {
 		self.scrollback_limit = limit;
 		let excess = self.scrollback.len().saturating_sub(limit);
-		self.scrollback.drain(..excess);
+		self.scrollback.drain_front(excess);
 		self.history_base = self.history_base.saturating_add(excess);
 		self.scroll_offset = self.scroll_offset.min(self.scrollback.len());
 	}
@@ -219,7 +198,7 @@ impl Term {
 			} else {
 				cols
 			};
-			self.grid[y][start..stop].fill(blank);
+			Cell::fill(&mut self.grid[y][start..stop], blank);
 		}
 	}
 }

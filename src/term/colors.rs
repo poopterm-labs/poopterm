@@ -228,9 +228,7 @@ impl Term {
 		for row in self.grid.iter_mut() {
 			recolor(row);
 		}
-		for line in &mut self.scrollback {
-			recolor(std::sync::Arc::make_mut(line).as_mut_slice());
-		}
+		recolor(self.scrollback.cells_mut());
 		if let Some((grid, _, _, saved_fg, saved_bg)) = &mut self.primary_screen {
 			for row in grid.iter_mut() {
 				recolor(row);
