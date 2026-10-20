@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.41 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Join marks to clusters without ending the print segment (#55) (parser).
+
 ## 26.10.40 "Giga Fly" — 2026-10-20
 
 ### Performance
