@@ -76,7 +76,7 @@ mod window_ops_tests;
 
 use crate::theme::Theme;
 pub(crate) use colors::{Colors, Dynamic, Setting};
-pub(crate) use extras::NONE as NO_EXTRA;
+pub(crate) use extras::{Extras, NONE as NO_EXTRA};
 pub(crate) use frame::Frame;
 pub(crate) use grid::Grid;
 pub(crate) use shared::{SharedTerm, TermGuard};
