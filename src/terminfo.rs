@@ -437,4 +437,35 @@ mod tests {
 		parser.advance(&mut term, &tput("cub1").stdout);
 		assert_eq!((term.cx, term.cy), (9, 1));
 	}
+
+	#[test]
+	fn flash_reverses_the_screen_and_puts_it_back() {
+		if !have("tic") || !have("tput") {
+			return;
+		}
+		use crate::{
+			parser::Parser,
+			term::Term,
+			theme::{Theme, ThemeKind},
+		};
+		let dir = TempDir::new("flash");
+		assert!(compile_into(&dir.0));
+		let output = Command::new("tput")
+			.env("TERMINFO", &dir.0)
+			.arg("-T")
+			.arg(NAME)
+			.arg("flash")
+			.output()
+			.unwrap();
+		assert!(output.status.success(), "flash is advertised");
+		let flash = output.stdout;
+		let on = b"\x1b[?5h";
+		assert!(flash.starts_with(on) && flash.ends_with(b"\x1b[?5l"));
+		let mut term = Term::new(10, 4, Theme::from_kind(ThemeKind::Poop), "/".into());
+		let mut parser = Parser::new();
+		parser.advance(&mut term, on);
+		assert!(term.reverse_screen, "the flash turns the screen around");
+		parser.advance(&mut term, &flash[on.len()..]);
+		assert!(!term.reverse_screen, "and back");
+	}
 }

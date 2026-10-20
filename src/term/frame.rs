@@ -144,6 +144,11 @@ impl Term {
 				.cells
 				.resize(frame.cells.len() + cols - cells.len(), blank);
 		}
+		if self.reverse_screen {
+			for cell in &mut frame.cells {
+				std::mem::swap(&mut cell.fg, &mut cell.bg);
+			}
+		}
 
 		// Copy the extras visible cells use instead of sharing the table: the
 		// parser updates it copy-on-write and would otherwise clone it.
