@@ -1,5 +1,15 @@
 # Changelog
 
+## 26.10.58 "Giga Fly" — 2026-10-20
+
+### Fixed
+
+- Reuse hyperlink slots and end the open link on rejected targets (#78) (parser).
+
+### Performance
+
+- Compile the parse loop for x86-64-v3 and pick it at runtime (#77) (parser).
+
 ## 26.10.57 "Giga Fly" — 2026-10-20
 
 ### Maintenance
