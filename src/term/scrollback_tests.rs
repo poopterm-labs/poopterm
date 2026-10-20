@@ -57,8 +57,8 @@ fn trimming_matches_a_scalar_scan_for_every_length_and_position() {
 #[test]
 fn rows_are_stored_without_trailing_padding() {
 	let mut s = Scrollback::default();
-	assert_eq!(s.push(&row("ab", 8), PAD, 10), 0);
-	assert_eq!(s.push(&row("", 8), PAD, 10), 0);
+	assert_eq!(s.push(&row("ab", 8), PAD, 10), (0, 2));
+	assert_eq!(s.push(&row("", 8), PAD, 10), (0, 0));
 	assert_eq!(lines(&s), ["ab", ""]);
 	assert_eq!((s.len(), s.is_empty()), (2, false));
 }
@@ -68,8 +68,7 @@ fn styled_trailing_blanks_are_kept() {
 	let mut s = Scrollback::default();
 	let mut cells = row("a", 4);
 	cells[2].bg = 3;
-	s.push(&cells, PAD, 10);
-	assert_eq!(s[0].len(), 3);
+	assert_eq!(s.push(&cells, PAD, 10), (0, 3));
 	assert_eq!(s[0][2].bg, 3);
 	assert_eq!(s[0][1], PAD);
 }
@@ -79,7 +78,7 @@ fn the_line_limit_evicts_the_oldest_rows() {
 	let mut s = Scrollback::default();
 	let evicted: usize = ["a", "b", "c", "d"]
 		.iter()
-		.map(|line| s.push(&row(line, 4), PAD, 2))
+		.map(|line| s.push(&row(line, 4), PAD, 2).0)
 		.sum();
 	assert_eq!(evicted, 2);
 	assert_eq!(lines(&s), ["c", "d"]);
@@ -176,7 +175,7 @@ struct Model {
 }
 
 impl Model {
-	fn push(&mut self, row: &[Cell], limit: usize) -> usize {
+	fn push(&mut self, row: &[Cell], limit: usize) -> (usize, usize) {
 		let len = row
 			.iter()
 			.rposition(|cell| *cell != PAD)
@@ -184,7 +183,7 @@ impl Model {
 		let evicted = (self.rows.len() + 1).saturating_sub(limit.max(1));
 		self.rows.drain(..evicted);
 		self.rows.push_back(row[..len].to_vec());
-		evicted
+		(evicted, len)
 	}
 }
 
@@ -257,11 +256,11 @@ fn growth_keeps_every_row_until_the_line_limit() {
 	let mut s = Scrollback::default();
 	for i in 0..1000 {
 		let line = "x".repeat(i % 50);
-		assert_eq!(s.push(&row(&line, 50), PAD, 1000), 0, "row {i}");
+		assert_eq!(s.push(&row(&line, 50), PAD, 1000), (0, i % 50), "row {i}");
 	}
 	assert_eq!(s.len(), 1000);
 	assert!(s.iter().enumerate().all(|(i, cells)| cells.len() == i % 50));
-	assert_eq!(s.push(&row("last", 50), PAD, 1000), 1);
+	assert_eq!(s.push(&row("last", 50), PAD, 1000), (1, 4));
 	assert_eq!(s[999].len(), 4);
 	assert_eq!(s[0].len(), 1);
 }
@@ -270,7 +269,7 @@ fn growth_keeps_every_row_until_the_line_limit() {
 fn a_limit_of_zero_still_keeps_the_newest_row() {
 	let mut s = Scrollback::default();
 	s.push(&row("a", 3), PAD, 0);
-	assert_eq!(s.push(&row("b", 3), PAD, 0), 1);
+	assert_eq!(s.push(&row("b", 3), PAD, 0), (1, 1));
 	assert_eq!(lines(&s), ["b"]);
 }
 

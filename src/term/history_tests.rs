@@ -105,6 +105,32 @@ fn shown(term: &Term) -> Vec<String> {
 }
 
 #[test]
+fn rows_scrolled_in_under_a_colored_background_are_colored_to_the_edge() {
+	let mut t = terminal(4, 2);
+	feed(&mut t, b"ab\r\n\x1b[41m\n");
+	assert_eq!(lines(&t), ["ab"]);
+	assert_ne!(t.blank(), t.padding());
+	assert!(t.grid[1].iter().all(|cell| *cell == t.blank()));
+}
+
+#[test]
+fn rows_scrolled_in_after_trimmed_ones_are_blank() {
+	let mut t = terminal(5, 2);
+	feed(&mut t, b"a b\r\nxyz\r\n\r\n");
+	assert_eq!(lines(&t), ["a b", "xyz"]);
+	assert_eq!(shown(&t), ["     ", "     "]);
+	assert!(t.grid.iter().flatten().all(|cell| *cell == t.blank()));
+}
+
+#[test]
+fn rows_scrolled_away_without_history_are_blanked_whole() {
+	let mut t = terminal(3, 1);
+	t.scrollback_limit = 0;
+	feed(&mut t, b"abc\r\n");
+	assert_eq!(shown(&t), ["   "]);
+}
+
+#[test]
 fn rows_scrolled_inside_margins_never_reach_history() {
 	let mut t = terminal(4, 4);
 	feed(&mut t, b"\x1b[2;3r\x1b[2Ha\r\nb\r\nc\r\nd");

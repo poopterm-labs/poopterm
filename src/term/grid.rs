@@ -33,24 +33,23 @@ impl Grid {
 	}
 
 	/// Scrolls rows `top..=bottom` up by `count`. Rows leaving the region are
-	/// passed to `evict` (oldest first) before they are blanked.
+	/// passed to `evict` (oldest first), which returns how many leading cells
+	/// to blank; the caller vouches that the rest already equal `blank`.
 	pub(crate) fn scroll_up(
 		&mut self,
 		top: usize,
 		bottom: usize,
 		count: usize,
 		blank: Cell,
-		mut evict: impl FnMut(&[Cell]),
+		mut evict: impl FnMut(&[Cell]) -> usize,
 	) {
 		let count = count.min(bottom + 1 - top);
 		let region = &mut self.rows[top..=bottom];
-		for row in &region[..count] {
-			evict(row);
+		for row in &mut region[..count] {
+			let dirty = evict(row);
+			Cell::fill(&mut row[..dirty], blank);
 		}
 		region.rotate_left(count);
-		for row in &mut region[bottom + 1 - top - count..] {
-			Cell::fill(row, blank);
-		}
 	}
 
 	/// Scrolls rows `top..=bottom` down by `count`, blanking the rows at the top.
@@ -124,6 +123,7 @@ mod tests {
 		let mut evicted = Vec::new();
 		g.scroll_up(0, 2, 2, cell('.'), |row| {
 			evicted.push(row.iter().map(|c| c.ch).collect::<String>());
+			row.len()
 		});
 		assert_eq!(evicted, ["aa", "bb"]);
 		assert_eq!(text(&g), ["cc", "..", "..", "dd"]);
@@ -135,6 +135,7 @@ mod tests {
 		let mut evicted = Vec::new();
 		g.scroll_up(1, 2, 9, cell('.'), |row| {
 			evicted.push(row.iter().map(|c| c.ch).collect::<String>());
+			row.len()
 		});
 		assert_eq!(evicted, ["bb", "cc"]);
 		assert_eq!(text(&g), ["aa", "..", "..", "dd"]);
@@ -162,9 +163,17 @@ mod tests {
 			attrs: 2,
 			..cell(' ')
 		};
-		g.scroll_up(0, 1, 1, blank, |_| {});
+		g.scroll_up(0, 1, 1, blank, <[Cell]>::len);
 		assert!(g[1].iter().all(|c| *c == blank));
 		assert_eq!(g[0][1].ch, 'd');
+	}
+
+	#[test]
+	fn only_the_prefix_evict_names_is_blanked() {
+		let mut g = grid(&["abc", "def", "ghi"]);
+		let mut dirty = [1, 0].into_iter();
+		g.scroll_up(0, 2, 2, cell('.'), |_| dirty.next().unwrap());
+		assert_eq!(text(&g), ["ghi", ".bc", "def"]);
 	}
 
 	#[test]

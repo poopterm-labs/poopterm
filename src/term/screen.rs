@@ -135,7 +135,9 @@ impl Term {
 		self.scroll_images(-(count as isize));
 		let blank = self.blank();
 		if top != 0 || bottom + 1 != self.rows || self.primary_screen.is_some() {
-			self.grid.scroll_up(top, bottom, count, blank, |_| {});
+			self
+				.grid
+				.scroll_up(top, bottom, count, blank, <[Cell]>::len);
 			return;
 		}
 		let pad = self.padding();
@@ -150,10 +152,12 @@ impl Term {
 			if *scrollback_limit == 0 {
 				*history_base = history_base.saturating_add(scrollback.len() + 1);
 				scrollback.clear();
-				return;
+				return row.len();
 			}
-			let evicted = scrollback.push(row, pad, *scrollback_limit);
+			let (evicted, len) = scrollback.push(row, pad, *scrollback_limit);
 			*history_base = history_base.saturating_add(evicted);
+			// Cells after the stored ones are padding, already blank when it is.
+			if pad == blank { len } else { row.len() }
 		});
 		if self.scroll_offset > 0 {
 			self.scroll_offset += count;

@@ -73,8 +73,9 @@ impl Scrollback {
 	}
 
 	/// Appends `row` without its trailing `pad` cells, keeping at most
-	/// `limit` (at least 1) rows. Returns how many old rows were dropped.
-	pub(crate) fn push(&mut self, row: &[Cell], pad: Cell, limit: usize) -> usize {
+	/// `limit` (at least 1) rows. Returns how many old rows were dropped,
+	/// and how many cells were stored.
+	pub(crate) fn push(&mut self, row: &[Cell], pad: Cell, limit: usize) -> (usize, usize) {
 		let len = trimmed_len(row, pad);
 		let limit = limit.max(1);
 		let evicted = self.lines.len().saturating_sub(limit - 1);
@@ -100,7 +101,7 @@ impl Scrollback {
 			len: len as u32,
 		});
 		self.write = start + len as u64;
-		evicted
+		(evicted, len)
 	}
 
 	/// Where a row of `len` cells goes: the write position, or the start of

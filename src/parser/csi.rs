@@ -309,7 +309,9 @@ impl Term {
 				if action == 'L' {
 					self.grid.scroll_down(self.cy, bottom, count, blank);
 				} else {
-					self.grid.scroll_up(self.cy, bottom, count, blank, |_| {});
+					self
+						.grid
+						.scroll_up(self.cy, bottom, count, blank, |row| row.len());
 				}
 			}
 			'm' => self.sgr(params),
