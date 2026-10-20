@@ -129,6 +129,44 @@ impl Cell {
 		unsafe { std::mem::transmute(self) }
 	}
 
+	/// The cell as four 32-bit lanes, the character first, for building cells
+	/// in vector registers.
+	#[inline(always)]
+	pub(crate) fn words(self) -> std::simd::u32x4 {
+		// SAFETY: as in `bits`.
+		unsafe { std::mem::transmute(self) }
+	}
+
+	/// `words` from [`Cell::words`], with width 0, given `width` instead.
+	#[inline(always)]
+	pub(crate) fn with_width(mut words: std::simd::u32x4, width: usize) -> std::simd::u32x4 {
+		// `width` is byte 13: the second byte of the last lane, as every
+		// target we build for is little-endian.
+		words[3] |= (width as u32) << 8;
+		words
+	}
+
+	/// `words` from [`Cell::words`] with the character cleared.
+	#[inline(always)]
+	pub(crate) fn without_char(words: std::simd::u32x4) -> std::simd::u32x4 {
+		words & std::simd::u32x4::from_array([0, !0, !0, !0])
+	}
+
+	/// `words` from [`Cell::without_char`] holding `ch`, which must be a
+	/// valid `char`; an OR, where replacing the lane would shuffle.
+	#[inline(always)]
+	pub(crate) fn with_char(words: std::simd::u32x4, ch: u32) -> std::simd::u32x4 {
+		words | std::simd::u32x4::from_array([ch, 0, 0, 0])
+	}
+
+	/// `cells` as words, to store whole cells with one vector store each. Lane
+	/// 0 must hold a `char`.
+	#[inline(always)]
+	pub(crate) fn words_mut(cells: &mut [Cell]) -> &mut [std::simd::u32x4] {
+		// SAFETY: as in `fill`; callers keep lane 0 a valid `char`.
+		unsafe { std::slice::from_raw_parts_mut(cells.as_mut_ptr().cast(), cells.len()) }
+	}
+
 	/// Sets every cell of `cells` to `cell` with whole-cell vector stores;
 	/// `slice::fill` writes cells field by field.
 	#[inline(always)]
