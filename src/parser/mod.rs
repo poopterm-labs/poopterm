@@ -23,6 +23,8 @@ mod osc_text_size;
 mod params;
 mod print;
 mod sgr;
+#[cfg(test)]
+mod sgr_tests;
 mod window_ops;
 
 use crate::{

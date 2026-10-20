@@ -65,6 +65,12 @@ impl Params {
 		}
 	}
 
+	/// The number of closed groups.
+	#[inline]
+	pub(crate) fn group_count(&self) -> usize {
+		self.groups
+	}
+
 	/// Group `index`: a parameter followed by its subparameters.
 	#[inline]
 	pub(crate) fn get(&self, index: usize) -> Option<&[u16]> {
