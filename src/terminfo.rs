@@ -7,6 +7,9 @@
 //! get `TERM=xterm-256color`.
 use std::path::PathBuf;
 
+#[cfg(test)]
+mod effect_tests;
+
 /// The entry's primary name; `poopterm` is an alias.
 pub(crate) const NAME: &str = "xterm-poopterm";
 /// The terminfo source, also printed by `poopterm --print-terminfo`.
@@ -63,13 +66,13 @@ fn search_dirs() -> Vec<PathBuf> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
 	use super::*;
 	use std::{env, fs, path::Path, process::Command};
 
 	/// Compiles [`SOURCE`] into `dir` with `tic -x`. Returns false if `tic`
 	/// is missing or fails.
-	fn compile_into(dir: &Path) -> bool {
+	pub(super) fn compile_into(dir: &Path) -> bool {
 		let source = dir.join("poopterm.terminfo");
 		fs::create_dir_all(dir).is_ok()
 			&& fs::write(&source, SOURCE).is_ok()
@@ -82,9 +85,9 @@ mod tests {
 				.is_ok_and(|output| output.status.success())
 	}
 
-	struct TempDir(PathBuf);
+	pub(super) struct TempDir(pub(super) PathBuf);
 	impl TempDir {
-		fn new(name: &str) -> Self {
+		pub(super) fn new(name: &str) -> Self {
 			let dir =
 				std::env::temp_dir().join(format!("poopterm-terminfo-{}-{name}", std::process::id()));
 			let _ = fs::remove_dir_all(&dir);
@@ -98,7 +101,7 @@ mod tests {
 		}
 	}
 
-	fn have(tool: &str) -> bool {
+	pub(super) fn have(tool: &str) -> bool {
 		Command::new(tool).arg("-V").output().is_ok()
 	}
 
@@ -194,7 +197,7 @@ mod tests {
 	}
 
 	/// Reads string capabilities from the compiled entry via infocmp.
-	fn capabilities(dir: &Path) -> std::collections::HashMap<String, String> {
+	pub(super) fn capabilities(dir: &Path) -> std::collections::HashMap<String, String> {
 		let output = Command::new("infocmp")
 			.args(["-x", "-1", "-A"])
 			.arg(dir)

@@ -365,10 +365,17 @@ impl Term {
 /// Maps ASCII to the DEC Special Graphics (line drawing) character set.
 pub(crate) fn dec_graphic(c: char) -> char {
 	match c {
+		'_' => ' ',
 		'`' => '◆',
 		'a' => '▒',
+		'b' => '␉',
+		'c' => '␌',
+		'd' => '␍',
+		'e' => '␊',
 		'f' => '°',
 		'g' => '±',
+		'h' => '␤',
+		'i' => '␋',
 		'j' => '┘',
 		'k' => '┐',
 		'l' => '┌',
