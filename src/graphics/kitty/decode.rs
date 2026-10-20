@@ -30,7 +30,7 @@ pub(crate) fn decode(command: &Command, data: &[u8]) -> Result<Bitmap, Error> {
 			let size = width * height * depth;
 			let inflated;
 			let data = if compressed {
-				inflated = inflate(data, size)?;
+				inflated = inflate(data, size, size)?;
 				&inflated[..]
 			} else {
 				data
@@ -48,7 +48,8 @@ pub(crate) fn decode(command: &Command, data: &[u8]) -> Result<Bitmap, Error> {
 		100 => {
 			let inflated;
 			let data = if compressed {
-				inflated = inflate(data, MAX_TRANSFER)?;
+				// Most streams shrink their data by a few times at most.
+				inflated = inflate(data, data.len().saturating_mul(4), MAX_TRANSFER)?;
 				&inflated[..]
 			} else {
 				data
@@ -66,10 +67,10 @@ fn check_size(width: usize, height: usize) -> Result<(), Error> {
 	Ok(())
 }
 
-/// Inflates zlib data, refusing output larger than `limit`.
-fn inflate(data: &[u8], limit: usize) -> Result<Vec<u8>, Error> {
-	miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(data, limit)
-		.map_err(|_| Error::new("EINVAL", "bad or oversized zlib data"))
+/// Inflates zlib data of about `expected` bytes, refusing output larger than `limit`.
+fn inflate(data: &[u8], expected: usize, limit: usize) -> Result<Vec<u8>, Error> {
+	crate::inflate::zlib(data, expected, limit)
+		.ok_or_else(|| Error::new("EINVAL", "bad or oversized zlib data"))
 }
 
 fn from_rgb(data: &[u8]) -> Vec<u32> {
@@ -169,6 +170,54 @@ mod tests {
 			code(decode(&command("f=24,o=z,s=4,v=3"), b"junk")),
 			"EINVAL"
 		);
+	}
+
+	#[test]
+	fn zlib_compressed_pixels_must_inflate_to_the_image_size() {
+		let rgba: Vec<u8> = (0..2 * 2 * 4).map(|i| i as u8 * 7).collect();
+		let zlib = |data: &[u8]| miniz_oxide::deflate::compress_to_vec_zlib(data, 6);
+		let bitmap = decode(&command("f=32,o=z,s=2,v=2"), &zlib(&rgba)).unwrap();
+		assert_eq!(bitmap, decode(&command("f=32,s=2,v=2"), &rgba).unwrap());
+		// Too little data once inflated, as for raw pixels.
+		assert_eq!(
+			code(decode(&command("f=32,o=z,s=2,v=2"), &zlib(&rgba[..15]))),
+			"ENODATA"
+		);
+		// One byte too many is refused before it is kept.
+		let mut more = rgba.clone();
+		more.push(0);
+		assert_eq!(
+			code(decode(&command("f=32,o=z,s=2,v=2"), &zlib(&more))),
+			"EINVAL"
+		);
+		// A damaged checksum fails the image.
+		let mut damaged = zlib(&rgba);
+		*damaged.last_mut().unwrap() ^= 1;
+		assert_eq!(
+			code(decode(&command("f=32,o=z,s=2,v=2"), &damaged)),
+			"EINVAL"
+		);
+		assert_eq!(code(decode(&command("f=32,o=x,s=2,v=2"), &rgba)), "EINVAL");
+	}
+
+	#[test]
+	fn compressed_png_may_inflate_past_four_times_its_size() {
+		use image::ImageEncoder;
+		// An uncompressed flat image shrinks far more than four times.
+		use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+		let mut png = Vec::new();
+		PngEncoder::new_with_quality(
+			&mut png,
+			CompressionType::Uncompressed,
+			FilterType::NoFilter,
+		)
+		.write_image(&[0; 64 * 64 * 4], 64, 64, image::ExtendedColorType::Rgba8)
+		.unwrap();
+		let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&png, 9);
+		assert!(png.len() > 4 * compressed.len());
+		let bitmap = decode(&command("f=100,o=z"), &compressed).unwrap();
+		assert_eq!((bitmap.width, bitmap.height), (64, 64));
+		assert!(bitmap.pixels.iter().all(|&pixel| pixel == 0));
 	}
 
 	#[test]

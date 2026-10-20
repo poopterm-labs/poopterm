@@ -22,6 +22,7 @@ mod dbus;
 mod fonts;
 mod graphics;
 mod hugepages;
+mod inflate;
 mod input;
 mod notifier;
 mod parser;
