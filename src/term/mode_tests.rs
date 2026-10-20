@@ -286,9 +286,9 @@ fn ris_forgets_saved_modes() {
 #[test]
 fn saved_modes_stay_bounded_by_the_known_modes() {
 	let mut t = terminal();
-	let all = "1;6;7;25;47;66;80;1000;1002;1003;1004;1006;1047;1049;2004";
+	let all = "1;5;6;7;25;47;66;80;1000;1002;1003;1004;1006;1047;1049;2004";
 	for _ in 0..3 {
-		send(&mut t, &format!("\x1b[?{all};5;9;31337s"));
+		send(&mut t, &format!("\x1b[?{all};3;9;31337s"));
 	}
 	assert_eq!(t.saved_modes.len(), all.split(';').count());
 }

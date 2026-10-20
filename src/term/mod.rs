@@ -59,6 +59,8 @@ mod pointer_tests;
 #[cfg(test)]
 mod prompt_tests;
 #[cfg(test)]
+mod reverse_screen_tests;
+#[cfg(test)]
 mod reverse_wrap_tests;
 mod screen;
 mod scrollback;
@@ -288,6 +290,8 @@ pub(crate) struct Term {
 	pub(crate) auto_wrap: bool,
 	/// DECSET 45: backspace in the first column goes to the line above.
 	pub(crate) reverse_wrap: bool,
+	/// DECSCNM: frames show every cell with its colors swapped.
+	pub(crate) reverse_screen: bool,
 	pub(crate) insert_mode: bool,
 	/// KAM (`CSI 2 h`): keyboard input is discarded.
 	pub(crate) keyboard_locked: bool,
@@ -498,6 +502,7 @@ impl Term {
 			origin_mode: false,
 			auto_wrap: true,
 			reverse_wrap: true,
+			reverse_screen: false,
 			insert_mode: false,
 			keyboard_locked: false,
 			local_echo: false,

@@ -263,6 +263,30 @@ fn program_cursor_and_selection_colors_are_drawn_and_redraw_the_grid() {
 }
 
 #[test]
+fn reverse_screen_paints_blanks_in_the_foreground_and_redraws_fully() {
+	let mut term = Term::new(4, 2, Theme::from_kind(ThemeKind::Poop), "/".into());
+	let mut parser = Parser::new();
+	let mut fonts = fonts();
+	let mut canvas = Canvas::new();
+	let theme = Theme::from_kind(ThemeKind::Poop);
+	for (input, corner) in [
+		("ab\x1b[?25l", theme.bg),
+		("\x1b[?5h", theme.fg),
+		("\x1b[2;3Hc", theme.fg),
+		("\x1b[?5l", theme.bg),
+	] {
+		parser.advance(&mut term, input.as_bytes());
+		let mut frame = Frame::default();
+		term.snapshot(&mut frame);
+		let mut expected = vec![0; 4 * 10 * 2 * 20];
+		draw(&mut expected, &mut fonts, &frame, KEY, None);
+		update(&mut canvas, &mut fonts, &mut frame, KEY);
+		assert!(canvas.pixels == expected, "input {input:?}");
+		assert_eq!(expected[4 * 10 * 2 * 20 - 1], corner, "input {input:?}");
+	}
+}
+
+#[test]
 #[ignore = "rendering benchmark; run explicitly in release mode"]
 fn highlight_rendering_throughput() {
 	let mut term = Term::new(100, 30, Theme::from_kind(ThemeKind::Poop), "/".into());

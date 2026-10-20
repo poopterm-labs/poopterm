@@ -113,6 +113,7 @@ impl Term {
 						self.cy = if enabled { self.scroll_top } else { 0 };
 						self.wrap_pending = false;
 					}
+					5 => self.reverse_screen = enabled,
 					7 => self.auto_wrap = enabled,
 					45 => self.reverse_wrap = enabled,
 					25 => self.cursor_visible = enabled,
@@ -352,6 +353,7 @@ impl Term {
 			1 => self.application_cursor,
 			66 => self.application_keypad,
 			6 => self.origin_mode,
+			5 => self.reverse_screen,
 			7 => self.auto_wrap,
 			45 => self.reverse_wrap,
 			25 => self.cursor_visible,
