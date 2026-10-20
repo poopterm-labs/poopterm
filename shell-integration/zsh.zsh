@@ -46,6 +46,8 @@ if [[ $TERM == xterm-poopterm && -z ${POOPTERM_SSH_KEEP_TERM-} ]] && (( ! $+func
 	ssh() { TERM=xterm-256color command ssh "$@"; }
 fi
 
+# Continuation prompts are prompts too; zle-line-init ends them with B.
+PS2=$'%{\e]133;A;k=s\a%}'"$PS2"
 add-zsh-hook precmd _poopterm_precmd
 add-zsh-hook preexec _poopterm_preexec
 add-zle-hook-widget zle-line-init _poopterm_line_init
