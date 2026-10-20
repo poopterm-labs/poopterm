@@ -131,6 +131,20 @@ fn rows_scrolled_away_without_history_are_blanked_whole() {
 }
 
 #[test]
+fn rows_scrolled_in_inside_margins_are_blank() {
+	let mut t = terminal(2, 3);
+	feed(&mut t, b"\x1b[3Hcc\x1b[1;2raa\r\nbb\r\n");
+	assert_eq!(shown(&t), ["bb", "  ", "cc"]);
+}
+
+#[test]
+fn deleted_lines_leave_blank_rows_at_the_bottom() {
+	let mut t = terminal(2, 3);
+	feed(&mut t, b"aa\r\nbb\r\ncc\x1b[H\x1b[2M");
+	assert_eq!(shown(&t), ["cc", "  ", "  "]);
+}
+
+#[test]
 fn rows_scrolled_inside_margins_never_reach_history() {
 	let mut t = terminal(4, 4);
 	feed(&mut t, b"\x1b[2;3r\x1b[2Ha\r\nb\r\nc\r\nd");
