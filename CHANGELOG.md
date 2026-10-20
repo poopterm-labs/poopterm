@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.33 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Blank only the written prefix of rows scrolled into history (#47) (term).
+
 ## 26.10.32 "Giga Fly" — 2026-10-20
 
 ### Performance
