@@ -197,11 +197,17 @@ fn draw_cell(
 	if layer == Layer::Backgrounds {
 		return;
 	}
-	if cell.attrs & attr::UNDERLINE != 0 {
-		p.rect(x0, y0 + ch.saturating_sub(2 * view.scale), cw, line, fg);
-	}
-	if cell.attrs & attr::DOUBLE_UNDERLINE != 0 {
-		p.rect(x0, y0 + ch.saturating_sub(4 * view.scale), cw, line, fg);
+	if cell.attrs & (attr::UNDERLINE | attr::DOUBLE_UNDERLINE) != 0 {
+		let color = match cell.extra {
+			NO_EXTRA => fg,
+			_ => view.frame.underline_color(cell).unwrap_or(fg),
+		};
+		if cell.attrs & attr::UNDERLINE != 0 {
+			p.rect(x0, y0 + ch.saturating_sub(2 * view.scale), cw, line, color);
+		}
+		if cell.attrs & attr::DOUBLE_UNDERLINE != 0 {
+			p.rect(x0, y0 + ch.saturating_sub(4 * view.scale), cw, line, color);
+		}
 	}
 	if cell.attrs & attr::OVERLINE != 0 {
 		p.rect(x0, y0 + view.scale, cw, line, fg);
@@ -391,3 +397,7 @@ fn draw_images(
 		draw_placement(p.pixels, p.width, clip, image, at, view.cell);
 	}
 }
+
+#[cfg(test)]
+#[path = "decoration_tests.rs"]
+mod decoration_tests;

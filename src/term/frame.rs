@@ -14,6 +14,7 @@ struct FrameExtra {
 	link: bool,
 	marks: Box<[char]>,
 	multicell: Option<Multicell>,
+	underline: Option<u32>,
 }
 
 /// The visible rows of a [`Term`] plus what the renderer needs to draw them.
@@ -66,8 +67,13 @@ impl Frame {
 		self.extras.get(cell.extra as usize)?.multicell.as_ref()
 	}
 
+	/// The SGR 58 color `cell`'s underlines are drawn in, if not its text's.
+	pub(crate) fn underline_color(&self, cell: &Cell) -> Option<u32> {
+		self.extras.get(cell.extra as usize)?.underline
+	}
+
 	/// Whether row `row` looks the same as `other`'s row `other_row`: same
-	/// cells, marks and links. Extra ids are frame-local, so they are
+	/// cells, marks, links and underline colors. Extra ids are frame-local, so they are
 	/// compared by content.
 	pub(crate) fn row_matches(&self, row: usize, other: &Frame, other_row: usize) -> bool {
 		let (mine, theirs) = (self.row(row), other.row(other_row));
@@ -78,7 +84,8 @@ impl Frame {
 				&& (a.extra == NO_EXTRA
 					|| (self.marks(a) == other.marks(b)
 						&& self.is_link(a) == other.is_link(b)
-						&& self.multicell(a) == other.multicell(b)))
+						&& self.multicell(a) == other.multicell(b)
+						&& self.underline_color(a) == other.underline_color(b)))
 		})
 	}
 
@@ -161,6 +168,7 @@ impl Term {
 					link: self.extras.hyperlink(cell.extra) != 0,
 					marks: self.extras.marks(cell.extra).into(),
 					multicell: self.extras.multicell(cell.extra).cloned(),
+					underline: self.extras.underline_color(cell.extra),
 				});
 				(frame.extras.len() - 1) as u16
 			});

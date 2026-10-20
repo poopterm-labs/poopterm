@@ -101,6 +101,9 @@ impl Term {
 				None => format!("48:2::{}", rgb(self.bg)),
 			});
 		}
+		if let Some(color) = self.underline_color {
+			parts.push(format!("58:2::{}", rgb(color)));
+		}
 		parts.join(";")
 	}
 }

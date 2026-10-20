@@ -1,7 +1,9 @@
 //! Select Graphic Rendition (`CSI … m`): colors and text attributes.
+use std::sync::Arc;
+
 use super::params::ParamList;
 use crate::{
-	term::{Term, attr::*},
+	term::{NO_EXTRA, Term, attr::*},
 	theme::xterm_color,
 };
 
@@ -40,8 +42,7 @@ impl Term {
 				i += 1;
 				continue;
 			};
-			// 58 (underline color) takes the same arguments; cells do not
-			// store it, so it is parsed only to skip its arguments.
+			// 58 (underline color) takes the same arguments.
 			if matches!(code, 38 | 48 | 58) {
 				let (mode, color, consumed) = if group.len() > 1 {
 					match group.get(1).copied() {
@@ -103,6 +104,7 @@ impl Term {
 				match (code, resolved) {
 					(38, Some(resolved)) => (self.fg, self.fg_id) = (resolved, color.unwrap_or(0)),
 					(48, Some(resolved)) => self.bg = resolved,
+					(58, Some(resolved)) => self.set_underline_color(Some(resolved)),
 					_ => {}
 				}
 				if mode != 0 {
@@ -141,6 +143,7 @@ impl Term {
 				27 => self.reverse = false,
 				28 => self.attrs &= !CONCEAL,
 				29 => self.attrs &= !STRIKE,
+				59 => self.set_underline_color(None),
 				53 => self.attrs |= OVERLINE,
 				55 => self.attrs &= !OVERLINE,
 				30..=37 => {
@@ -161,13 +164,35 @@ impl Term {
 }
 
 impl Term {
-	fn reset_style(&mut self) {
+	pub(super) fn reset_style(&mut self) {
 		self.fg = self.default_fg;
 		self.fg_id = 0;
 		self.bg = self.default_bg;
 		self.attrs = 0;
 		self.bold = false;
 		self.reverse = false;
+		self.set_underline_color(None);
+	}
+
+	pub(crate) fn set_underline_color(&mut self, color: Option<u32>) {
+		if self.underline_color != color {
+			self.underline_color = color;
+			self.update_active_extra();
+		}
+	}
+
+	/// Points [`Term::active_extra`] at the active hyperlink and underline
+	/// color; with the table full, printed cells go without both.
+	pub(super) fn update_active_extra(&mut self) {
+		if self.active_hyperlink == 0 && self.underline_color.is_none() {
+			self.active_extra = NO_EXTRA;
+			return;
+		}
+		let extras = Arc::make_mut(&mut self.extras);
+		self.active_extra = extras
+			.with_hyperlink(NO_EXTRA, self.active_hyperlink)
+			.and_then(|id| extras.with_underline_color(id, self.underline_color))
+			.unwrap_or_default();
 	}
 
 	pub(crate) fn indexed_color(&self, index: u8) -> u32 {

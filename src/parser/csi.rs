@@ -392,11 +392,7 @@ impl Term {
 		self.scroll_bottom = self.rows - 1;
 		self.charsets = [false; 2];
 		self.active_charset = 0;
-		self.fg = self.default_fg;
-		self.bg = self.default_bg;
-		self.attrs = 0;
-		self.bold = false;
-		self.reverse = false;
+		self.reset_style();
 		self.saved_cursor = None;
 		self.wrap_pending = false;
 	}

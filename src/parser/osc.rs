@@ -1,8 +1,6 @@
 //! Operating System Commands: titles, hyperlinks and cwd; colors, the
 //! clipboard and notifications have their own modules.
-use std::sync::Arc;
-
-use crate::term::{NO_EXTRA, Term};
+use crate::term::Term;
 
 impl Term {
 	pub(super) fn apply_osc_dispatch(&mut self, params: &[&[u8]], bell: bool) {
@@ -26,7 +24,7 @@ impl Term {
 				let uri = params[2];
 				if uri.is_empty() {
 					self.active_hyperlink = 0;
-					self.active_extra = NO_EXTRA;
+					self.update_active_extra();
 				} else if uri.len() <= 2048
 					&& let Ok(uri) = std::str::from_utf8(uri)
 					&& !uri.chars().any(char::is_control)
@@ -34,9 +32,7 @@ impl Term {
 				{
 					self.hyperlinks.push(uri.to_owned());
 					self.active_hyperlink = (self.hyperlinks.len() - 1) as u16;
-					self.active_extra = Arc::make_mut(&mut self.extras)
-						.with_hyperlink(NO_EXTRA, self.active_hyperlink)
-						.unwrap_or_default();
+					self.update_active_extra();
 				}
 			}
 			b"133" => {
