@@ -4,6 +4,8 @@
 mod bash_command_tests;
 pub(crate) mod command_line;
 #[cfg(test)]
+mod fish_tests;
+#[cfg(test)]
 mod host_tests;
 pub(crate) mod inject;
 mod markers;

@@ -327,8 +327,12 @@ fn zsh_reports_command_lines_and_click_to_move() {
 fn fish_reports_command_lines_and_click_to_move() {
 	let script =
 		"source shell-integration/fish.fish; __poopterm_prompt; __poopterm_preexec \"$COMMAND\"";
+	let Some(args) = super::fish_tests::without_native_marks() else {
+		return;
+	};
 	let Some(output) = shell_command("fish")
-		.args(["--no-config", "-c", script])
+		.args(args)
+		.args(["-c", script])
 		.env("COMMAND", COMMAND)
 		.output()
 		.ok()
