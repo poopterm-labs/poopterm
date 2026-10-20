@@ -1,7 +1,7 @@
 //! Printable characters and C0/C1 control execution.
 use std::sync::Arc;
 
-use super::narrow;
+use super::{cluster::join_marks, narrow};
 use crate::{
 	graphics::kitty::PLACEHOLDER,
 	term::{Cell, NO_EXTRA, Term, attr},
@@ -156,8 +156,16 @@ impl Term {
 				};
 				let next_width = crate::width::width(next).min(cols);
 				if next_width == 0 || x + next_width > cols || next == PLACEHOLDER {
-					chars = before;
-					break;
+					// Marks join the character just written, and the run goes on
+					// after them without setting up the segment again.
+					let rest = before.as_str();
+					let (used, resumed) = join_marks(&mut self.extras, &mut cells[x - width], rest, cols - x);
+					chars = rest[used..].chars();
+					let Some(resumed) = resumed else {
+						break;
+					};
+					(c, width) = resumed;
+					continue;
 				}
 				(c, width) = (next, next_width);
 			}
@@ -367,3 +375,7 @@ pub(crate) fn dec_graphic(c: char) -> char {
 		_ => c,
 	}
 }
+
+#[cfg(test)]
+#[path = "print_tests.rs"]
+mod tests;
