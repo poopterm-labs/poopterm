@@ -172,6 +172,22 @@ fn combining_marks_and_joined_emoji_stay_with_their_base_cell() {
 }
 
 #[test]
+fn repeated_marks_leave_a_shared_extras_table_shared() {
+	let mut t = terminal(16, 2);
+	feed(&mut t, "e\u{301}".as_bytes());
+	// A frame snapshot holds the table, as while the UI thread draws.
+	let held = std::sync::Arc::clone(&t.extras);
+	feed(&mut t, "e\u{301}".as_bytes());
+	assert!(std::sync::Arc::ptr_eq(&held, &t.extras));
+	assert_eq!(t.marks(&cell(&t, 1)), ['\u{301}']);
+	// A new mark needs a new entry, so the table is copied first.
+	feed(&mut t, "e\u{302}".as_bytes());
+	assert!(!std::sync::Arc::ptr_eq(&held, &t.extras));
+	assert_eq!(held.marks(cell(&t, 2).extra), []);
+	assert_eq!(t.marks(&cell(&t, 2)), ['\u{302}']);
+}
+
+#[test]
 fn osc8_hyperlinks_are_attached_to_printed_cells_and_can_be_closed() {
 	let mut t = terminal(24, 2);
 	feed(

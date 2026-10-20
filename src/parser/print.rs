@@ -265,7 +265,12 @@ impl Term {
 		if width != 0 && (extra == NO_EXTRA || self.extras.marks(extra).last() != Some(&'\u{200d}')) {
 			return false;
 		}
-		if let Some(id) = Arc::make_mut(&mut self.extras).with_mark(extra, c) {
+		// Repeated marks are cached; only a miss needs the table unique.
+		let id = match self.extras.remembered_mark(extra, c) {
+			None => Arc::make_mut(&mut self.extras).with_mark(extra, c),
+			hit => hit,
+		};
+		if let Some(id) = id {
 			self.grid[self.cy][x].extra = id;
 		}
 		true

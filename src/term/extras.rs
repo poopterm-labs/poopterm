@@ -51,6 +51,11 @@ struct Memo {
 	mark: u32,
 }
 
+fn memo_slot(id: u16, mark: char) -> usize {
+	let hash = u32::from(id).wrapping_mul(0x9e37_79b9) ^ u32::from(mark).wrapping_mul(0x85eb_ca6b);
+	(hash >> 24) as usize % MEMO
+}
+
 /// Interned [`Extra`] entries. Ids are stable for the table's lifetime and
 /// identical entries share an id, so the table is bounded by distinct content.
 #[derive(Clone)]
@@ -94,14 +99,20 @@ impl Extras {
 			.map_or(0, |extra| extra.hyperlink)
 	}
 
+	/// [`Self::with_mark`]'s answer if it is cached, found without `&mut`, so
+	/// callers can skip making a shared table unique.
+	#[inline]
+	pub(crate) fn remembered_mark(&self, id: u16, mark: char) -> Option<u16> {
+		let memo = self.memo[memo_slot(id, mark)];
+		((memo.id, memo.mark) == (id, u32::from(mark))).then_some(memo.result)
+	}
+
 	/// The id for `id`'s content with `mark` appended, or `None` if the table is full.
 	pub(crate) fn with_mark(&mut self, id: u16, mark: char) -> Option<u16> {
-		let hash = u32::from(id).wrapping_mul(0x9e37_79b9) ^ u32::from(mark).wrapping_mul(0x85eb_ca6b);
-		let slot = (hash >> 24) as usize % MEMO;
-		let memo = self.memo[slot];
-		if (memo.id, memo.mark) == (id, u32::from(mark)) {
-			return Some(memo.result);
+		if let Some(result) = self.remembered_mark(id, mark) {
+			return Some(result);
 		}
+		let slot = memo_slot(id, mark);
 		let current = self.entries.get(id as usize)?;
 		let result = if current.marks.len() >= MAX_MARKS {
 			id
@@ -214,6 +225,35 @@ mod tests {
 				}
 			}
 		}
+	}
+
+	#[test]
+	fn remembered_marks_are_only_ever_with_marks_answers() {
+		let mut extras = Extras::default();
+		assert_eq!(extras.remembered_mark(NONE, '\u{301}'), None);
+		let accent = extras.with_mark(NONE, '\u{301}').unwrap();
+		assert_eq!(extras.remembered_mark(NONE, '\u{301}'), Some(accent));
+		assert_eq!(extras.remembered_mark(NONE, '\u{302}'), None);
+		assert_eq!(extras.remembered_mark(accent, '\u{301}'), None);
+		// Fill every slot several times over: whatever is still cached must
+		// be the answer with_mark gives, and asking must not change it.
+		for mark in '\u{300}'..char::from_u32(0x300 + 4 * MEMO as u32).unwrap() {
+			extras.with_mark(accent, mark).unwrap();
+		}
+		let mut hits = 0;
+		for mark in '\u{300}'..char::from_u32(0x300 + 4 * MEMO as u32).unwrap() {
+			if let Some(cached) = extras.remembered_mark(accent, mark) {
+				hits += 1;
+				assert_eq!(extras.marks(cached), ['\u{301}', mark]);
+				assert_eq!(extras.with_mark(accent, mark), Some(cached));
+			}
+		}
+		assert!((1..=MEMO).contains(&hits), "{hits}");
+		// Another id whose answer would sit in the same slot is not answered.
+		let slot = memo_slot(accent, '\u{300}');
+		let other = (0..=u16::MAX).find(|&id| id != accent && memo_slot(id, '\u{300}') == slot);
+		extras.with_mark(accent, '\u{300}').unwrap();
+		assert_eq!(extras.remembered_mark(other.unwrap(), '\u{300}'), None);
 	}
 
 	#[test]
