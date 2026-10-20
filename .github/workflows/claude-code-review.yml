@@ -44,4 +44,6 @@ jobs:
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          claude_args: '--allowed-tools "mcp__github_inline_comment__create_inline_comment"'
+          # Each finding links to a Claude Code session that fixes it.
+          include_fix_links: true
+          claude_args: '--model claude-opus-5-5 --allowed-tools "mcp__github_inline_comment__create_inline_comment"'
