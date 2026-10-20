@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.42 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Decode into one flat buffer with alpha resolved up front (#56) (sixel).
+
 ## 26.10.41 "Giga Fly" — 2026-10-20
 
 ### Performance
