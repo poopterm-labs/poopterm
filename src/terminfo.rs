@@ -9,6 +9,8 @@ use std::path::PathBuf;
 
 #[cfg(test)]
 mod effect_tests;
+#[cfg(test)]
+mod size_tests;
 
 /// The entry's primary name; `poopterm` is an alias.
 pub(crate) const NAME: &str = "xterm-poopterm";
