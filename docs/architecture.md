@@ -45,12 +45,21 @@ deadlock, so debug builds track held locks and panic instead.
 
 ## Terminal state (`src/term`)
 
-- `Term` holds the screen `Grid`, scrollback (`VecDeque<Arc<Row>>`), cursor,
-  modes, palette, tab stops, image placements and stored kitty images, and
+- `Term` holds the screen `Grid`, the scrollback, cursor, modes, palette,
+  tab stops, image placements and stored kitty images, and
   shell-integration markers.
-- `Grid` stores one `Vec<Cell>` per row. Scrolling rotates row headers and
-  moves the row leaving the screen into the scrollback, so a line feed costs
-  O(columns), not O(screen).
+- `Grid` stores one `Vec<Cell>` per row. Scrolling rotates row headers (a
+  line feed moves them up by one in a single `ptr::copy`) and copies the row
+  leaving the screen into the scrollback, so a line feed costs O(columns),
+  not O(screen). Only the written prefix of that row is blanked again.
+- `term::scrollback::Scrollback` is one ring buffer of cells holding rows
+  without their trailing default blanks, so typical output takes a fraction
+  of a full row; a row never wraps around the ring's end. On x86-64 rows are
+  copied in with non-temporal stores, since nothing reads them soon;
+  `TermGuard::drop` issues one `sfence` before unlocking, so the next lock
+  holder sees them whole.
+- Runs of cells are filled with 32-byte AVX2 stores when the CPU has them
+  (`term/fill.rs`, checked once at runtime), and with `u64x2` otherwise.
 - `Cell` is 16 bytes: character, foreground, background, attribute bits
   (`term::attr`), width (1 normal, 2 wide, 0 wide-character spacer) and an
   `extra` id. Combining marks, OSC 8 hyperlinks and OSC 66 blocks are interned in
@@ -72,8 +81,11 @@ state machine, written from the specifications, with SIMD scans
 
 - **Text in runs.** Ground state scans to the next C0 control in one pass.
   Pure printable ASCII goes to `print_ascii(&[u8])`; anything else is
-  validated once (`str::from_utf8`) and goes to `print(&str)`, with C1
-  controls (U+0080–U+009F) split out and executed.
+  validated once and goes to `print(&str)`, with C1 controls
+  (U+0080–U+009F) split out and executed. `vt/utf8.rs` validates with the
+  Keiser–Lemire nibble-table algorithm in AVX2 when the CPU has it, and
+  `str::from_utf8` elsewhere; only an invalid run takes the per-defect path
+  that inserts U+FFFD.
 - **Payloads in slices.** OSC fields, DCS payloads (`put(&[u8])`, Sixel) and
   APC strings (`apc_start` / `apc_put` / `apc_end`, the kitty graphics
   protocol) are scanned in bulk, not byte by byte. OSC strings over 4 MiB
@@ -94,7 +106,21 @@ across reads are not corrupted (vte 0.15 drops bytes after them).
 
 `parser::Parser` wraps `vt::Parser` with `Term` as the handler. The
 per-family handlers (`csi.rs`, `esc.rs`, `osc.rs`, `sgr.rs`, `print.rs`)
-are `impl Term` blocks. `batched_printing_matches_per_character_printing`
+are `impl Term` blocks.
+
+Printing non-ASCII text (`print.rs`) avoids per-character work where it can:
+
+- `narrow.rs` prints runs of narrow one- to three-byte characters (Latin,
+  Greek, Cyrillic, punctuation, box drawing) sixteen bytes at a time,
+  decoding them with SIMD instead of one by one.
+- Widths come from `src/width.rs`, a two-level table (`src/width.bin`,
+  13.5 KiB) that `scripts/width_table.py` generates from the Unicode data
+  files; `unicode-width` is only the test oracle.
+- Cell words for narrow and wide characters are built once per segment.
+- Combining marks and joined characters (`cluster.rs`) attach to the cell
+  just written without ending the run, through a cold out-of-line helper.
+
+`batched_printing_matches_per_character_printing`
 feeds random streams through `parser::Parser` and through vte driving
 `Term` one character at a time (`parser::PerCharacter`), and requires
 identical terminal state.
@@ -155,6 +181,8 @@ The kitty graphics protocol runs on the parser thread:
   Limits are enforced while receiving, before anything is decoded.
 - `kitty::load` reads file, temporary-file and shared-memory media;
   `kitty::decode` turns RGB, RGBA and PNG (optionally zlib) into a `Bitmap`.
+  Zlib payloads (`o=z`) go through `crate::inflate`, limited to the exact
+  image size; PNG still uses the `image` crate.
 - `kitty::Store` keeps images by id and number with a quota and least
   recently used eviction that prefers images not on screen. Each image is an
   `Animation`: its frames, the shown frame and the playback timeline.
@@ -166,6 +194,30 @@ The kitty graphics protocol runs on the parser thread:
 - Unicode placeholder cells (U+10EEEE) store the image id as the client set
   the foreground color (`Term::fg_id`). `Term::snapshot` resolves them into
   `Frame::placeholders`, and only while virtual placements exist.
+
+Sixel (`src/sixel.rs`) is decoded with explicit size limits into one flat
+buffer of final `0xAARRGGBB` pixels: colors get their alpha when they are
+chosen, so the buffer becomes the bitmap as is.
+
+## Inflate (`src/inflate`)
+
+Our own zlib/DEFLATE decoder (RFC 1950/1951), written from the
+specifications, with no `unsafe`:
+
+- `bits.rs` reads 64 bits at a time and refills eight bytes at once.
+- `huffman.rs` builds two-level tables (10-bit primary for literals and
+  lengths, 8-bit for distances) whose entries hold the kind, value, extra
+  bits and code length; over-subscribed and incomplete codes are refused.
+- `mod.rs` decodes stored, fixed and dynamic blocks. While enough room
+  remains, a fast loop keeps the reader in registers, decodes up to three
+  literals per refill and copies matches with `u8x16` (whole vectors, a
+  splat for distance 1, a `swizzle_dyn` pattern for other short periods);
+  near the end a careful per-symbol path takes over.
+- `adler.rs` checks Adler-32 with `u32x32` lanes.
+
+The output never grows past the caller's limit, and a match that would end
+past it is refused. `miniz_oxide` is the test oracle and compresses the
+benchmark corpus.
 
 The renderer draws each row in layers: images below `i32::MIN / 2`, cell
 backgrounds, other negative z-indices, text and placeholder slices, then

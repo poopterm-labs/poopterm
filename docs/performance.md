@@ -47,9 +47,21 @@ xterm, but dropped by kitty, which used to abort the run.
 
 **Parser only**, without rendering: `cargo test --release -- --ignored
 --nocapture parser_throughput`. **PTY ceiling**: `scripts/bench-pty.py`.
+**Inflate**: `inflate_throughput`, the same way (our decoder against
+`miniz_oxide`). The other benchmarks are listed in
+[`testing.md`](testing.md#running).
+
+Run-to-run noise on one machine is a few percent, more than many single
+changes gain. Compare by alternating the two builds several times
+(A B B A …) and report the medians with their spread; for changes under
+about 2%, also compare instruction counts with `perf stat -e
+instructions:u`, which barely vary between runs.
 
 To profile, build the `profiling` profile (release plus symbols) and use
-`perf` (user-space events work without root):
+`perf`. User-space events work without root at the default
+`kernel.perf_event_paranoid=2`; to see kernel time too (page faults, PTY
+reads), lower it for the session with `sudo sysctl -w
+kernel.perf_event_paranoid=1 kernel.kptr_restrict=0`.
 
 ```sh
 cargo build --profile profiling
@@ -95,38 +107,41 @@ prompts, 10% on emoji).
 
 ## Results
 
-Intel i3-N305 (8 E-cores, AVX2), Linux, 26.10.3 plus the synchronized-output
-and combining-mark changes below (`d48ebd6`), plain release build (no PGO).
-**End to end** is `scripts/bench-throughput.py --mib 16 --repeat 3` in a
-poopterm window of 100×30 cells (median MB/s); **headless** is
-`poopterm --benchmark --mib 16 --no-render` at 120×40, starting from a full
-scrollback.
+Intel i3-N305 (8 E-cores, AVX2), Linux, plain release build (no PGO).
+**Headless** is `poopterm --benchmark --mib 16 --no-render` at 120×40,
+starting from a full scrollback, median of 3 runs: first at 26.10.3 plus
+the synchronized-output and combining-mark changes below (`d48ebd6`), then
+at 26.10.42 with our own inflate (#57). **End to end** is
+`scripts/bench-throughput.py --mib 16 --repeat 3` in a poopterm window of
+100×30 cells (median MB/s), measured at `d48ebd6` and not yet repeated.
 
-| Workload | End to end | Headless |
-|----------|-----------:|---------:|
-| log (plain ASCII) | 86 | 204 |
-| compiler (colors, hyperlinks) | 77 | 122 |
-| ls --color | 86 | 143 |
-| source (highlighted) | 105 | 131 |
-| unicode (accented, Greek, Cyrillic) | 83 | 92 |
-| cjk | 86 | 102 |
-| emoji (ZWJ, combining marks) | 63 | 69 |
-| tui (sync blocks, htop-like) | 161 | 175 |
-| editor (scroll regions) | 159 | 165 |
-| progress bars | 175 | 190 |
-| truecolor half blocks | 248 | 261 |
-| cursor motion | 119 | 123 |
-| shell prompts (OSC 133/7/0/8) | 90 | 115 |
-| sixel | 72 | 76 |
-| kitty-rgba | 301 | 1021 |
-| kitty-png | 108 | 111 |
-| kitty-zlib | 224 | 233 |
-| **overall** | **108** | **133** |
+| Workload | End to end (`d48ebd6`) | Headless (`d48ebd6`) | Headless (26.10.42) |
+|----------|-----------:|---------:|---------:|
+| log (plain ASCII) | 86 | 204 | 248 |
+| compiler (colors, hyperlinks) | 77 | 122 | 153 |
+| ls --color | 86 | 143 | 182 |
+| source (highlighted) | 105 | 131 | 139 |
+| unicode (accented, Greek, Cyrillic) | 83 | 92 | 138 |
+| cjk | 86 | 102 | 154 |
+| emoji (ZWJ, combining marks) | 63 | 69 | 120 |
+| tui (sync blocks, htop-like) | 161 | 175 | 204 |
+| editor (scroll regions) | 159 | 165 | 213 |
+| progress bars | 175 | 190 | 286 |
+| truecolor half blocks | 248 | 261 | 240 |
+| cursor motion | 119 | 123 | 144 |
+| shell prompts (OSC 133/7/0/8) | 90 | 115 | 142 |
+| sixel | 72 | 76 | 149 |
+| kitty-rgba | 301 | 1021 | 1023 |
+| kitty-png | 108 | 111 | 113 |
+| kitty-zlib | 224 | 233 | 246 |
+| **overall** | **108** | **133** | **175** |
 
 End-to-end figures sit below headless ones where the PTY and the window
-cost more than parsing: plain ASCII parses at 200 MB/s but arrives at
-86 MB/s, and raw kitty RGBA is limited by the PTY, not the decoder. Where
-parsing dominates (emoji, Unicode, tui) the two are close.
+cost more than parsing: at `d48ebd6` plain ASCII parsed at 204 MB/s but
+arrived at 86 MB/s, and raw kitty RGBA is limited by the PTY, not the
+decoder. Where parsing dominates (emoji, Unicode, tui) the two are close.
+Truecolor's headless figure has varied between 240 and 260 MB/s across
+builds without a code change behind it.
 
 ### Before 26.10
 
@@ -207,16 +222,6 @@ ranged 89–97 MB/s over the day).
 - **Profile-guided optimization** (`make pgo`) adds about 6% overall on top
   of all this.
 
-## Where the time goes now
-
-During a flood the parser thread is the bottleneck: it is ~100% busy and the
-queue stays near full. On emoji output, `Term::print_text` is ~22% of
-parser time, UTF-8 validation ~9%, line feeds (`scroll_region_up`) ~8% and
-attaching marks ~7%; the interning that used to dominate is mostly gone. On
-Unicode output, `print_text` (width lookup and cell writes) dominates; on
-ASCII output, line feeds take ~20%.
-The plan toward 200 MB/s is in [`TODO.md`](../TODO.md).
-
 ## Follow-up work (26.10)
 
 The TODO throughput work was implemented and validated with the parser and
@@ -237,6 +242,37 @@ claiming an unproven gain. Selection and search row damage is checked by
 pixel-equivalence tests; an ignored 300-frame test measured 25.6 ms for full
 redraw and 3.39 ms for partial redraw at 100×30 cells and a 1000×600 surface.
 
+## Parser, terminal and image work (26.10.28 onward)
+
+Each change was measured headless at 16 MiB in alternating runs against
+the `main` it was based on; gains are for the workloads it targeted.
+
+| Change | Gain | Where |
+|--------|------|-------|
+| Scrollback as trimmed rows in one ring buffer, instead of a `VecDeque` of rows (#44) | compiler +22%, ls +13%, log +11% | `term/scrollback.rs` |
+| SIMD UTF-8 validation (Keiser–Lemire, AVX2 at runtime) instead of `str::from_utf8` (#45) | unicode +31%, emoji +19%, cjk +19% | `vt/utf8.rs` |
+| Blank only the written prefix of rows scrolled into history (#47) | compiler, ls, tui +5% | `term/grid.rs` |
+| Fill cells with 32-byte AVX2 stores (#48) | editor +12%, progress +7% | `term/fill.rs` |
+| Generated width table instead of `unicode-width`'s range chain (#49) | emoji +16%, cjk +15%, progress +15% | `src/width.rs` |
+| Repeated marks answered without making the extras table unique (#50) | emoji +5% | `term/extras.rs` |
+| Line feeds rotate row headers in one move (#51) | log, compiler, cjk +1–2% | `term/grid.rs` |
+| Narrow multibyte runs printed sixteen bytes at a time (#52) | unicode +10% | `parser/narrow.rs` |
+| Narrow and wide cell words built once per segment (#53) | cjk −3.5% instructions | `parser/print.rs` |
+| History rows written with non-temporal stores, one `sfence` per unlock (#54) | log +10%, ls +4% | `term/scrollback.rs` |
+| Marks joined to clusters without ending the print segment (#55) | emoji +12%, tui +6% | `parser/cluster.rs` |
+| Sixel decoded into one flat buffer with alpha resolved up front (#56) | sixel +90% | `src/sixel.rs` |
+| Our own inflate for kitty `o=z` (#57) | kitty-zlib +5% | `src/inflate` |
+
+Measured and rejected along the way:
+
+- A ring of rows for the screen grid, so a full-screen scroll only moves an
+  index: scrolling workloads gained 3–6%, but cursor-addressed ones lost
+  2–3%.
+- Non-temporal stores with a fence per row: −11% (one fence per unlock is
+  what landed in #54).
+- Inlining the mark-joining helper: LLVM then spilled the character
+  iterator in the CJK loop, costing 7% more instructions.
+
 ## Images (26.10)
 
 Headless `--benchmark` on the i3-N305, 16 MiB per workload, 120×40, parser
@@ -245,15 +281,58 @@ encoded input:
 
 | Workload | Before the kitty protocol | Now |
 |----------|-------------------------:|----:|
-| kitty-rgba | ignored | ~1110 (~700) |
-| kitty-zlib | ignored | ~240 (~210) |
-| kitty-png | ignored | ~115 (~107) |
+| kitty-rgba | ignored | ~1020–1110 (~700) |
+| kitty-zlib | ignored | ~246 (~210) |
+| kitty-png | ignored | ~113 (~107) |
 
 Before, APC strings were dropped unread, so those workloads only measured
 the scan for their end. Decoding base64 with SIMD took kitty-rgba from about
 954 to 1113 MB/s. Reserving the exact size of raw payloads up front showed no
 reproducible gain and was dropped.
 
-PNG time is mostly the PNG crate: about 60% inflating (`fdeflate`) and 20%
-unfiltering. Our own inflate (see [`TODO.md`](../TODO.md)) is where the next
-gain is.
+Zlib payloads now go through our own inflate (`src/inflate`), which beats
+`miniz_oxide` on every stream in `inflate_throughput` except stored
+(incompressible) data:
+
+| Stream (zlib level 6) | Ours, MB/s | miniz_oxide, MB/s |
+|-----------------------|-----------:|------------------:|
+| RGB gradient 32×32 | 213 | 210 |
+| RGB gradient 256×256 | 284 | 261 |
+| random, 1 MiB (stored blocks) | 4962 | 6648 |
+| words, 1 MiB | 1090 | 854 |
+| runs, 1 MiB | 3544 | 2991 |
+| short periods, 1 MiB | 1279 | 878 |
+
+Small images spend most of their time building each stream's Huffman
+tables, which is why kitty-zlib gains less than the large streams.
+
+PNG time is still mostly the PNG crate: about 60% inflating (`fdeflate`)
+and 20% unfiltering. Our own PNG decoder, on top of our inflate with a SIMD
+unfilter, is the next step (see [`TODO.md`](../TODO.md)).
+
+Sixel was the slowest workload at about 80 MB/s: each row was its own
+`Vec`, resized on every paint, then copied into a bitmap with a second pass
+to add alpha. Decoding into one flat buffer of final pixels doubled it
+(#56).
+
+## Where the time goes now
+
+During a flood the parser thread is the bottleneck: it is ~100% busy and the
+queue stays near full. Headless profiles at 26.10.42 (`perf record -e
+cycles:u`, 16 MiB, shares of the whole run, which includes generating the
+corpus) of the workloads still furthest below 200 MB/s:
+
+| Workload | Largest costs |
+|----------|---------------|
+| emoji | `print_text` 30%, line feeds (`scroll_region_up`) 18%, `memmove` 11%, `join_marks` 10%, UTF-8 validation 5% |
+| unicode | `print_text` 37%, line feeds 15%, `memmove` 11%, fills 6%, UTF-8 validation 4% |
+| cursor | `Parser::advance` 25%, fills 11%, CSI final bytes 10%, `clear_range` 7%, CSI dispatch 7% |
+| shell | `Parser::advance` 30%, line feeds 14%, `memmove` 9%, OSC dispatch 5%, `from_utf8` on OSC strings 5% |
+| source | `Parser::advance` 36%, `memmove` 12%, SGR 12%, line feeds 10% |
+
+Text workloads now spend most of their time writing cells and scrolling
+(the `memmove` is mostly rows copied into history); escape-sequence
+workloads spend it in `Parser::advance`, the per-sequence path that the
+compatibility work of 26.10.23–26.10.27 made slower (see the regression
+in [`TODO.md`](../TODO.md)). The plan toward 200 MB/s on every payload is
+there too.

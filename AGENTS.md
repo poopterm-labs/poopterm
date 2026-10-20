@@ -107,7 +107,8 @@ input events ──► App (UI thread) ──► input::{keys,mouse,paste} ─�
 | `src/render/` | Pure drawing: `Painter`, `FontSet` glyph cache, grid renderer, row damage, SIMD blending. |
 | `src/ui/` | Pure UI models: selection, search, tab layout. |
 | `src/app/` | winit event loop and glue. `App` methods are split by concern (`keyboard`, `mouse`, `tabs`, `settings`, `draw`, …). |
-| Top level | `config`, `theme`, `fonts`, `clipboard`, `session_store`, `shell_integration`, `sixel`, `wallpaper`, `platform`. |
+| `src/inflate/` | Our own zlib/DEFLATE decoder for kitty `o=z` payloads, tested against `miniz_oxide`. |
+| Top level | `config`, `theme`, `fonts`, `width` (generated width table), `clipboard`, `session_store`, `shell_integration`, `sixel`, `wallpaper`, `platform`. |
 
 Details: [`docs/architecture.md`](docs/architecture.md).
 
