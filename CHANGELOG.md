@@ -1,5 +1,21 @@
 # Changelog
 
+## 26.10.47 "Giga Fly" — 2026-10-20
+
+### Added
+
+- Add reverse screen video and advertise flash (#62) (render).
+- Advertise smm and rmm for the meta modes (#63) (terminfo).
+- Report bash command lines with osc 133 cmdline_url (#68) (shell).
+
+### Fixed
+
+- Keep other hosts' osc 7 directories out of the local cwd (#65) (shell).
+
+### Maintenance
+
+- Install zsh and fish so the shell hook tests run on linux (#67).
+
 ## 26.10.46 "Giga Fly" — 2026-10-20
 
 ### Added
