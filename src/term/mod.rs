@@ -40,6 +40,8 @@ mod kitty_animation_tests;
 #[cfg(test)]
 mod kitty_tests;
 #[cfg(test)]
+mod memory_lock_tests;
+#[cfg(test)]
 mod mode_tests;
 #[cfg(test)]
 mod movement_tests;
@@ -269,6 +271,8 @@ pub(crate) struct Term {
 	pub(crate) bg: u32,
 	pub(crate) scroll_top: usize,
 	pub(crate) scroll_bottom: usize,
+	/// The top margin came from an HP memory lock (`ESC l`).
+	pub(crate) memory_locked: bool,
 	pub(crate) saved_cursor: Option<SavedCursor>,
 	pub(crate) bracketed_paste: bool,
 	pub(crate) mouse_tracking: u16,
@@ -478,6 +482,7 @@ impl Term {
 			bg: theme.bg,
 			scroll_top: 0,
 			scroll_bottom: rows.saturating_sub(1),
+			memory_locked: false,
 			saved_cursor: None,
 			bracketed_paste: false,
 			mouse_tracking: 0,

@@ -53,6 +53,15 @@ impl Term {
 					self.cy = self.cy.saturating_sub(1);
 				}
 			}
+			// HP memory lock: the lines above the cursor stop scrolling.
+			b'l' if self.cy < self.scroll_bottom => {
+				self.scroll_top = self.cy;
+				self.memory_locked = true;
+			}
+			b'm' if self.memory_locked => {
+				self.scroll_top = 0;
+				self.memory_locked = false;
+			}
 			b'D' => self.linefeed(),
 			b'E' => {
 				self.cx = 0;

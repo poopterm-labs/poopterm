@@ -250,6 +250,7 @@ impl Term {
 				if top < bottom {
 					self.scroll_top = top;
 					self.scroll_bottom = bottom;
+					self.memory_locked = false;
 					self.cx = 0;
 					self.cy = if self.origin_mode { top } else { 0 };
 				}
