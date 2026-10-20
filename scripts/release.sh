@@ -11,10 +11,11 @@ if [[ "$remote" == "$GITHUB_SHA" ]]; then
   release=$(python3 scripts/release.py)
   version=${release%%$'\n'*}
   codename=${release#*$'\n'}
-  # Homebrew builds from the tag, which lands with this commit, so the
-  # formula goes in it too: a release pushes to main exactly once.
+  # Homebrew and makepkg build from the tag, which lands with this commit, so
+  # the formula and PKGBUILD go in it too: a release pushes to main exactly once.
   python3 scripts/release.py --formula "$version"
-  git add Cargo.toml Cargo.lock CHANGELOG.md Formula/poopterm.rb
+  python3 scripts/release.py --pkgbuild "$version"
+  git add Cargo.toml Cargo.lock CHANGELOG.md Formula/poopterm.rb packaging/arch/PKGBUILD
   # Pushed with the deploy key, which triggers workflows: [skip ci] stops
   # this commit from releasing again.
   git commit -m "chore(release): ${version} after green CI" -m "[skip ci]" -m "Poopterm-Release-For: ${GITHUB_SHA}"

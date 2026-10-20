@@ -93,6 +93,16 @@ It ships the same profile-guided build, desktop launcher, icons and terminfo
 entry as the Debian package. There is no DNF repository yet, so updates are
 installed the same way.
 
+### Arch Linux
+
+The repository carries a PKGBUILD that builds the latest release from source
+with the nightly toolchain, which it installs inside the build directory:
+
+```sh
+curl -LO https://raw.githubusercontent.com/poopterm-labs/poopterm/main/packaging/arch/PKGBUILD
+makepkg -si
+```
+
 Each package attached to a [release](https://github.com/poopterm-labs/poopterm/releases)
 carries a signed build provenance attestation, which proves that the release
 workflow built it from the tagged commit. Check a downloaded package with the
