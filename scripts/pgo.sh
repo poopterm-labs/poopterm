@@ -4,12 +4,16 @@
 #
 #   scripts/pgo.sh                 # instrument, train on the benchmark, build
 #   scripts/pgo.sh instrument      # instrumented build only
-#   scripts/pgo.sh train [MIB]     # run the benchmark corpus (default 8 MiB each)
+#   scripts/pgo.sh train [MIB]     # run the benchmark corpus (default 8 MiB each),
+#                                  # as floods and as small interactive writes
 #   scripts/pgo.sh use             # open the instrumented terminal and use it;
 #                                  # closing it saves what you did as training
 #   scripts/pgo.sh build           # merge every profile and build optimized
 #   scripts/pgo.sh compare [MIB]   # benchmark the release and PGO builds
 #   scripts/pgo.sh path            # print the optimized binary's path
+#   scripts/pgo.sh dist [MIB]      # instrument, train and build, then put the
+#                                  # result at target/release/poopterm; if any
+#                                  # step fails, a plain release build instead
 #   scripts/pgo.sh clean           # forget all profiles
 #
 # Profiles add up: train on the benchmark, add sessions with `use`, then
@@ -59,6 +63,23 @@ need_instrumented() {
 train() {
 	need_instrumented
 	"$instrumented" --benchmark --mib "${1:-8}"
+	# Interactive programs write a few bytes at a time (key echo, prompts)
+	# and get a frame for most writes; keep their paths in the profile too.
+	"$instrumented" --benchmark --kib 64 --read 16 --frame-every 64
+}
+
+# The binary releases ship, at the path packaging expects. Training runs
+# in its own process, so a failure anywhere in it falls back.
+dist() {
+	release=$root/target/release/poopterm
+	if sh "$root/scripts/pgo.sh" all "$@"; then
+		mkdir -p "$(dirname "$release")"
+		cp "$optimized" "$release"
+		echo "pgo.sh: shipping the PGO build"
+	else
+		echo "::warning::pgo.sh: PGO failed; shipping a plain release build" >&2
+		cargo build --release --locked
+	fi
 }
 
 use_terminal() {
@@ -103,8 +124,9 @@ use) use_terminal ;;
 build) build ;;
 compare) compare "$@" ;;
 path) echo "$optimized" ;;
+dist) dist "$@" ;;
 clean) rm -rf "$profiles" "$merged" ;;
--h | --help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
+-h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
 *)
 	echo "pgo.sh: unknown command: $command (try --help)" >&2
 	exit 2

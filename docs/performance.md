@@ -21,7 +21,13 @@ with history show up:
 cargo build --release
 ./target/release/poopterm --benchmark                      # 16 MiB per workload, 120×40
 ./target/release/poopterm --benchmark --mib 64 --only log,tui --size 200x50
+./target/release/poopterm --benchmark --kib 64 --read 16 --frame-every 64  # interactive
 ```
+
+`--read` sets the bytes per parser call (default 64 KiB, one PTY read) and
+`--frame-every` the bytes between frames (default 1 MiB). Small values model
+interactive programs, which write a few bytes at a time and get a frame for
+most writes.
 
 **End to end**, in any terminal (also for comparing emulators):
 
@@ -98,12 +104,21 @@ make pgo-clean       # forget the profiles
 
 `poopterm --benchmark` needs no window and covers every workload, the
 parser, terminal state and rendering, so it is the base training run
-(`PGO_MIB`, default 8, sets its size). Sessions with `make pgo-use` add the
+(`PGO_MIB`, default 8, sets its size). A second run feeds every workload in
+16-byte reads with a frame every 64 bytes, so interactive paths (key echo,
+prompts, frequent frames) are trained too, not only floods. Sessions with `make pgo-use` add the
 paths only a window exercises: input, tabs, the UI and real programs.
 Profiles accumulate under `target/pgo/profiles` until `make pgo-clean`;
-after large code changes, clean and retrain. On an i3-N305 the
-benchmark-trained build is about 6% faster overall (up to 17% on shell
-prompts, 10% on emoji).
+after large code changes, clean and retrain.
+
+Released Debian packages ship the PGO build: the release job runs
+`scripts/pgo.sh dist`, which instruments, trains and rebuilds, then puts the
+result at `target/release/poopterm`. If any step fails, it builds a plain
+release binary instead and logs a warning. On an i3-N305 (headless, medians
+of three alternating runs) the trained build is 5% faster overall: cursor
++14%, editor +14%, shell +12%, source +10%, tui +10%, compiler +9%, and
+emoji −2.5%. Fed interactively (`--read 16 --frame-every 64`) it is 13%
+faster.
 
 ## Results
 
@@ -219,8 +234,8 @@ ranged 89–97 MB/s over the day).
   because programs choose the hashed content.
 - **Titles** set by prompts on every line were filtered character by
   character; short printable-ASCII titles are now copied whole (shell +7%).
-- **Profile-guided optimization** (`make pgo`) adds about 6% overall on top
-  of all this.
+- **Profile-guided optimization** (`make pgo`, and every release) adds
+  about 5% overall on top of all this, 13% when fed interactively.
 
 ## Follow-up work (26.10)
 
