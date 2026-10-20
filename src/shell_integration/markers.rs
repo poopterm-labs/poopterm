@@ -1,6 +1,6 @@
 //! OSC 133 semantic prompt markers, with the options of the
 //! semantic-prompts proposal (`aid`, `cl`, `k`, `err`) and kitty's
-//! (`cmdline`, `cmdline_url`).
+//! (`cmdline`, `cmdline_url`, `click_events`).
 use std::{
 	collections::VecDeque,
 	time::{Duration, Instant},
@@ -17,6 +17,8 @@ const MAX_OPEN: usize = 16;
 /// Longest application identifier and error text kept.
 const MAX_AID: usize = 64;
 const MAX_ERROR: usize = 32;
+/// Most secondary prompts remembered under one primary prompt.
+const MAX_SECONDARY: usize = 64;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Phase {
@@ -49,6 +51,12 @@ pub(crate) struct ShellIntegration {
 	pub command_line: Option<String>,
 	/// The prompt asked (`cl=`) for clicks in its input line to move the cursor.
 	pub click_move: bool,
+	/// The shell takes clicks in its prompt as SGR mouse reports (kitty's
+	/// `click_events`): 1 for screen rows, 2 for rows counted from the
+	/// prompt line above the click; 0 when it does not.
+	pub click_events: u8,
+	/// Absolute rows of the secondary prompts since the last primary one.
+	secondary: Vec<usize>,
 	pub markers: VecDeque<Marker>,
 	/// Open commands, outermost first: their application and whether their
 	/// output started.
@@ -91,6 +99,9 @@ impl ShellIntegration {
 		match letter {
 			b"A" | b"N" => {
 				if matches!(option(options, "k"), Some("s" | "c" | "r")) {
+					if self.secondary.len() < MAX_SECONDARY {
+						self.secondary.push(row);
+					}
 					self.phase = Phase::Prompt;
 					return;
 				}
@@ -116,6 +127,12 @@ impl ShellIntegration {
 				}
 				self.open.push((aid.to_owned(), false));
 				self.click_move = option(options, "cl").is_some();
+				self.click_events = match option(options, "click_events") {
+					Some("1") => 1,
+					Some("2") => 2,
+					_ => 0,
+				};
+				self.secondary.clear();
 				self.command_line = None;
 				self.mark(Phase::Prompt, row, col, None);
 			}
@@ -213,6 +230,15 @@ impl ShellIntegration {
 			.find(|marker| marker.phase == Phase::Command)
 			.filter(|marker| marker.row == row)
 			.map_or(0, |marker| marker.col)
+	}
+
+	/// The row of the prompt line on or above absolute `row` that clicks
+	/// count from: the closest secondary prompt, else the primary one.
+	/// `None` above the primary prompt.
+	pub fn prompt_line(&self, row: usize) -> Option<usize> {
+		let primary = self.prompts().rev().find(|m| m.phase == Phase::Prompt)?.row;
+		let secondary = self.secondary.iter().rev().find(|&&line| line <= row);
+		(row >= primary).then(|| secondary.copied().unwrap_or(primary))
 	}
 
 	/// Records a mark at absolute `row`, leaving the phase alone.
@@ -322,5 +348,21 @@ mod tests {
 		mark(&mut shell, "D;1", 4, start + LONG_COMMAND);
 		assert!(shell.take_long_command_finished());
 		assert!(!shell.take_long_command_finished());
+	}
+
+	#[test]
+	fn clicks_count_from_a_bounded_number_of_secondary_prompts() {
+		let mut shell = ShellIntegration::default();
+		mark(&mut shell, "A", 10, Instant::now());
+		assert_eq!(shell.prompt_line(9), None);
+		assert_eq!(shell.prompt_line(10), Some(10));
+		for row in 11..=11 + MAX_SECONDARY {
+			mark(&mut shell, "A;k=s", row, Instant::now());
+		}
+		assert_eq!(shell.prompt_line(10), Some(10));
+		let last_kept = 10 + MAX_SECONDARY;
+		assert_eq!(shell.prompt_line(last_kept), Some(last_kept));
+		// One more is past the bound and counts from the last one kept.
+		assert_eq!(shell.prompt_line(last_kept + 1), Some(last_kept));
 	}
 }

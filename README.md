@@ -413,8 +413,10 @@ bundled font keeps its own license, above.
   `L` and `A`/`N` start a fresh line, `P` and `k=` mark continuation and right
   prompts, `I` works like `B`, `aid=` tracks nested programs so `N` finishes
   the right command, and `D` takes an exit code and `err=`. With `cl=`, a plain
-  click in the line being edited moves the cursor with arrow keys. kitty's
-  `cmdline=` and `cmdline_url=` on `C` name the running command. Poopterm
+  click in the line being edited moves the cursor with arrow keys; with kitty's
+  `click_events=1` (screen rows) or `2` (rows from the prompt line above), clicks
+  in the prompt reach the shell as SGR mouse reports instead, as fish 4 asks.
+  kitty's `cmdline=` and `cmdline_url=` on `C` name the running command. Poopterm
   retains the latest 256 markers and shows the running command or exit status
   in the status bar. Optional hooks are available for zsh, Bash, and fish;
   install them explicitly with the instructions below. The hooks also emit
