@@ -53,7 +53,7 @@ fn in_narrow_block(c: u16) -> bool {
 /// the chunk is left for the next call. Returns the bytes and cells used and
 /// the last character, or `None` (writing nothing) when a character needs
 /// the general path or the characters do not fit.
-#[inline]
+#[inline(always)]
 pub(super) fn print_chunk(
 	bytes: &[u8; CHUNK],
 	row: &mut [u32x4],

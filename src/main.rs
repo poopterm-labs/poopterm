@@ -17,6 +17,7 @@ mod clipboard;
 #[path = "../build/codename.rs"]
 mod codename;
 mod config;
+mod cpu;
 #[cfg(not(target_os = "macos"))]
 mod dbus;
 mod fonts;

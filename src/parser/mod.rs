@@ -6,6 +6,8 @@ mod cluster;
 mod color_spec;
 mod csi;
 mod dcs;
+#[cfg(all(test, target_arch = "x86_64"))]
+mod dispatch_tests;
 mod erase;
 mod esc;
 mod modes;
@@ -158,6 +160,7 @@ impl Term {
 		target.dcs_request = kind.map(Request::new);
 	}
 
+	#[inline(always)]
 	fn dispatch_csi(
 		&mut self,
 		params: &impl ParamList,

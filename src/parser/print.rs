@@ -87,6 +87,26 @@ impl Term {
 	/// Prints text without C0 or C1 controls with one style lookup. Equivalent
 	/// to calling [`Term::apply_print`] per character.
 	pub(super) fn print_text(&mut self, text: &str) {
+		#[cfg(target_arch = "x86_64")]
+		if crate::cpu::has_v3() {
+			// SAFETY: the CPU supports the features.
+			return unsafe { self.print_text_v3(text) };
+		}
+		self.print_text_with(text);
+	}
+
+	/// # Safety
+	///
+	/// The CPU must have the features [`crate::cpu::has_v3`] checks.
+	#[cfg(target_arch = "x86_64")]
+	#[target_feature(enable = "avx2,bmi1,bmi2,lzcnt,popcnt,fma")]
+	pub(super) unsafe fn print_text_v3(&mut self, text: &str) {
+		self.print_text_with(text);
+	}
+
+	/// The body of [`Term::print_text`], compiled into each variant.
+	#[inline(always)]
+	pub(super) fn print_text_with(&mut self, text: &str) {
 		let template = self.styled_cell();
 		let blank = self.blank();
 		let general = self.charsets[self.active_charset]
@@ -185,6 +205,7 @@ impl Term {
 	/// Prints a run of printable ASCII (`0x20..=0x7e`). Equivalent to calling
 	/// [`Term::apply_print`] per byte, but resolves the cell style once and
 	/// fills each row segment in one pass.
+	#[inline(always)]
 	pub(crate) fn print_ascii(&mut self, mut bytes: &[u8]) {
 		if self.charsets[self.active_charset] || self.insert_mode || self.has_multicells {
 			for &byte in bytes {
