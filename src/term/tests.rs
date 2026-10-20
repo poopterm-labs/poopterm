@@ -225,6 +225,114 @@ fn osc8_hyperlinks_are_attached_to_printed_cells_and_can_be_closed() {
 	assert_eq!(t.hyperlink_uri(&cell(&t, 5)), None);
 }
 
+/// Shells repeat the same few links on every prompt; each must reuse its
+/// slot, so links keep working however often they repeat.
+#[test]
+fn repeated_osc8_targets_share_one_slot_and_never_exhaust_the_table() {
+	let mut t = terminal(24, 2);
+	for _ in 0..5_000 {
+		feed(
+			&mut t,
+			b"\x1b]8;;https://example.com/main\x1b\\m\x1b]8;;\x1b\\\r",
+		);
+	}
+	assert_eq!(t.hyperlinks.len(), 2);
+	feed(
+		&mut t,
+		b"\x1b]8;;https://example.com/new\x1b\\n\x1b]8;;\x1b\\",
+	);
+	assert_eq!(
+		t.hyperlink_uri(&cell(&t, 0)),
+		Some("https://example.com/new")
+	);
+	// The earlier target keeps its slot when it comes back.
+	feed(&mut t, b"\r\x1b]8;;https://example.com/main\x1b\\m");
+	assert_eq!(
+		t.hyperlink_uri(&cell(&t, 0)),
+		Some("https://example.com/main")
+	);
+	assert_eq!(t.hyperlinks.len(), 3);
+}
+
+/// Distinct targets still stop at the bound, and the cap never lets an
+/// unseen target reuse another's slot.
+#[test]
+fn distinct_osc8_targets_stop_at_the_bound_without_mixing_targets() {
+	let mut t = terminal(24, 2);
+	for i in 0..4_200 {
+		feed(
+			&mut t,
+			format!("\x1b]8;;https://example.com/{i}\x1b\\x\x1b]8;;\x1b\\\r").as_bytes(),
+		);
+	}
+	assert_eq!(t.hyperlinks.len(), 4096);
+	feed(&mut t, b"\x1b]8;;https://example.com/7\x1b\\s");
+	assert_eq!(t.hyperlink_uri(&cell(&t, 0)), Some("https://example.com/7"));
+	// A target that does not fit ends the open link instead of extending it.
+	feed(&mut t, b"\x1b]8;;https://example.com/unseen\x1b\\u");
+	assert_eq!(t.hyperlink_uri(&cell(&t, 1)), None);
+}
+
+/// A rejected target (control characters, or too long) also ends the open
+/// link: its text must not point at the previous target.
+#[test]
+fn a_rejected_osc8_target_ends_the_open_link() {
+	let long = format!("\x1b]8;;https://example.com/{}\x1b\\b", "x".repeat(2048));
+	for rejected in ["\x1b]8;;https://example.com/\u{85}\x1b\\b", long.as_str()] {
+		let mut t = terminal(24, 2);
+		feed(&mut t, b"\x1b]8;;https://example.com/a\x1b\\a");
+		feed(&mut t, rejected.as_bytes());
+		assert_eq!(t.hyperlink_uri(&cell(&t, 0)), Some("https://example.com/a"));
+		assert_eq!(t.hyperlink_uri(&cell(&t, 1)), None, "{rejected:?}");
+	}
+}
+
+/// Targets of up to 2048 bytes are kept; one byte more is rejected.
+#[test]
+fn osc8_targets_are_bounded_at_2048_bytes() {
+	for (len, kept) in [(2048, true), (2049, false)] {
+		let uri = format!("https://example.com/{}", "x".repeat(len - 20));
+		let mut t = terminal(24, 2);
+		feed(&mut t, format!("\x1b]8;;{uri}\x1b\\a").as_bytes());
+		assert_eq!(
+			t.hyperlink_uri(&cell(&t, 0)),
+			kept.then_some(uri.as_str()),
+			"{len}"
+		);
+	}
+}
+
+/// Reopening a link keeps the current underline color: with one set the
+/// cell gets both, and once it is reset the link alone.
+#[test]
+fn reopened_osc8_links_keep_the_current_underline_color() {
+	let mut t = terminal(24, 2);
+	let link = b"\x1b]8;;https://example.com/a\x1b\\";
+	feed(&mut t, link);
+	feed(&mut t, b"a\x1b]8;;\x1b\\\x1b[58;2;1;2;3m");
+	feed(&mut t, link);
+	feed(&mut t, b"b\x1b]8;;\x1b\\\x1b[59m");
+	feed(&mut t, link);
+	feed(&mut t, b"c");
+	let underline = |i| t.extras.underline_color(cell(&t, i).extra);
+	assert_eq!(
+		(underline(0), underline(1), underline(2)),
+		(None, Some(0x010203), None)
+	);
+	for i in 0..3 {
+		assert_eq!(
+			t.hyperlink_uri(&cell(&t, i)),
+			Some("https://example.com/a"),
+			"{i}"
+		);
+	}
+	assert_eq!(
+		(cell(&t, 0).extra, cell(&t, 2).extra),
+		(cell(&t, 2).extra, cell(&t, 0).extra)
+	);
+	assert_ne!(cell(&t, 1).extra, cell(&t, 0).extra);
+}
+
 #[test]
 fn kitty_keyboard_mode_can_be_enabled_and_restored() {
 	let mut t = terminal(12, 2);

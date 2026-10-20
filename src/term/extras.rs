@@ -70,6 +70,9 @@ pub(crate) struct Extras {
 	/// building and hashing entries. Ids never change meaning, so answers
 	/// stay right; colliding pairs only evict each other.
 	memo: [Memo; MEMO],
+	/// `with_hyperlink(NONE, link)` by `link`, or `NONE` when not yet asked:
+	/// shells reopen the same few links on every prompt.
+	links: Vec<u16>,
 }
 
 impl Default for Extras {
@@ -83,6 +86,7 @@ impl Default for Extras {
 				result: NONE,
 				mark: u32::MAX,
 			}; MEMO],
+			links: Vec::new(),
 		}
 	}
 }
@@ -139,16 +143,33 @@ impl Extras {
 		Some(result)
 	}
 
+	/// [`Self::with_hyperlink`]'s answer for a plain cell if it is known,
+	/// found without `&mut`.
+	#[inline]
+	pub(crate) fn remembered_link(&self, link: u16) -> Option<u16> {
+		self
+			.links
+			.get(usize::from(link))
+			.copied()
+			.filter(|&id| id != NONE)
+	}
+
 	/// The id for `id`'s marks with hyperlink `link`, or `None` if the table is full.
 	pub(crate) fn with_hyperlink(&mut self, id: u16, link: u16) -> Option<u16> {
 		let current = self.entries.get(id as usize)?;
 		if current.hyperlink == link {
 			return Some(id);
 		}
-		self.intern(Extra {
+		let result = self.intern(Extra {
 			hyperlink: link,
 			..current.clone()
-		})
+		})?;
+		if id == NONE {
+			let slot = usize::from(link);
+			self.links.resize(self.links.len().max(slot + 1), NONE);
+			self.links[slot] = result;
+		}
+		Some(result)
 	}
 
 	/// The SGR 58 underline color for `id`, if it has one.
@@ -246,6 +267,60 @@ mod tests {
 						"round {round}"
 					);
 				}
+			}
+		}
+	}
+
+	/// The memo answers only for plain cells, and only with the id
+	/// `with_hyperlink` gave; marked or colored cells still intern.
+	#[test]
+	fn remembered_links_are_only_ever_plain_with_hyperlink_answers() {
+		let mut extras = Extras::default();
+		assert_eq!(extras.remembered_link(3), None);
+		let accent = extras.with_mark(NONE, '\u{301}').unwrap();
+		let marked = extras.with_hyperlink(accent, 3).unwrap();
+		assert_eq!(extras.remembered_link(3), None);
+		let plain = extras.with_hyperlink(NONE, 3).unwrap();
+		assert_ne!(plain, marked);
+		assert_eq!(extras.remembered_link(3), Some(plain));
+		assert_eq!(extras.remembered_link(4), None);
+		assert_eq!(extras.with_hyperlink(NONE, 0), Some(NONE));
+		assert_eq!(extras.remembered_link(0), None);
+		assert_eq!(extras.remembered_link(u16::MAX), None);
+		let colored = extras.with_underline_color(plain, Some(0xff)).unwrap();
+		assert_eq!(extras.hyperlink(colored), 3);
+		assert_eq!(extras.remembered_link(3), Some(plain));
+	}
+
+	/// Under any mix of marks, links and colors, the memo agrees with
+	/// interning: a remembered link is the plain entry for that link, and
+	/// asking again never changes the answer.
+	#[test]
+	fn remembered_links_match_interning_under_random_operations() {
+		let mut rng = crate::bench::corpus::Rng::new(0x11);
+		let mut extras = Extras::default();
+		let mut ids = vec![NONE];
+		let mut plain = HashMap::new();
+		for _ in 0..20_000 {
+			let id = *rng.pick(&ids);
+			let link = rng.below(40) as u16;
+			let next = match rng.below(3) {
+				0 => extras.with_mark(id, *rng.pick(&['\u{301}', '\u{302}', '\u{20e3}'])),
+				1 => extras.with_hyperlink(id, link).inspect(|&fresh| {
+					if id == NONE && link != 0 {
+						assert_eq!(*plain.entry(link).or_insert(fresh), fresh);
+					}
+				}),
+				_ => extras.with_underline_color(id, rng.pick(&[None, Some(0), Some(0xff)]).to_owned()),
+			}
+			.unwrap();
+			ids.push(next);
+			let probe = rng.below(40) as u16;
+			if let Some(remembered) = extras.remembered_link(probe) {
+				assert_eq!(plain.get(&probe), Some(&remembered));
+				assert_eq!(extras.hyperlink(remembered), probe);
+				assert!(extras.marks(remembered).is_empty());
+				assert_eq!(extras.underline_color(remembered), None);
 			}
 		}
 	}

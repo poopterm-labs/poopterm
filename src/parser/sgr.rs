@@ -168,6 +168,12 @@ impl Term {
 			self.active_extra = NO_EXTRA;
 			return;
 		}
+		if self.underline_color.is_none()
+			&& let Some(id) = self.extras.remembered_link(self.active_hyperlink)
+		{
+			self.active_extra = id;
+			return;
+		}
 		let extras = Arc::make_mut(&mut self.extras);
 		self.active_extra = extras
 			.with_hyperlink(NO_EXTRA, self.active_hyperlink)

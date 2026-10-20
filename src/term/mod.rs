@@ -326,7 +326,11 @@ pub(crate) struct Term {
 	/// Combining marks and hyperlinks referenced by [`Cell::extra`], shared
 	/// copy-on-write between clones.
 	pub(crate) extras: Arc<extras::Extras>,
+	/// OSC 8 targets by index; index 0 is no link.
 	pub(crate) hyperlinks: Vec<String>,
+	/// The index of each target in `hyperlinks`, so a repeated target reuses
+	/// its slot instead of filling the bounded table.
+	pub(crate) hyperlink_ids: std::collections::HashMap<String, u16>,
 	pub(crate) wrap_pending: bool,
 	/// Whether blocks of scaled text (OSC 66) may be on screen; printing
 	/// and erasing take the slower paths that respect them.
@@ -531,6 +535,7 @@ impl Term {
 			active_extra: extras::NONE,
 			extras: Arc::default(),
 			hyperlinks: vec![String::new()],
+			hyperlink_ids: std::collections::HashMap::new(),
 			wrap_pending: false,
 			has_multicells: false,
 			charsets: [false; 2],
