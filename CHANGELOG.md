@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.57 "Giga Fly" — 2026-10-20
+
+### Maintenance
+
+- Record memory footprint findings and plan (#76) (todo).
+
 ## 26.10.56 "Giga Fly" — 2026-10-20
 
 ### Performance
