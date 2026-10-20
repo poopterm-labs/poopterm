@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.40 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Stream history rows past the cache (#54) (term).
+
 ## 26.10.39 "Giga Fly" — 2026-10-20
 
 ### Performance
