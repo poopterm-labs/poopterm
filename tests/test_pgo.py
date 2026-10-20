@@ -55,7 +55,7 @@ class Pgo(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.fake = Path(self.temp.name)
+        self.fake = Path(self.temp.name).resolve()  # macOS: /var is /private/var
         self.repo = self.fake / 'repo'
         (self.repo / 'scripts').mkdir(parents=True)
         shutil.copy(SOURCE / 'scripts/pgo.sh', self.repo / 'scripts/pgo.sh')
