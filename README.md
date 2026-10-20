@@ -538,6 +538,13 @@ colors. `make install` installs the entry system-wide, or run
 `poopterm --print-terminfo | sudo tic -x -`. Set `term = "xterm-256color"`
 (or any name) in `config.toml` to override.
 
+## Accessibility
+
+[`ACCESSIBILITY.md`](ACCESSIBILITY.md) describes what works today (keyboard
+shortcuts for every action, font sizes up to 32 px, custom high-contrast
+colors, no blinking), the known gaps such as screen reader support, and how
+to report an accessibility problem.
+
 ## Development and releases
 
 ```sh

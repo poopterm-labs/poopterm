@@ -236,3 +236,23 @@ gain), `image` (wallpapers and iTerm2 inline images need JPEG and WebP), and `rf
   kitty animation frames.
 - **OSC 176 (application id)** is ignored: a Wayland app id is fixed once
   the window exists, so it cannot follow a program's request.
+
+## Accessibility
+
+The gaps listed in [`ACCESSIBILITY.md`](ACCESSIBILITY.md); keep the two in
+step.
+
+- **Screen readers.** Expose the grid as an accessibility tree, written
+  in-house from the specifications: AT-SPI over our own D-Bus code
+  (`src/dbus`) on Linux and FreeBSD, NSAccessibility on macOS. Text, cursor
+  position and new output announcements first; selection after.
+- **IME preedit.** Draw the composing text at the cursor and place the
+  candidate window there (`Ime::Preedit`, `set_ime_cursor_area`).
+- **Keyboard-only Settings.** Tab and Shift+Tab focus order through every
+  control, with a visible focus ring.
+- **Font zoom shortcuts.** Ctrl+= / Ctrl+- / Ctrl+0 (Cmd on macOS), bindable
+  like the other shortcuts.
+- **Reduced motion.** A setting that pauses kitty animations, following the
+  desktop's reduced-motion preference where the platform exposes one.
+- **Contrast check.** A test that measures each built-in theme's foreground
+  and background against WCAG AA (4.5:1), and fixes for the ones that fail.
