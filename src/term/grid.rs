@@ -1,8 +1,8 @@
 //! Row-based screen storage.
 //!
 //! Each row is its own `Vec<Cell>`, so scrolling rotates row headers instead
-//! of moving every cell, and a row that scrolls off the top can be handed to
-//! the scrollback without copying.
+//! of moving every cell, and rows entering the screen are blanked in place,
+//! in memory that is already in cache.
 use std::ops::{Index, IndexMut};
 
 use super::Cell;
@@ -33,25 +33,23 @@ impl Grid {
 	}
 
 	/// Scrolls rows `top..=bottom` up by `count`. Rows leaving the region are
-	/// passed to `evict` (oldest first), which returns a buffer to reuse for
-	/// the blank row entering at the bottom, if it has one.
+	/// passed to `evict` (oldest first) before they are blanked.
 	pub(crate) fn scroll_up(
 		&mut self,
 		top: usize,
 		bottom: usize,
 		count: usize,
 		blank: Cell,
-		mut evict: impl FnMut(Row) -> Option<Row>,
+		mut evict: impl FnMut(&[Cell]),
 	) {
 		let count = count.min(bottom + 1 - top);
 		let region = &mut self.rows[top..=bottom];
+		for row in &region[..count] {
+			evict(row);
+		}
 		region.rotate_left(count);
-		let cols = self.cols;
-		for slot in &mut region[bottom + 1 - top - count..] {
-			let mut fresh = evict(std::mem::take(slot)).unwrap_or_default();
-			fresh.clear();
-			fresh.resize(cols, blank);
-			*slot = fresh;
+		for row in &mut region[bottom + 1 - top - count..] {
+			Cell::fill(row, blank);
 		}
 	}
 
@@ -61,7 +59,7 @@ impl Grid {
 		let region = &mut self.rows[top..=bottom];
 		region.rotate_right(count);
 		for row in &mut region[..count] {
-			row.fill(blank);
+			Cell::fill(row, blank);
 		}
 	}
 
@@ -121,15 +119,52 @@ mod tests {
 	}
 
 	#[test]
-	fn scrolling_up_moves_rows_out_and_reuses_returned_buffers() {
+	fn scrolling_up_hands_leaving_rows_out_before_blanking_them() {
 		let mut g = grid(&["aa", "bb", "cc", "dd"]);
 		let mut evicted = Vec::new();
 		g.scroll_up(0, 2, 2, cell('.'), |row| {
 			evicted.push(row.iter().map(|c| c.ch).collect::<String>());
-			Some(row)
 		});
 		assert_eq!(evicted, ["aa", "bb"]);
 		assert_eq!(text(&g), ["cc", "..", "..", "dd"]);
+	}
+
+	#[test]
+	fn scrolling_up_by_more_than_the_region_evicts_and_blanks_it_all() {
+		let mut g = grid(&["aa", "bb", "cc", "dd"]);
+		let mut evicted = Vec::new();
+		g.scroll_up(1, 2, 9, cell('.'), |row| {
+			evicted.push(row.iter().map(|c| c.ch).collect::<String>());
+		});
+		assert_eq!(evicted, ["bb", "cc"]);
+		assert_eq!(text(&g), ["aa", "..", "..", "dd"]);
+	}
+
+	#[test]
+	fn scrolling_up_by_zero_changes_nothing() {
+		let mut g = grid(&["aa", "bb"]);
+		g.scroll_up(0, 1, 0, cell('.'), |_| panic!("no row leaves"));
+		assert_eq!(text(&g), ["aa", "bb"]);
+	}
+
+	#[test]
+	fn scrolling_down_by_more_than_the_region_blanks_it_all() {
+		let mut g = grid(&["aa", "bb", "cc"]);
+		g.scroll_down(0, 1, 5, cell('.'));
+		assert_eq!(text(&g), ["..", "..", "cc"]);
+	}
+
+	#[test]
+	fn blanked_rows_take_every_field_of_the_blank() {
+		let mut g = grid(&["ab", "cd"]);
+		let blank = Cell {
+			bg: 4,
+			attrs: 2,
+			..cell(' ')
+		};
+		g.scroll_up(0, 1, 1, blank, |_| {});
+		assert!(g[1].iter().all(|c| *c == blank));
+		assert_eq!(g[0][1].ch, 'd');
 	}
 
 	#[test]

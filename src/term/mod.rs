@@ -16,6 +16,8 @@ mod dcs_tests;
 mod extras;
 mod frame;
 mod grid;
+#[cfg(test)]
+mod history_tests;
 mod images;
 pub(crate) mod iterm;
 #[cfg(test)]
@@ -49,6 +51,9 @@ mod pointer_tests;
 #[cfg(test)]
 mod prompt_tests;
 mod screen;
+mod scrollback;
+#[cfg(test)]
+mod scrollback_tests;
 mod shared;
 mod shell;
 pub(crate) mod status;
@@ -70,7 +75,7 @@ pub(crate) use frame::Frame;
 pub(crate) use grid::Grid;
 pub(crate) use shared::{SharedTerm, TermGuard};
 
-use std::{collections::VecDeque, path::PathBuf, sync::Arc, time::Instant};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 /// Bit flags stored in [`Cell::attrs`] and [`Term::attrs`].
 pub(crate) mod attr {
@@ -96,7 +101,10 @@ pub(crate) enum CursorShape {
 /// One grid cell (16 bytes). `width` is 1 for normal, 2 for the left half
 /// of a wide character and 0 for its right-half spacer. Combining marks and
 /// hyperlinks live in [`Term::extras`], referenced by `extra`.
+///
+/// Aligned to 16 bytes so cells move and compare as single vector words.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C, align(16))]
 pub(crate) struct Cell {
 	pub(crate) ch: char,
 	pub(crate) fg: u32,
@@ -104,6 +112,29 @@ pub(crate) struct Cell {
 	pub(crate) attrs: u8,
 	pub(crate) width: u8,
 	pub(crate) extra: u16,
+}
+
+impl Cell {
+	/// The cell as one 128-bit word; equal exactly when the cells are.
+	#[inline(always)]
+	pub(crate) fn bits(self) -> u128 {
+		// SAFETY: `repr(C)` with 4 + 4 + 4 + 1 + 1 + 2 bytes of fields leaves
+		// no padding, so every byte is initialized.
+		unsafe { std::mem::transmute(self) }
+	}
+
+	/// Sets every cell of `cells` to `cell` with whole-cell vector stores;
+	/// `slice::fill` writes cells field by field.
+	#[inline(always)]
+	pub(crate) fn fill(cells: &mut [Cell], cell: Cell) {
+		use std::simd::u64x2;
+		// SAFETY: `Cell` is 16 bytes with no padding and 16-byte alignment, so
+		// the same memory is a valid `[u64x2]`.
+		let words =
+			unsafe { std::slice::from_raw_parts_mut(cells.as_mut_ptr().cast::<u64x2>(), cells.len()) };
+		let bits = cell.bits();
+		words.fill(u64x2::from_array([bits as u64, (bits >> 64) as u64]));
+	}
 }
 
 impl Default for Cell {
@@ -162,7 +193,7 @@ pub(crate) struct Term {
 	pub(crate) rows: usize,
 	/// The visible screen.
 	pub(crate) grid: Grid,
-	pub(crate) scrollback: VecDeque<Arc<Vec<Cell>>>,
+	pub(crate) scrollback: scrollback::Scrollback,
 	pub(crate) scrollback_limit: usize,
 	pub(crate) scroll_offset: usize,
 	pub(crate) primary_screen: Option<(Grid, usize, usize, u32, u32)>,
@@ -307,7 +338,7 @@ impl Term {
 	#[inline(always)]
 	pub(crate) fn row_cells(&self, row: usize) -> Option<&[Cell]> {
 		if row < self.scrollback.len() {
-			self.scrollback.get(row).map(|line| line.as_slice())
+			self.scrollback.get(row)
 		} else {
 			let row = row - self.scrollback.len();
 			(row < self.rows).then(|| self.grid[row].as_slice())
@@ -325,6 +356,16 @@ impl Term {
 	}
 
 	#[inline(always)]
+	/// The cell trimmed from the end of scrollback rows: a blank in the
+	/// default colors.
+	pub(crate) fn padding(&self) -> Cell {
+		Cell {
+			fg: self.default_fg,
+			bg: self.default_bg,
+			..Cell::default()
+		}
+	}
+
 	pub(crate) fn blank(&self) -> Cell {
 		Cell {
 			attrs: self.attrs,
@@ -366,7 +407,7 @@ impl Term {
 					..Cell::default()
 				},
 			),
-			scrollback: VecDeque::new(),
+			scrollback: scrollback::Scrollback::default(),
 			scrollback_limit: 5000,
 			scroll_offset: 0,
 			primary_screen: None,

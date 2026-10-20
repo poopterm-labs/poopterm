@@ -134,7 +134,8 @@ impl Term {
 		);
 
 		frame.cells.clear();
-		let blank = self.blank();
+		// History rows are stored without their trailing default blanks.
+		let blank = self.padding();
 		for row in first_row..first_row + rows {
 			let cells = self.row_cells(row).unwrap_or(&[]);
 			let cells = &cells[..cells.len().min(cols)];
