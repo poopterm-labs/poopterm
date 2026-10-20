@@ -315,3 +315,119 @@ fn wide_characters_cut_by_a_narrow_run_are_repaired() {
 	let stream = format!("\x1b[1;20H日本語日本語\x1b[1;1H{run}");
 	assert_matches_per_character(stream.as_bytes(), 24, 2);
 }
+
+#[test]
+fn narrow_characters_in_blocks_with_marks_are_looked_up_and_taken() {
+	// Each block also holds combining marks or wide characters, so these take
+	// the width lookup instead of the bitmap, and still print here.
+	for c in [
+		'\u{48a}', '\u{370}', '\u{a8}', '\u{5d0}', '\u{2010}', '\u{2300}',
+	] {
+		assert!(
+			!in_narrow_block(c as u16),
+			"U+{:04X} is in a mixed block",
+			c as u32
+		);
+		let input = format!("{c}abcdefghijklmnopq");
+		let mut row = row(CHUNK);
+		let (used, cells_used, _) =
+			print_chunk(&chunk(&input), &mut row, narrow()).unwrap_or_else(|| panic!("{input}"));
+		let printed = &input[..used];
+		assert_eq!(cells_used, printed.chars().count(), "{input}");
+		assert_eq!(text(&row[..cells_used]), printed, "{input}");
+	}
+}
+
+/// Feeds `parts` one `advance` call at a time.
+fn fed(parts: &[&[u8]], cols: usize, rows: usize) -> Term {
+	let mut term = Term::new(cols, rows, Theme::from_kind(ThemeKind::Poop), "/".into());
+	let mut parser = Parser::new();
+	for part in parts {
+		parser.advance(&mut term, part);
+	}
+	term
+}
+
+#[test]
+fn streams_split_anywhere_print_like_whole_streams() {
+	let stream = "ascii, then éèêë and Привет мир — “ok” ─┼─ ±½ done, ascii 日本".as_bytes();
+	let whole = fed(&[stream], 20, 4);
+	for split in 1..stream.len() {
+		let parts = fed(&[&stream[..split], &stream[split..]], 20, 4);
+		assert_eq!(
+			(parts.cx, parts.cy, parts.last_printed),
+			(whole.cx, whole.cy, whole.last_printed),
+			"split at byte {split}"
+		);
+		for y in 0..4 {
+			assert_eq!(
+				parts.grid[y], whole.grid[y],
+				"row {y}, split at byte {split}"
+			);
+		}
+	}
+}
+
+#[test]
+fn narrow_runs_without_auto_wrap_overwrite_the_last_column() {
+	let run = "абвгдеёжзийклмнопрстуфхцчшщ".repeat(2);
+	for cols in [40, 20, 16, 9] {
+		let stream = format!("\x1b[?7l{run}\x1b[1;3H{run}é");
+		assert_matches_per_character(stream.as_bytes(), cols, 2);
+		let term = fed(&[stream.as_bytes()], cols, 2);
+		assert_eq!(term.grid[0][cols - 1].ch, 'é', "{cols} columns");
+		assert_eq!(term.grid[1][0].ch, ' ', "{cols} columns: nothing wrapped");
+	}
+}
+
+#[test]
+fn every_style_survives_the_fast_path() {
+	let run = "Ünïcödé façade naïveté — ±½°";
+	for sgr in [
+		"1",
+		"2",
+		"3",
+		"4",
+		"4:3",
+		"5",
+		"7",
+		"8",
+		"9",
+		"1;7",
+		"2;8",
+		"31",
+		"1;34",
+		"38;5;196",
+		"48;5;22",
+		"38;2;1;2;3;48;2;4;5;6",
+		"4;58;5;3",
+		"53",
+	] {
+		let stream = format!("{run}\x1b[{sgr}m{run}\x1b[0m{run}");
+		assert_matches_per_character(stream.as_bytes(), 100, 2);
+		let term = fed(&[stream.as_bytes()], 100, 2);
+		let n = run.chars().count();
+		let (before, styled) = (term.grid[0][n - 1], term.grid[0][2 * n - 1]);
+		assert_eq!(styled.ch, '°', "\\e[{sgr}m");
+		assert_ne!(
+			(styled.fg, styled.bg, styled.attrs, styled.extra),
+			(before.fg, before.bg, before.attrs, before.extra),
+			"\\e[{sgr}m changes the cell"
+		);
+		assert_eq!(term.grid[0][3 * n - 1], before, "\\e[{sgr}m is reset");
+	}
+	let link = format!("\x1b]8;;https://example.com\x1b\\{run}\x1b]8;;\x1b\\{run}");
+	assert_matches_per_character(link.as_bytes(), 80, 2);
+}
+
+#[test]
+fn marks_right_after_a_chunk_join_its_last_character() {
+	for lead in 0..20 {
+		for mark in ["\u{301}", "\u{20d7}", "\u{200d}é", "\u{fe0f}", "\u{200b}"] {
+			let stream = format!("{}{}{mark}xyz", "a".repeat(lead), "éèêëāēī".repeat(3));
+			for cols in [80, 24] {
+				assert_matches_per_character(stream.as_bytes(), cols, 2);
+			}
+		}
+	}
+}
