@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.48 "Giga Fly" — 2026-10-20
+
+### Added
+
+- Send prompt clicks to shells that ask with click_events (#69) (shell).
+
 ## 26.10.47 "Giga Fly" — 2026-10-20
 
 ### Added
