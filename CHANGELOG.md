@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.38 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Print narrow multibyte runs sixteen bytes at a time (#52) (parser).
+
 ## 26.10.37 "Giga Fly" — 2026-10-20
 
 ### Performance
