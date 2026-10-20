@@ -79,9 +79,11 @@ impl DerefMut for TermGuard<'_> {
 	}
 }
 
-#[cfg(debug_assertions)]
 impl Drop for TermGuard<'_> {
 	fn drop(&mut self) {
+		// Runs before the mutex unlocks, which drops with the fields.
+		super::scrollback::publish_streamed();
+		#[cfg(debug_assertions)]
 		held::release(self.owner);
 	}
 }
@@ -135,6 +137,56 @@ mod tests {
 			.join()
 			.unwrap();
 		assert_eq!(term.lock().title, "from parser");
+	}
+
+	fn history(term: &Term) -> Vec<String> {
+		(0..term.scrollback.len())
+			.map(|row| term.scrollback[row].iter().map(|c| c.ch).collect())
+			.collect()
+	}
+
+	#[test]
+	fn history_written_under_the_lock_is_read_intact_on_another_thread() {
+		let term = shared();
+		term.lock().scrollback_limit = 50;
+		let writer = term.clone();
+		thread::spawn(move || {
+			let mut parser = crate::parser::Parser::new();
+			for line in 0..200 {
+				parser.advance(&mut writer.lock(), format!("{line:04}\r\n").as_bytes());
+			}
+		})
+		.join()
+		.unwrap();
+		let expected: Vec<String> = (149..199).map(|line| format!("{line:04}")).collect();
+		assert_eq!(history(&term.lock()), expected);
+	}
+
+	#[test]
+	fn a_reader_never_sees_history_rows_half_written() {
+		let term = shared();
+		term.lock().scrollback_limit = 30;
+		let writer = term.clone();
+		let parser = thread::spawn(move || {
+			let mut parser = crate::parser::Parser::new();
+			for line in 0..3000 {
+				parser.advance(&mut writer.lock(), format!("{line:04}\r\n").as_bytes());
+			}
+		});
+		while !parser.is_finished() {
+			let rows = history(&term.lock());
+			// Lines are consecutive numbers, so every row follows the one before.
+			let numbers: Vec<u32> = rows.iter().map(|row| row.parse().unwrap()).collect();
+			assert!(
+				numbers.windows(2).all(|pair| pair[1] == pair[0] + 1),
+				"{rows:?}"
+			);
+		}
+		parser.join().unwrap();
+		assert_eq!(
+			history(&term.lock()).last().map(String::as_str),
+			Some("2998")
+		);
 	}
 
 	#[test]
