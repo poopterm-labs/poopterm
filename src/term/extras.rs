@@ -1,5 +1,5 @@
-//! Rarely used per-cell data (combining marks, OSC 8 hyperlinks, parts of
-//! scaled text) kept out of [`Cell`](super::Cell) so cells stay 16 bytes.
+//! Rarely used per-cell data (combining marks, OSC 8 hyperlinks, SGR 58
+//! underline colors, parts of scaled text) kept out of [`Cell`](super::Cell) so cells stay 16 bytes.
 use std::{
 	collections::{HashMap, hash_map::Entry},
 	hash::{Hash, Hasher},
@@ -7,7 +7,7 @@ use std::{
 
 use super::multicell::Multicell;
 
-/// The `extra` id of a cell with no marks and no hyperlink.
+/// The `extra` id of a cell with none of these.
 pub(crate) const NONE: u16 = 0;
 /// Combining marks kept per cell; further marks are dropped.
 pub(crate) const MAX_MARKS: usize = 8;
@@ -17,6 +17,7 @@ struct Extra {
 	hyperlink: u16,
 	marks: Box<[char]>,
 	multicell: Option<Box<Multicell>>,
+	underline: Option<u32>,
 }
 
 // Entries are hashed for every combining mark printed. SipHash costs
@@ -25,14 +26,17 @@ struct Extra {
 impl Hash for Extra {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		let marks = &self.marks[..self.marks.len().min(MAX_MARKS)];
-		let mut bytes = [0u8; 4 + 4 * MAX_MARKS];
+		let mut bytes = [0u8; 8 + 4 * MAX_MARKS];
 		bytes[..2].copy_from_slice(&self.hyperlink.to_ne_bytes());
 		bytes[2] = marks.len() as u8;
 		bytes[3] = u8::from(self.multicell.is_some());
-		for (chunk, &mark) in bytes[4..].as_chunks_mut::<4>().0.iter_mut().zip(marks) {
+		// Colors are 24-bit; bit 24 tells black from none.
+		let underline = self.underline.map_or(0, |color| color | 1 << 24);
+		bytes[4..8].copy_from_slice(&underline.to_ne_bytes());
+		for (chunk, &mark) in bytes[8..].as_chunks_mut::<4>().0.iter_mut().zip(marks) {
 			*chunk = u32::from(mark).to_ne_bytes();
 		}
-		state.write(&bytes[..4 + 4 * marks.len()]);
+		state.write(&bytes[..8 + 4 * marks.len()]);
 		if let Some(multicell) = &self.multicell {
 			multicell.hash(state);
 		}
@@ -124,6 +128,7 @@ impl Extras {
 				hyperlink: current.hyperlink,
 				marks: marks.into(),
 				multicell: current.multicell.clone(),
+				underline: current.underline,
 			})?
 		};
 		self.memo[slot] = Memo {
@@ -142,6 +147,24 @@ impl Extras {
 		}
 		self.intern(Extra {
 			hyperlink: link,
+			..current.clone()
+		})
+	}
+
+	/// The SGR 58 underline color for `id`, if it has one.
+	pub(crate) fn underline_color(&self, id: u16) -> Option<u32> {
+		self.entries.get(id as usize)?.underline
+	}
+
+	/// The id for `id`'s content with underline color `color`, or `None` if
+	/// the table is full.
+	pub(crate) fn with_underline_color(&mut self, id: u16, color: Option<u32>) -> Option<u16> {
+		let current = self.entries.get(id as usize)?;
+		if current.underline == color {
+			return Some(id);
+		}
+		self.intern(Extra {
+			underline: color,
 			..current.clone()
 		})
 	}
@@ -277,5 +300,38 @@ mod tests {
 			extras.with_hyperlink(NONE, 1).is_some(),
 			"existing entries still resolve"
 		);
+	}
+
+	#[test]
+	fn underline_colors_are_interned_with_the_rest_of_the_cell() {
+		let mut extras = Extras::default();
+		assert_eq!(extras.underline_color(NONE), None);
+		assert_eq!(extras.with_underline_color(NONE, None), Some(NONE));
+		let red = extras.with_underline_color(NONE, Some(0xff0000)).unwrap();
+		let black = extras.with_underline_color(NONE, Some(0)).unwrap();
+		assert_ne!(red, NONE);
+		assert_ne!(black, NONE, "black is a color");
+		assert_ne!(red, black);
+		assert_eq!(extras.with_underline_color(NONE, Some(0xff0000)), Some(red));
+		assert_eq!(extras.underline_color(red), Some(0xff0000));
+		assert_eq!(extras.underline_color(black), Some(0));
+		assert_eq!(extras.with_underline_color(red, None), Some(NONE));
+	}
+
+	#[test]
+	fn underline_colors_survive_marks_and_hyperlinks() {
+		let mut extras = Extras::default();
+		let red = extras.with_underline_color(NONE, Some(0xff0000)).unwrap();
+		let marked = extras.with_mark(red, '\u{301}').unwrap();
+		let linked = extras.with_hyperlink(marked, 3).unwrap();
+		assert_eq!(extras.underline_color(marked), Some(0xff0000));
+		assert_eq!(extras.underline_color(linked), Some(0xff0000));
+		assert_eq!(extras.marks(linked), ['\u{301}']);
+		assert_ne!(marked, extras.with_mark(NONE, '\u{301}').unwrap());
+		let unlinked = extras.with_hyperlink(linked, 0).unwrap();
+		assert_eq!(unlinked, marked);
+		let blue = extras.with_underline_color(linked, Some(0xff)).unwrap();
+		assert_eq!(extras.hyperlink(blue), 3);
+		assert_eq!(extras.marks(blue), ['\u{301}']);
 	}
 }

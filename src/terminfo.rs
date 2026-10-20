@@ -9,6 +9,8 @@ use std::path::PathBuf;
 
 #[cfg(test)]
 mod effect_tests;
+#[cfg(test)]
+mod size_tests;
 
 /// The entry's primary name; `poopterm` is an alias.
 pub(crate) const NAME: &str = "xterm-poopterm";
@@ -515,5 +517,38 @@ pub(super) mod tests {
 		parser.advance(&mut term, &tput("rmm"));
 		assert_eq!(alt_a(&term), b"\x1ba", "rmm goes back to ESC");
 		assert!(!term.keyboard.eight_bit_meta, "and clears the eighth bit");
+	}
+
+	#[test]
+	fn setulc_and_setal_set_the_underline_color() {
+		if !have("tic") || !have("tput") {
+			return;
+		}
+		use crate::{
+			parser::Parser,
+			term::Term,
+			theme::{Theme, ThemeKind},
+		};
+		let dir = TempDir::new("underline");
+		assert!(compile_into(&dir.0));
+		let tput = |args: &[&str]| {
+			let output = Command::new("tput")
+				.env("TERMINFO", &dir.0)
+				.arg("-T")
+				.arg(NAME)
+				.args(args)
+				.output()
+				.unwrap();
+			assert!(output.status.success(), "{args:?} is advertised");
+			output.stdout
+		};
+		assert_eq!(tput(&["Setulc", "1193046"]), b"\x1b[58:2::18:52:86m");
+		assert_eq!(tput(&["setal", "1193046"]), tput(&["Setulc", "1193046"]));
+		let mut term = Term::new(10, 4, Theme::from_kind(ThemeKind::Poop), "/".into());
+		let mut parser = Parser::new();
+		parser.advance(&mut term, &tput(&["setal", &0xff00ff.to_string()]));
+		parser.advance(&mut term, b"A");
+		let extra = term.grid[0][0].extra;
+		assert_eq!(term.extras.underline_color(extra), Some(0xff00ff));
 	}
 }

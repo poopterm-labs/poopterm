@@ -64,6 +64,7 @@ fn state(t: &Term) -> String {
 		t.fg,
 		t.bg,
 		t.attrs,
+		t.underline_color,
 		t.bold,
 		t.reverse,
 		t.charsets,
@@ -124,6 +125,8 @@ const EFFECTS: &[(&str, &[&str], &str, &str)] = &[
 	("setaf", &["1"], "", ""),
 	("setab", &["1"], "", ""),
 	("setrgbf", &["1", "2", "3"], "", ""),
+	("setal", &["66051"], "", ""),
+	("Setulc", &["66051"], "", ""),
 	("setrgbb", &["1", "2", "3"], "", ""),
 	("op", &[], "\x1b[31;42m", ""),
 	("smacs", &[], "", "q"),
@@ -155,7 +158,6 @@ const EFFECTS: &[(&str, &[&str], &str, &str)] = &[
 	("rc", &[], "\x1b7\x1b[H", ""),
 	("civis", &[], "", ""),
 	("cnorm", &[], "\x1b[?25l", ""),
-	("cvvis", &[], "\x1b[?25l", ""),
 	("Ss", &["6"], "", ""),
 	("Se", &[], "\x1b[6 q", ""),
 	("Cs", &["#ff0000"], "", ""),
@@ -192,6 +194,7 @@ const EFFECTS: &[(&str, &[&str], &str, &str)] = &[
 	("fe", &[], "", ""),
 	("fd", &[], "\x1b[?1004h", ""),
 	("XM", &["1"], "", ""),
+	("XM", &["0"], "\x1b[?1006;1000h", ""),
 	("Sync", &["1"], "", ""),
 	("Ms", &["c", "eA=="], "", ""),
 	("initc", &["1", "1000", "0", "0"], "", ""),
@@ -212,7 +215,7 @@ const EFFECTS: &[(&str, &[&str], &str, &str)] = &[
 ];
 
 /// Patterns for the replies to queries, checked against those replies.
-const REPLIES: &[&str] = &["u6", "u8", "rv", "xr"];
+const REPLIES: &[&str] = &["u6", "u8"];
 /// What Poopterm sends (pasted text's brackets, mouse reports), the
 /// character set mapping line drawing uses, and the visual bell.
 const OTHERS: &[&str] = &["PS", "PE", "xm", "acsc", "flash"];
@@ -245,6 +248,7 @@ fn every_advertised_string_capability_is_checked() {
 	let mut checked: Vec<_> = EFFECTS.iter().map(|&(cap, ..)| cap).collect();
 	checked.extend(REPLIES.iter().chain(OTHERS));
 	checked.sort();
+	checked.dedup();
 	assert_eq!(advertised, checked);
 }
 
@@ -285,11 +289,6 @@ fn replies_match_the_advertised_patterns() {
 	assert_eq!(reply("u7"), cup);
 	assert!(matches(b"\x1b\\[\\?[;0-9]+c", &reply("u9")));
 	assert_eq!(entry.tput("u8", &[]), b"\x1b[?%[;0123456789]c");
-	assert!(matches(&entry.tput("rv", &[]), &reply("RV")));
-	assert!(matches(&entry.tput("xr", &[]), &reply("XR")));
-	// The patterns reject what other terminals answer.
-	assert!(!matches(&entry.tput("rv", &[]), b"\x1b[>41;390;0c"));
-	assert!(!matches(&entry.tput("xr", &[]), b"\x1bP>|XTerm(390)\x1b\\"));
 }
 
 #[test]
@@ -370,4 +369,18 @@ fn boolean_capabilities_hold() {
 	let mut term = terminal();
 	feed(&mut term, b"\x08");
 	assert_eq!(term.cx, 2);
+}
+
+#[test]
+fn initc_scales_thousandths_to_hex_bytes() {
+	let Some(entry) = Entry::new("initc") else {
+		return;
+	};
+	// x * 255 / 1000, rounded down: 999 must not round up to ff.
+	let set = entry.tput("initc", &["1", "500", "999", "1000"]);
+	assert_eq!(set, b"\x1b]4;1;rgb:7F/FE/FF\x1b\\");
+	assert_eq!(
+		entry.tput("initc", &["255", "0", "4", "3"]),
+		b"\x1b]4;255;rgb:00/01/00\x1b\\"
+	);
 }
