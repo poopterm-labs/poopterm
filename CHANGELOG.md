@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.60 "Giga Fly" — 2026-10-20
+
+### Added
+
+- Build and attach a fedora rpm package (#81) (release).
+
 ## 26.10.59 "Giga Fly" — 2026-10-20
 
 ### Fixed
