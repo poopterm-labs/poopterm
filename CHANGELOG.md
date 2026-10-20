@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.54 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Track each grid row's used extent (#73) (term).
+
 ## 26.10.53 "Giga Fly" — 2026-10-20
 
 ### Performance
