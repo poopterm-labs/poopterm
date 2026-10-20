@@ -301,7 +301,9 @@ when no login profile exists. Bash ignores `--rcfile` with `-l`, so this shell
 is interactive but does not set bash's `login_shell` flag. Set `shell_integration = "off"` in `config.toml` to disable
 this. The hooks also make `ssh` connect with `TERM=xterm-256color`, since
 remote hosts rarely have poopterm's terminfo entry; set
-`POOPTERM_SSH_KEEP_TERM=1` to keep it.
+`POOPTERM_SSH_KEEP_TERM=1` to keep it. fish 4 marks its prompts itself
+(its `mark-prompt` feature), so there the fish hook only reports the
+directory.
 
 To install the hooks by hand, review the output and append it to
 the startup file for the shell you use:
