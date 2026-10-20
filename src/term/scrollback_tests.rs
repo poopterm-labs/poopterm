@@ -346,3 +346,30 @@ fn pushed_rows_keep_every_field_through_wraps() {
 	}
 	assert_eq!(s.len(), 40);
 }
+
+#[test]
+fn streamed_copies_from_every_source_offset_land_whole() {
+	let source: Vec<Cell> = ('a'..='z').map(|ch| Cell { ch, ..PAD }).collect();
+	// Source and target chunks fall out of step unless both offsets match.
+	for from in 0..4 {
+		for to in 0..4 {
+			let len = source.len() - from;
+			let mut target = vec![PAD; len + to + 3];
+			stream_copy(&mut target[to..to + len], &source[from..]);
+			publish_streamed();
+			assert_eq!(
+				text(&target[to..to + len]),
+				text(&source[from..]),
+				"{from} to {to}"
+			);
+			assert!(
+				target[..to].iter().all(|&cell| cell == PAD),
+				"{from} to {to}"
+			);
+			assert!(
+				target[to + len..].iter().all(|&cell| cell == PAD),
+				"{from} to {to}"
+			);
+		}
+	}
+}
