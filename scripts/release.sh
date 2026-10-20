@@ -63,7 +63,8 @@ fi
 if [[ $attached == no ]]; then
   # Package the release commit itself, so the .deb and the binary in it carry
   # the new version; a failed build stops before the GitHub release exists.
-  cargo build --release --locked
+  # Releases ship the PGO build, or a plain one if training fails.
+  bash scripts/pgo.sh dist
   bash scripts/package-deb.sh
   shopt -s nullglob
   packages=(dist/poopterm_"${version}"-1_*.deb)

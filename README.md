@@ -44,8 +44,9 @@ cargo run --release
 
 To build without launching the app, run `cargo build --release`.
 
-For a faster binary, `make pgo` builds a profile-guided optimized one
-(about 6% faster), trained on the built-in benchmark; `make pgo-use`
+Released packages are profile-guided optimized builds. To build one
+yourself, `make pgo` trains on the built-in benchmark (about 5% faster than
+a plain release build, 13% on interactive output); `make pgo-use`
 trains it further on your own sessions and `make pgo-install` installs it.
 See [`docs/performance.md`](docs/performance.md#profile-guided-optimization).
 

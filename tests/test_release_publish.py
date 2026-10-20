@@ -96,12 +96,12 @@ if sys.argv[1:3] == ['release', 'edit'] and '--draft=false' in sys.argv:
     (root / 'draft').unlink(missing_ok=True)
 ''')
         gh.chmod(0o755)
-        cargo = fakebin / 'cargo'
-        cargo.write_text('''#!/usr/bin/env bash
-echo "cargo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_ROOT/build.log"
-[[ ! -e "$FAKE_GH_ROOT/fail-build" ]]
+        # Releases ship the PGO build; pgo.sh itself is tested in test_pgo.
+        pgo = self.repo / 'scripts/pgo.sh'
+        pgo.write_text('''#!/bin/sh
+echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_ROOT/build.log"
+[ ! -e "$FAKE_GH_ROOT/fail-build" ]
 ''')
-        cargo.chmod(0o755)
         self.env = dict(os.environ, GITHUB_SHA=self.sha, GH_REPO='test/poopterm',
                         GH_TOKEN='fake-local-test-token', FAKE_GH_ROOT=str(self.root),
                         PATH=str(fakebin) + os.pathsep + os.environ['PATH'])
@@ -235,7 +235,7 @@ echo "cargo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_G
         version = self.version.rsplit('.', 1)[0] + '.1'
         self.assertEqual(self.uploads(), [f'dist/poopterm_{version}-1_amd64.deb'])
         build = (self.root / 'build.log').read_text().splitlines()
-        self.assertEqual(build, [f'cargo build --release --locked {version}', f'package {version}'])
+        self.assertEqual(build, [f'pgo dist {version}', f'package {version}'])
 
     def test_a_package_of_another_version_is_never_uploaded(self):
         self.env['FAKE_DEB_VERSION'] = self.version

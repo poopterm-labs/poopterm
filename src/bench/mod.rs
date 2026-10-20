@@ -35,6 +35,25 @@ struct Options {
 	size: Size,
 	only: Vec<String>,
 	render: bool,
+	feed: Feed,
+}
+
+/// How output reaches the terminal: floods arrive in large reads, while
+/// interactive programs (key echo, prompts) write a few bytes at a time and
+/// get a frame for each.
+#[derive(Clone, Copy)]
+pub(crate) struct Feed {
+	/// Bytes per `advance` call, like one PTY read.
+	pub read: usize,
+	/// Bytes after which a frame is drawn, checked after each read.
+	pub frame_every: usize,
+}
+
+impl Feed {
+	pub(crate) const FLOOD: Self = Self {
+		read: READ,
+		frame_every: FRAME_EVERY,
+	};
 }
 
 fn options(args: impl Iterator<Item = String>) -> Result<Options, Box<dyn Error>> {
@@ -46,6 +65,7 @@ fn options(args: impl Iterator<Item = String>) -> Result<Options, Box<dyn Error>
 		},
 		only: Vec::new(),
 		render: true,
+		feed: Feed::FLOOD,
 	};
 	let mut args = args.peekable();
 	while let Some(arg) = args.next() {
@@ -61,6 +81,8 @@ fn options(args: impl Iterator<Item = String>) -> Result<Options, Box<dyn Error>
 					rows: rows.parse::<usize>()?.clamp(2, 1000),
 				};
 			}
+			"--read" => options.feed.read = value()?.parse::<usize>()?.clamp(1, 1 << 20),
+			"--frame-every" => options.feed.frame_every = value()?.parse::<usize>()?.clamp(1, 1 << 30),
 			"--only" => options.only.extend(value()?.split(',').map(str::to_owned)),
 			"--no-render" => options.render = false,
 			"--list" => {
@@ -84,10 +106,15 @@ fn fonts() -> FontSet {
 	FontSet::new(font, Vec::new())
 }
 
-/// Feeds `data` to a terminal whose history is full, as after real use;
-/// draws a frame every [`FRAME_EVERY`] bytes when `fonts` is given. Returns
-/// MB/s.
-pub(crate) fn measure(data: &[u8], size: Size, mut fonts: Option<&mut FontSet>) -> f64 {
+/// Feeds `data` to a terminal whose history is full, as after real use, in
+/// reads of `feed.read`; draws a frame every `feed.frame_every` bytes when
+/// `fonts` is given. Returns MB/s.
+pub(crate) fn measure(
+	data: &[u8],
+	size: Size,
+	feed_by: Feed,
+	mut fonts: Option<&mut FontSet>,
+) -> f64 {
 	let theme = Theme::from_kind(ThemeKind::Poop);
 	let mut term = Term::new(size.cols, size.rows, theme, "/".into());
 	(term.cell_width, term.cell_height) = CELL;
@@ -99,21 +126,36 @@ pub(crate) fn measure(data: &[u8], size: Size, mut fonts: Option<&mut FontSet>) 
 	term.responses.clear();
 	let mut frame = Frame::default();
 	let mut pixels = vec![0u32; size.cols * CELL.0 * size.rows * CELL.1];
-	let mut since_frame = 0;
 	let start = Instant::now();
-	for chunk in data.chunks(READ) {
-		parser.advance(&mut term, chunk);
-		term.responses.clear();
-		since_frame += chunk.len();
-		if let Some(fonts) = fonts.as_deref_mut()
-			&& since_frame >= FRAME_EVERY
-		{
-			since_frame = 0;
+	feed(&mut parser, &mut term, data, feed_by, |term| {
+		if let Some(fonts) = fonts.as_deref_mut() {
 			term.snapshot(&mut frame);
 			draw(&mut pixels, fonts, &frame, theme.bg);
 		}
-	}
+	});
 	data.len() as f64 / start.elapsed().as_secs_f64() / 1e6
+}
+
+/// Advances `term` through `data` in reads of `feed.read`, dropping its
+/// replies, and calls `frame` once `feed.frame_every` bytes have arrived
+/// since the last one.
+fn feed(
+	parser: &mut Parser,
+	term: &mut Term,
+	data: &[u8],
+	feed: Feed,
+	mut frame: impl FnMut(&mut Term),
+) {
+	let mut since_frame = 0;
+	for chunk in data.chunks(feed.read) {
+		parser.advance(term, chunk);
+		term.responses.clear();
+		since_frame += chunk.len();
+		if since_frame >= feed.frame_every {
+			since_frame = 0;
+			frame(term);
+		}
+	}
 }
 
 fn draw(pixels: &mut [u32], fonts: &mut FontSet, frame: &Frame, bg: u32) {
@@ -145,7 +187,8 @@ fn selected(options: &Options) -> impl Iterator<Item = &'static Workload> + '_ {
 	})
 }
 
-/// `poopterm --benchmark [--mib N] [--size COLSxROWS] [--only a,b] [--no-render] [--list]`
+/// `poopterm --benchmark [--mib N] [--size COLSxROWS] [--only a,b] [--read BYTES]
+/// [--frame-every BYTES] [--no-render] [--list]`
 pub(crate) fn run(args: impl Iterator<Item = String>) -> Result<(), Box<dyn Error>> {
 	let options = options(args)?;
 	let mut fonts = fonts();
@@ -165,12 +208,15 @@ pub(crate) fn run(args: impl Iterator<Item = String>) -> Result<(), Box<dyn Erro
 	let (mut total_bytes, mut total_seconds) = (0.0, 0.0);
 	for workload in selected(&options) {
 		let data = workload.build(options.bytes, options.size);
-		measure(&data[..data.len() / 8], options.size, None);
-		let parse = measure(&data, options.size, None);
+		measure(&data[..data.len() / 8], options.size, options.feed, None);
+		let parse = measure(&data, options.size, options.feed, None);
 		total_bytes += data.len() as f64;
 		total_seconds += data.len() as f64 / parse / 1e6;
 		let rendered = if options.render {
-			format!("{:9.1}", measure(&data, options.size, Some(&mut fonts)))
+			format!(
+				"{:9.1}",
+				measure(&data, options.size, options.feed, Some(&mut fonts))
+			)
 		} else {
 			String::new()
 		};
@@ -216,7 +262,7 @@ mod tests {
 			println!(
 				"parser {:<11} {:8.1} MB/s",
 				workload.name,
-				measure(&data, size, None)
+				measure(&data, size, Feed::FLOOD, None)
 			);
 		}
 	}
@@ -229,10 +275,119 @@ mod tests {
 		for workload in WORKLOADS {
 			let data = workload.build(FRAME_EVERY + 1, size);
 			assert!(
-				measure(&data, size, Some(&mut fonts)) > 0.0,
+				measure(&data, size, Feed::FLOOD, Some(&mut fonts)) > 0.0,
 				"{}",
 				workload.name
 			);
+		}
+	}
+
+	fn parsed(args: &[&str]) -> Result<Options, String> {
+		options(args.iter().map(|arg| arg.to_string())).map_err(|error| error.to_string())
+	}
+
+	#[test]
+	fn floods_are_fed_in_pty_sized_reads_by_default() {
+		let options = parsed(&[]).unwrap();
+		assert_eq!(
+			(options.feed.read, options.feed.frame_every),
+			(READ, FRAME_EVERY)
+		);
+	}
+
+	#[test]
+	fn small_reads_and_frequent_frames_can_be_chosen() {
+		let options = parsed(&["--read", "16", "--frame-every", "64"]).unwrap();
+		assert_eq!((options.feed.read, options.feed.frame_every), (16, 64));
+		// Zero would never advance; anything above a megabyte is one flood.
+		let options = parsed(&["--read", "0", "--frame-every", "0"]).unwrap();
+		assert_eq!((options.feed.read, options.feed.frame_every), (1, 1));
+		let options = parsed(&["--read", "99999999"]).unwrap();
+		assert_eq!(options.feed.read, 1 << 20);
+	}
+
+	#[test]
+	fn read_options_need_a_number() {
+		assert_eq!(parsed(&["--read"]).err().unwrap(), "--read needs a value");
+		assert!(parsed(&["--frame-every", "lots"]).is_err());
+	}
+
+	/// The cursor column at each frame drawn while `len` bytes arrive in
+	/// reads of `read`.
+	fn frames(len: usize, read: usize, frame_every: usize) -> Vec<usize> {
+		let theme = Theme::from_kind(ThemeKind::Poop);
+		let mut term = Term::new(30, 4, theme, "/".into());
+		let mut drawn = Vec::new();
+		let data = vec![b'x'; len];
+		feed(
+			&mut Parser::new(),
+			&mut term,
+			&data,
+			Feed { read, frame_every },
+			|term| {
+				drawn.push(term.cx);
+			},
+		);
+		drawn
+	}
+
+	#[test]
+	fn frames_follow_whole_reads() {
+		// Reads of 3 reach 5 bytes since the last frame at 6, 12 and 18.
+		assert_eq!(frames(20, 3, 5), [6, 12, 18]);
+		assert_eq!(frames(20, 20, 5), [20]);
+		assert_eq!(frames(4, 3, 5), []);
+		assert_eq!(frames(3, 1, 1), [1, 2, 3]);
+	}
+
+	#[test]
+	fn replies_are_dropped_after_every_read() {
+		let theme = Theme::from_kind(ThemeKind::Poop);
+		let mut term = Term::new(30, 4, theme, "/".into());
+		let feed_once = Feed {
+			read: 4,
+			frame_every: 4,
+		};
+		feed(
+			&mut Parser::new(),
+			&mut term,
+			b"\x1b[6n\x1b[c",
+			feed_once,
+			|term| {
+				assert!(term.responses.is_empty());
+			},
+		);
+		assert!(term.responses.is_empty());
+	}
+
+	#[test]
+	fn small_reads_leave_the_screen_a_flood_leaves() {
+		let size = Size { cols: 30, rows: 8 };
+		for workload in WORKLOADS
+			.iter()
+			.filter(|workload| workload.name != "kitty-rgba")
+		{
+			let data = workload.build(8 << 10, size);
+			let screen = |read| {
+				let theme = Theme::from_kind(ThemeKind::Poop);
+				let mut term = Term::new(size.cols, size.rows, theme, "/".into());
+				let mut parser = Parser::new();
+				feed(
+					&mut parser,
+					&mut term,
+					&data,
+					Feed {
+						read,
+						frame_every: READ,
+					},
+					|_| {},
+				);
+				let rows: Vec<String> = (0..size.rows)
+					.map(|y| term.grid[y].iter().map(|cell| cell.ch).collect())
+					.collect();
+				(rows, term.cx, term.cy)
+			};
+			assert_eq!(screen(7), screen(READ), "{}", workload.name);
 		}
 	}
 }

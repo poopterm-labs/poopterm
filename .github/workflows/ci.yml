@@ -119,7 +119,8 @@ jobs:
     # Builds the Debian package after the version bump, on the same old
     # glibc as the debian-package job.
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    # The PGO build compiles three times and trains in between.
+    timeout-minutes: 60
     permissions:
       contents: write
       # Sigstore signing of the package's build provenance.
@@ -138,7 +139,8 @@ jobs:
       - name: Install Linux and Debian packaging libraries
         run: sudo apt-get update && sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev dpkg-dev ncurses-bin
       - name: Install nightly Rust
-        run: rustup toolchain install nightly --profile minimal
+        # llvm-tools holds the llvm-profdata that matches rustc's LLVM.
+        run: rustup toolchain install nightly --profile minimal --component llvm-tools
       # Ubuntu 22.04 ships Python 3.10; the release scripts need tomllib (3.11).
       - name: Install Python for the release scripts
         uses: actions/setup-python@v7

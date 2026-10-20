@@ -84,6 +84,15 @@ class Release(unittest.TestCase):
         self.assertIn('import tomllib', (scripts / 'release.py').read_text())
         self.assertIn('import tomllib', (scripts / 'release.sh').read_text())
 
+    def test_releases_have_the_tools_and_time_for_a_pgo_build(self):
+        # pgo.sh merges profiles with the toolchain's own llvm-profdata, and
+        # builds three times: instrumented, then trained, then optimized.
+        release = job('release')
+        self.assertIn('run: rustup toolchain install nightly --profile minimal --component llvm-tools\n',
+                      release)
+        self.assertGreaterEqual(int(re.search(r'timeout-minutes: (\d+)', release)[1]), 60)
+        self.assertIn('bash scripts/pgo.sh dist', (Path(__file__).parents[1] / 'scripts/release.sh').read_text())
+
     def test_the_job_lookup_stops_at_the_next_job(self):
         self.assertNotIn('release:', job('debian-package'))
         self.assertIn('scripts/release.sh', job('release'))
