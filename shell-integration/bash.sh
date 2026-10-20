@@ -66,5 +66,7 @@ fi
 PROMPT_COMMAND=__poopterm_prompt_command
 # B marks where command input starts, so it belongs at the end of the prompt.
 PS1="$PS1"'\[\e]133;B\a\]'
+# Continuation prompts are prompts too, not part of the command typed.
+PS2='\[\e]133;A;k=s\a\]'"$PS2"'\[\e]133;B\a\]'
 PS0='$(__poopterm_preexec)'"$__poopterm_original_ps0"
 # <<< poopterm shell integration <<<
