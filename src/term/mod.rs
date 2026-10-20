@@ -14,6 +14,10 @@ pub(crate) mod dcs;
 #[cfg(test)]
 mod dcs_tests;
 mod extras;
+#[cfg(target_arch = "x86_64")]
+mod fill;
+#[cfg(test)]
+mod fill_tests;
 mod frame;
 mod grid;
 #[cfg(test)]
@@ -127,6 +131,11 @@ impl Cell {
 	/// `slice::fill` writes cells field by field.
 	#[inline(always)]
 	pub(crate) fn fill(cells: &mut [Cell], cell: Cell) {
+		#[cfg(target_arch = "x86_64")]
+		if cells.len() >= 4 && std::arch::is_x86_feature_detected!("avx2") {
+			// SAFETY: the CPU supports AVX2.
+			return unsafe { fill::fill(cells, cell) };
+		}
 		use std::simd::u64x2;
 		// SAFETY: `Cell` is 16 bytes with no padding and 16-byte alignment, so
 		// the same memory is a valid `[u64x2]`.
