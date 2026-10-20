@@ -107,6 +107,9 @@ branch and a pull request.
    type), commit in small steps, and rebase on `main` rather than merging it.
 3. Open a pull request with a Conventional Commits title and a body that
    explains why, with benchmark numbers or screenshots where they apply.
+   The pull request template carries the checklist, including the
+   accessibility checks from [`ACCESSIBILITY.md`](ACCESSIBILITY.md) for
+   changes to what users see or do.
 4. CI (Linux, macOS, FreeBSD, Debian package, CodeQL) and the pull request
    rules must pass. The pull request is then squashed onto `main`, keeping
    your authorship.
@@ -115,7 +118,8 @@ branch and a pull request.
 
 [Open an issue](https://github.com/poopterm-labs/poopterm/issues/new/choose)
 and pick the form that fits: bug report, rendering problem, terminal
-compatibility, performance problem or feature request. Each form asks for
+compatibility, performance problem, accessibility problem or feature
+request. Each form asks for
 what that kind of report needs: your Poopterm version (Settings → About, or
 `poopterm --version`), OS, display server and shell; steps to reproduce;
 for rendering and escape-sequence bugs, the exact bytes that trigger it (for
