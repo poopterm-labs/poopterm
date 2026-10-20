@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.34 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Fill cells with 32-byte avx2 stores when the cpu has them (#48) (term).
+
 ## 26.10.33 "Giga Fly" — 2026-10-20
 
 ### Performance
