@@ -149,13 +149,14 @@ least as fast.
   code point against the crate, now only a dev-dependency. Regenerate the
   table for each Unicode release (the script's docstring says how) and bump
   the oracle with it.
-- **`miniz_oxide` → our own inflate (RFC 1950/1951)** for kitty `o=z` and
-  PNG. **Safety and security come first:** this parses untrusted input, so
-  no `unsafe` unless it is proven necessary and justified,
-  output sizes are bounded before allocating, and the decoder is
-  fuzzed against `miniz_oxide`. Faster decoding (streaming fused with
-  base64, wide Huffman tables, SIMD copies) is kept only where it is
-  safe. Otherwise we keep matching miniz rather than taking risks.
+- **`miniz_oxide` → our own inflate (RFC 1950/1951):** done for kitty
+  `o=z` (`src/inflate`: no `unsafe`, output bounded by a limit before it
+  grows, two-level Huffman tables, a fast loop that decodes up to three
+  literals per refill, `u8x16` match copies, SIMD Adler-32). Randomized and
+  damaged streams are tested against `miniz_oxide`, which stays only to
+  compress the benchmark corpus and as the test oracle;
+  `inflate_throughput` compares the two. Still to do: PNG, which needs our
+  own PNG decoder (unfiltering) in place of the `image` crate.
 - **`fontdue` → our own rasterizer:** done for drawing (`src/fonts`: cmap,
   glyf, CFF/CFF2, a SIMD coverage rasterizer), with fontdue kept as the
   test oracle (`font_tests.rs`). Loading is lazy, so startup no longer
