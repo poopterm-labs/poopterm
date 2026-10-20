@@ -47,7 +47,8 @@ To build without launching the app, run `cargo build --release`.
 Released packages are profile-guided optimized builds. To build one
 yourself, `make pgo` trains on the built-in benchmark (about 5% faster than
 a plain release build, 13% on interactive output); `make pgo-use`
-trains it further on your own sessions and `make pgo-install` installs it.
+trains it further on your own sessions, `make bolt` lays it out with BOLT on
+Linux (about 3% more) and `make pgo-install` installs what releases ship.
 See [`docs/performance.md`](docs/performance.md#profile-guided-optimization).
 
 ## Package managers
