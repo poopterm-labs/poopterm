@@ -431,3 +431,37 @@ fn marks_right_after_a_chunk_join_its_last_character() {
 		}
 	}
 }
+
+#[test]
+fn narrow_runs_over_scaled_text_images_and_inserts_take_the_general_path() {
+	let run = "Съешь же ещё этих мягких булок — ±½° éèêë";
+	for (setup, after) in [
+		("\x1b]66;s=2;ab\x07\x1b[1;1H", ""),
+		("\x1b]66;n=1:d=2:w=1;ab\x1b\\\x1b[1;2H", ""),
+		("\x1bPq#0;2;0;0;0~~~~~~-~~~~~~\x1b\\\x1b[1;1H", ""),
+		("abcdefghij\x1b[1;3H\x1b[4h", "\x1b[4l"),
+		("日本語日本語\x1b[1;2H\x1b[4h", "\x1b[4l"),
+		("\x1b(0", "\x1b(B"),
+	] {
+		let stream = format!("{setup}{run}{after}{run}");
+		for cols in [80, 30] {
+			assert_matches_per_character(stream.as_bytes(), cols, 4);
+		}
+	}
+	// Inserting shifts the earlier text right instead of overwriting it.
+	let term = fed(
+		&[format!("abcdefghij\x1b[1;3H\x1b[4h{run}").as_bytes()],
+		80,
+		2,
+	);
+	let shifted = run.chars().count() + 2;
+	let tail: String = term.grid[0][shifted..shifted + 8]
+		.iter()
+		.map(|c| c.ch)
+		.collect();
+	assert_eq!(tail, "cdefghij");
+	// Scaled text keeps its block; narrow text after it starts past both cells.
+	let term = fed(&["\x1b]66;s=2;a\x07éèêëāēīōūабвгд".as_bytes()], 40, 3);
+	assert_eq!(term.grid[0][2].ch, 'é');
+	assert_eq!(term.grid[0][15].ch, 'д');
+}
