@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.55 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Ship profile-guided builds (#74) (release).
+
 ## 26.10.54 "Giga Fly" — 2026-10-20
 
 ### Performance
