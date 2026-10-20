@@ -1,5 +1,8 @@
-//! Bounded DEC Sixel decoder. Coordinates are pixels; while decoding,
-//! colors are `0xRRGGBB` and transparent pixels are [`TRANSPARENT`].
+//! Bounded DEC Sixel decoder. Coordinates are pixels. Colors get their alpha
+//! when they are chosen, so the decoder paints final `0xAARRGGBB` pixels into
+//! one flat buffer, which becomes the bitmap as is.
+use std::simd::u32x4;
+
 use crate::graphics::Bitmap;
 
 const TRANSPARENT: u32 = u32::MAX;
@@ -64,7 +67,9 @@ impl Transfer {
 }
 
 struct Decoder {
-	rows: Vec<Vec<u32>>,
+	/// Rows of `stride` pixels; columns from `width` on are unused.
+	pixels: Vec<u32>,
+	stride: usize,
 	width: usize,
 	height: usize,
 	x: usize,
@@ -75,23 +80,52 @@ struct Decoder {
 	selected: usize,
 	painted: usize,
 }
+/// A decoding color as a pixel: [`TRANSPARENT`] becomes clear, the rest opaque.
+fn pixel(color: u32) -> u32 {
+	if color == TRANSPARENT {
+		0
+	} else {
+		color | 0xff00_0000
+	}
+}
+
+/// Fills `span` with `color` in vector stores, the last one overlapping
+/// the one before, so short spans need no scalar tail.
+#[inline(always)]
+fn fill(span: &mut [u32], color: u32) {
+	let lanes = u32x4::splat(color);
+	match span.len() {
+		0..4 => span.fill(color),
+		len => {
+			let (chunks, _) = span.as_chunks_mut::<4>();
+			for chunk in chunks {
+				*chunk = lanes.to_array();
+			}
+			lanes.copy_to_slice(&mut span[len - 4..]);
+		}
+	}
+}
+
 impl Decoder {
 	fn new(aspect: usize, background: u32, foreground: u32) -> Self {
-		let mut colors = [foreground; 256];
+		let mut colors = [pixel(foreground); 256];
 		for (index, color) in colors.iter_mut().enumerate().take(16) {
-			*color = [
-				0, 0x3333cc, 0xcc2121, 0x33cc33, 0xcc33cc, 0x33cccc, 0xcccc33, 0x878787, 0x424242,
-				0x545499, 0x995454, 0x549954, 0x995499, 0x549999, 0x999954, 0xcccccc,
-			][index];
+			*color = pixel(
+				[
+					0, 0x3333cc, 0xcc2121, 0x33cc33, 0xcc33cc, 0x33cccc, 0xcccc33, 0x878787, 0x424242,
+					0x545499, 0x995454, 0x549954, 0x995499, 0x549999, 0x999954, 0xcccccc,
+				][index],
+			);
 		}
 		Self {
-			rows: Vec::new(),
+			pixels: Vec::new(),
+			stride: 0,
 			width: 0,
 			height: 0,
 			x: 0,
 			y: 0,
 			aspect,
-			background,
+			background: pixel(background),
 			colors,
 			selected: 0,
 			painted: 0,
@@ -103,36 +137,50 @@ impl Decoder {
 		if width > MAX_SIDE || height > MAX_SIDE || width.checked_mul(height)? > MAX_PIXELS {
 			return None;
 		}
+		if width > self.stride {
+			self.widen(width);
+		}
 		self.width = width;
 		self.height = height;
-		self.rows.resize_with(height, Vec::new);
+		self.pixels.resize(height * self.stride, self.background);
 		Some(())
 	}
+	/// Moves the rows to a stride of at least `width`, doubling it so images
+	/// that grow a column at a time are copied a few times only.
+	#[cold]
+	fn widen(&mut self, width: usize) {
+		let stride = (self.stride * 2).min(MAX_SIDE).max(width);
+		let mut pixels = vec![self.background; self.height * stride];
+		// Before the first resize there are no rows, and no stride.
+		let rows = self.pixels.chunks_exact(self.stride.max(1));
+		for (to, from) in pixels.chunks_exact_mut(stride).zip(rows) {
+			to[..from.len()].copy_from_slice(from);
+		}
+		(self.pixels, self.stride) = (pixels, stride);
+	}
+	#[inline(always)]
 	fn paint(&mut self, byte: u8, repeat: usize) -> Option<()> {
-		self.painted = self
-			.painted
-			.checked_add(repeat.checked_mul(6 * self.aspect)?)?;
+		let band = 6 * self.aspect;
+		self.painted = self.painted.checked_add(repeat.checked_mul(band)?)?;
 		if self.painted > 64 * 1024 * 1024 {
 			return None;
 		}
-		self.size(
-			self.x.checked_add(repeat)?,
-			self.y.checked_add(6 * self.aspect)?,
-		)?;
-		for bit in 0..6 {
-			if (byte - b'?') & (1 << bit) == 0 {
-				continue;
-			}
-			for dy in 0..self.aspect {
-				let row_idx = self.y + bit * self.aspect + dy;
-				if row_idx < self.rows.len() {
-					let row = &mut self.rows[row_idx];
-					row.resize(self.width, self.background);
-					row[self.x..self.x + repeat].fill(self.colors[self.selected]);
-				}
+		let end = self.x.checked_add(repeat)?;
+		if end > self.width || self.y + band > self.height {
+			self.size(end, self.y + band)?;
+		}
+		let color = self.colors[self.selected];
+		// Only the set bits paint: each is `aspect` rows of the band.
+		let mut bits = byte - b'?';
+		while bits != 0 {
+			let top = self.y + bits.trailing_zeros() as usize * self.aspect;
+			bits &= bits - 1;
+			for row in top..top + self.aspect {
+				let start = row * self.stride + self.x;
+				fill(&mut self.pixels[start..start + repeat], color);
 			}
 		}
-		self.x += repeat;
+		self.x = end;
 		Some(())
 	}
 	fn decode(mut self, bytes: &[u8]) -> Option<Bitmap> {
@@ -160,34 +208,36 @@ impl Decoder {
 					}
 				}
 				b'#' | b'"' => {
-					let mut params = vec![number(bytes, &mut i)];
+					let (mut params, mut count) = ([0; 6], 1);
+					params[0] = number(bytes, &mut i);
 					while bytes.get(i) == Some(&b';') {
 						i += 1;
-						if params.len() == 6 {
+						if count == 6 {
 							return None;
 						}
-						params.push(number(bytes, &mut i));
+						params[count] = number(bytes, &mut i);
+						count += 1;
 					}
 					if byte == b'#' {
 						self.selected = params[0];
 						if self.selected >= self.colors.len() {
 							return None;
 						}
-						if params.len() >= 5 {
+						if count >= 5 {
 							self.colors[self.selected] = match params[1] {
-								2 => rgb(params[2], params[3], params[4]),
-								1 => hls(params[2], params[3], params[4]),
+								2 => pixel(rgb(params[2], params[3], params[4])),
+								1 => pixel(hls(params[2], params[3], params[4])),
 								_ => self.colors[self.selected],
 							};
 						}
-					} else if params.len() >= 2 {
+					} else if count >= 2 {
 						let numerator = params[0].max(1);
 						let denominator = params[1].max(1);
 						self.aspect = numerator
 							.saturating_add(denominator / 2)
 							.checked_div(denominator)?
 							.clamp(1, 10);
-						if params.len() >= 4 {
+						if count >= 4 {
 							self.size(params[2], params[3].checked_mul(self.aspect)?)?;
 						}
 					}
@@ -199,21 +249,15 @@ impl Decoder {
 		if self.width == 0 || self.height == 0 {
 			return None;
 		}
-		let mut pixels = vec![self.background; self.width * self.height];
-		for (y, row) in self.rows.iter().enumerate() {
-			if y < self.height && !row.is_empty() {
-				let copy_len = row.len().min(self.width);
-				pixels[y * self.width..y * self.width + copy_len].copy_from_slice(&row[..copy_len]);
+		let (width, stride) = (self.width, self.stride);
+		let mut pixels = self.pixels;
+		if stride != width {
+			for row in 1..self.height {
+				pixels.copy_within(row * stride..row * stride + width, row * width);
 			}
 		}
-		for pixel in &mut pixels {
-			*pixel = if *pixel == TRANSPARENT {
-				0
-			} else {
-				*pixel | 0xff00_0000
-			};
-		}
-		Some(Bitmap::new(self.width, self.height, pixels))
+		pixels.truncate(width * self.height);
+		Some(Bitmap::new(width, self.height, pixels))
 	}
 }
 fn number(bytes: &[u8], i: &mut usize) -> usize {
@@ -250,60 +294,8 @@ fn hls(h: usize, l: usize, s: usize) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn extending_matches_pushing_byte_by_byte_up_to_the_limit() {
-		let data: Vec<u8> = (0..MAX_PAYLOAD + 10)
-			.map(|i| b'?' + (i % 63) as u8)
-			.collect();
-		for split in [0, 1, MAX_PAYLOAD - 1, MAX_PAYLOAD, MAX_PAYLOAD + 3] {
-			let (mut one, mut bulk) = (Transfer::new(7, 1), Transfer::new(7, 1));
-			for &byte in &data[..split] {
-				one.push(byte);
-			}
-			bulk.extend(&data[..split]);
-			assert_eq!(
-				(&one.bytes, one.overflow),
-				(&bulk.bytes, bulk.overflow),
-				"{split}"
-			);
-		}
-		let mut bulk = Transfer::new(7, 1);
-		bulk.extend(&data[..MAX_PAYLOAD - 2]);
-		bulk.extend(&data[..5]);
-		assert!(bulk.overflow);
-		assert_eq!(bulk.bytes.len(), MAX_PAYLOAD);
-	}
-
-	fn decode(data: &[u8]) -> Option<Bitmap> {
-		let mut t = Transfer::new(7, 1);
-		for &byte in data {
-			t.push(byte);
-		}
-		t.finish(0, 0xffffff)
-	}
-	#[test]
-	fn repeats_planes_and_transparency() {
-		let image = decode(b"#1;2;100;0;0!3~$#2;2;0;100;0?@").unwrap();
-		assert_eq!((image.width, image.height), (3, 6));
-		assert_eq!(image.pixels[0], 0xffff0000);
-		assert_eq!(image.pixels[1], 0xff00ff00);
-		assert_eq!(image.pixels[4], 0xffff0000);
-		assert_eq!(decode(b"?").unwrap().pixels[0], 0);
-	}
-	#[test]
-	fn raster_attributes_and_aspect_ratio() {
-		let image = decode(b"\"2;1;4;6#1;2;0;0;100@").unwrap();
-		assert_eq!((image.width, image.height), (4, 12));
-		assert_eq!(image.pixels[0], 0xff0000ff);
-		assert_eq!(image.pixels[4], 0xff0000ff);
-	}
-	#[test]
-	fn hls_primary_checks() {
-		assert_eq!(hls(0, 50, 100), 0x0000ff);
-		assert_eq!(hls(120, 50, 100), 0xff0000);
-		assert_eq!(hls(240, 50, 100), 0x00ff00);
-	}
-}
+#[path = "sixel_reference_tests.rs"]
+mod reference;
+#[cfg(test)]
+#[path = "sixel_tests.rs"]
+mod tests;
