@@ -35,8 +35,10 @@ class Install(unittest.TestCase):
         environment = {'PATH': f"{self.tools}:{os.environ['PATH']}", 'HOME': str(self.home), 'POOPTERM_BIN': str(self.binary),
                        'DESTDIR': str(self.stage)}
         environment.update(env)
-        return subprocess.run(['sh', str(SCRIPT), '--no-build', *args], env=environment,
-                              capture_output=True, text=True, check=True)
+        result = subprocess.run(['sh', str(SCRIPT), '--no-build', *args], env=environment,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result
 
     def test_installs_system_wide_by_default_and_uninstalls_cleanly(self):
         # A per-user data directory no longer moves anything.
