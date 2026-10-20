@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.39 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Build narrow and wide cell words once per segment (#53) (parser).
+
 ## 26.10.38 "Giga Fly" — 2026-10-20
 
 ### Performance
