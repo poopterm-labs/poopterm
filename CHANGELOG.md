@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.50 "Giga Fly" — 2026-10-20
+
+### Fixed
+
+- Match rv, xr and xm to what poopterm sends (#71) (terminfo).
+
 ## 26.10.49 "Giga Fly" — 2026-10-20
 
 ### Fixed
