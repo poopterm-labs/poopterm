@@ -1,0 +1,5 @@
+# musl targets link statically by default, and a static binary cannot dlopen
+# the Wayland, X11 and xkbcommon libraries that winit loads at runtime: it
+# exits with `NoWaylandLib` (Alpine). Link musl's C library dynamically.
+[target.'cfg(target_env = "musl")']
+rustflags = ["-C", "target-feature=-crt-static"]
