@@ -6,7 +6,7 @@ import unittest
 WORKFLOWS = Path(__file__).parents[1] / '.github/workflows'
 MENTION = (WORKFLOWS / 'claude.yml').read_text()
 REVIEW = (WORKFLOWS / 'claude-code-review.yml').read_text()
-MAINTAINERS = """contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event."""
+MAINTAINERS = """contains(fromJSON('["OWNER", "MEMBER"]'), github.event."""
 
 
 def condition(workflow):
@@ -19,12 +19,20 @@ class Mentions(unittest.TestCase):
     def test_every_trigger_requires_a_maintainer(self):
         # Anyone can comment on a public repository; each run spends our usage.
         gate = condition(MENTION)
+        # Organization members only: outside collaborators cannot start runs.
+        self.assertNotIn('COLLABORATOR', MENTION)
         for event, author in [('issue_comment', 'comment'), ('pull_request_review_comment', 'comment'),
                               ('pull_request_review', 'review'), ('issues', 'issue')]:
             clause = re.search(rf"\(github\.event_name == '{event}' .*?\)\)(?: \|\||\n|$)", gate, re.S)
             self.assertIsNotNone(clause, event)
             self.assertIn(f'{MAINTAINERS}{author}.author_association)', clause[0], event)
         self.assertEqual(gate.count(MAINTAINERS), 4)
+
+    def test_the_claude_label_starts_a_run_on_an_issue(self):
+        # Labelling needs triage access, and the action checks the labeller can write.
+        self.assertIn('  issues:\n    types: [opened, assigned, labeled]\n', MENTION)
+        self.assertIn("(github.event.action == 'labeled' && github.event.label.name == 'claude')", condition(MENTION))
+        self.assertIn('label_trigger: claude', MENTION)
 
     def test_line_comments_on_code_can_start_a_run(self):
         self.assertIn('  pull_request_review_comment:\n    types: [created]\n', MENTION)
@@ -41,8 +49,11 @@ class Mentions(unittest.TestCase):
         for allowed in ['Bash(cargo test *)', 'Bash(cargo clippy *)', 'Bash(cargo fmt *)',
                         'Bash(python3 scripts/pr_check.py *)', 'Bash(gh pr checks *)']:
             self.assertIn(f'"{allowed}"', tools)
-        for forbidden in ['git push', 'gh pr merge', 'Bash(git *)', 'Bash(gh *)', 'Bash(*)']:
+        for forbidden in ['git push', 'gh pr merge', 'Bash(git *)', 'Bash(gh *)', 'Bash(*)', ' Bash ']:
             self.assertNotIn(forbidden, tools)
+
+    def test_mentions_can_ask_for_the_project_review(self):
+        self.assertIn("plugins: 'code-review@claude-code-plugins'", MENTION)
 
     def test_one_run_at_a_time_per_issue_or_pull_request(self):
         self.assertIn('group: claude-${{ github.event.issue.number || github.event.pull_request.number }}', MENTION)
@@ -62,8 +73,11 @@ class Review(unittest.TestCase):
         self.assertIn("github.event.pull_request.user.login != 'dependabot[bot]'", gate)
 
     def test_the_review_may_only_comment(self):
-        self.assertIn('claude_args: \'--allowed-tools "mcp__github_inline_comment__create_inline_comment"\'', REVIEW)
+        self.assertIn('--allowed-tools "mcp__github_inline_comment__create_inline_comment"\'', REVIEW)
         self.assertNotIn('contents: write', REVIEW)
+
+    def test_review_findings_link_to_a_fix(self):
+        self.assertIn('include_fix_links: true', REVIEW)
 
     def test_the_trigger_is_pull_request_never_pull_request_target(self):
         # pull_request_target would run with secrets on a fork's code.
@@ -72,6 +86,10 @@ class Review(unittest.TestCase):
 
 
 class Both(unittest.TestCase):
+    def test_both_run_opus(self):
+        for workflow in [MENTION, REVIEW]:
+            self.assertEqual(re.findall(r'--model (\S+)', workflow), ['claude-opus-5-5'])
+
     def test_the_action_is_pinned_to_a_commit(self):
         # Like every third-party action here; Dependabot moves the pin.
         for workflow in [MENTION, REVIEW]:
