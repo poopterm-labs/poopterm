@@ -229,3 +229,18 @@ fn combining_marks_join_the_block() {
 	assert_eq!(&*part(&t, 1, 1).unwrap().text, "e\u{301}");
 	assert_eq!((t.cx, t.cy), (2, 0));
 }
+
+#[test]
+fn blocks_take_the_width_of_their_text() {
+	let mut t = terminal(14, 3);
+	send(&mut t, "\x1b]66;s=2;猫e\u{301}\u{1100}\u{1161}\x07");
+	let blocks = [(0, "猫", 2), (4, "e\u{301}", 1), (6, "\u{1100}\u{1161}", 2)];
+	for (x, text, width) in blocks {
+		assert_eq!(
+			summary(&t, x, 0),
+			Some((text.into(), (2, width), (0, 0))),
+			"{text:?}"
+		);
+	}
+	assert_eq!((t.cx, t.cy), (10, 0));
+}
