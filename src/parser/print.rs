@@ -1,6 +1,7 @@
 //! Printable characters and C0/C1 control execution.
 use std::sync::Arc;
 
+use super::narrow;
 use crate::{
 	graphics::kitty::PLACEHOLDER,
 	term::{Cell, NO_EXTRA, Term, attr},
@@ -116,20 +117,37 @@ impl Term {
 			if row[x].width == 0 && x > 0 {
 				row[x - 1] = blank;
 			}
+			// Narrow characters in a row; the fast path is tried after a few, so
+			// text with wide characters rarely pays for misses.
+			let mut narrow_run = 0;
 			let (mut c, mut width) = (c, width);
+			// Cells are built in vector registers and stored whole: `spacer`
+			// is the template with width 0, the right half of wide characters.
+			let spacer = Cell {
+				width: 0,
+				..template
+			}
+			.words();
+			let base = Cell::without_char(spacer);
+			let narrow = Cell::with_width(base, 1);
+			let cells = Cell::words_mut(row);
 			loop {
-				row[x] = Cell {
-					ch: c,
-					width: width as u8,
-					..template
-				};
+				cells[x] = Cell::with_char(Cell::with_width(base, width), c as u32);
 				if width == 2 {
-					row[x + 1] = Cell {
-						width: 0,
-						..template
-					};
+					cells[x + 1] = spacer;
 				}
 				x += width;
+				narrow_run = if width == 1 { narrow_run + 1 } else { 0 };
+				while narrow_run >= narrow::RUN
+					&& let Some(chunk) = chars.as_str().as_bytes().first_chunk()
+				{
+					let Some((len, used, last)) = narrow::print_chunk(chunk, &mut cells[x..], narrow) else {
+						narrow_run = 0;
+						break;
+					};
+					chars = chars.as_str()[len..].chars();
+					(x, c) = (x + used, last);
+				}
 				// Peek: a character that does not fit goes to the general path.
 				let before = chars.clone();
 				let Some(next) = chars.next() else {

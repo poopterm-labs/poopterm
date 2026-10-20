@@ -8,6 +8,7 @@ mod dcs;
 mod erase;
 mod esc;
 mod modes;
+mod narrow;
 mod osc;
 mod osc_clipboard;
 mod osc_color;
