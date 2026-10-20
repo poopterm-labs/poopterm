@@ -21,19 +21,12 @@ impl Term {
 			b"7501" => self.osc_program_status(&params[1..], bell),
 			b"99" if params.len() >= 3 => self.osc_kitty_notify(params[1], &params[2..], bell),
 			b"8" if params.len() >= 3 => {
-				let uri = params[2];
-				if uri.is_empty() {
-					self.active_hyperlink = 0;
-					self.update_active_extra();
-				} else if uri.len() <= 2048
-					&& let Ok(uri) = std::str::from_utf8(uri)
-					&& !uri.chars().any(char::is_control)
-					&& self.hyperlinks.len() < 4096
-				{
-					self.hyperlinks.push(uri.to_owned());
-					self.active_hyperlink = (self.hyperlinks.len() - 1) as u16;
-					self.update_active_extra();
-				}
+				// An empty, rejected or unstorable target ends the open link.
+				let uri = std::str::from_utf8(params[2])
+					.ok()
+					.filter(|uri| !uri.is_empty() && uri.len() <= 2048 && !uri.chars().any(char::is_control));
+				self.active_hyperlink = uri.and_then(|uri| self.hyperlink_id(uri)).unwrap_or(0);
+				self.update_active_extra();
 			}
 			b"133" => {
 				let letter = params.get(1).copied().unwrap_or_default();
@@ -74,6 +67,20 @@ impl Term {
 }
 
 impl Term {
+	/// The slot of hyperlink target `uri`, added unless the table is full.
+	fn hyperlink_id(&mut self, uri: &str) -> Option<u16> {
+		if let Some(&id) = self.hyperlink_ids.get(uri) {
+			return Some(id);
+		}
+		if self.hyperlinks.len() >= 4096 {
+			return None;
+		}
+		let id = self.hyperlinks.len() as u16;
+		self.hyperlinks.push(uri.to_owned());
+		self.hyperlink_ids.insert(uri.to_owned(), id);
+		Some(id)
+	}
+
 	/// Sets the window title, redrawing the tab if it changed.
 	pub(super) fn set_title(&mut self, title: String) {
 		if self.title != title {
