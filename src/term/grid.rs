@@ -49,7 +49,11 @@ impl Grid {
 			let dirty = evict(row);
 			Cell::fill(&mut row[..dirty], blank);
 		}
-		region.rotate_left(count);
+		if count == 1 {
+			rotate_left_one(region);
+		} else {
+			region.rotate_left(count);
+		}
 	}
 
 	/// Scrolls rows `top..=bottom` down by `count`, blanking the rows at the top.
@@ -70,6 +74,24 @@ impl Grid {
 		}
 		self.rows.resize_with(rows, || vec![blank; cols]);
 		self.cols = cols;
+	}
+}
+
+/// `rows.rotate_left(1)` with one move of the row headers; the slice method
+/// copies through a buffer, in three calls, on every line feed.
+#[inline]
+fn rotate_left_one(rows: &mut [Row]) {
+	let Some(last) = rows.len().checked_sub(1) else {
+		return;
+	};
+	let rows = rows.as_mut_ptr();
+	// SAFETY: the first row is read out, the others shift down by one inside
+	// the slice, and the first is written to the slot that frees up, so every
+	// row is owned exactly once again; nothing between can panic.
+	unsafe {
+		let first = std::ptr::read(rows);
+		std::ptr::copy(rows.add(1), rows, last);
+		std::ptr::write(rows.add(last), first);
 	}
 }
 
@@ -139,6 +161,53 @@ mod tests {
 		});
 		assert_eq!(evicted, ["bb", "cc"]);
 		assert_eq!(text(&g), ["aa", "..", "..", "dd"]);
+	}
+
+	#[test]
+	fn scrolling_up_by_one_moves_rows_without_copying_them() {
+		let mut g = grid(&["aa", "bb", "cc", "dd"]);
+		let buffers: Vec<_> = g.iter().map(|row| row.as_ptr()).collect();
+		g.scroll_up(0, 3, 1, cell('.'), <[Cell]>::len);
+		assert_eq!(text(&g), ["bb", "cc", "dd", ".."]);
+		let moved: Vec<_> = g.iter().map(|row| row.as_ptr()).collect();
+		assert_eq!(moved, [buffers[1], buffers[2], buffers[3], buffers[0]]);
+	}
+
+	#[test]
+	fn scrolling_one_row_regions_up_by_one_blanks_them() {
+		for (top, expected) in [
+			(0, ["..", "bb", "cc"]),
+			(1, ["aa", "..", "cc"]),
+			(2, ["aa", "bb", ".."]),
+		] {
+			let mut g = grid(&["aa", "bb", "cc"]);
+			g.scroll_up(top, top, 1, cell('.'), <[Cell]>::len);
+			assert_eq!(text(&g), expected, "row {top}");
+		}
+	}
+
+	#[test]
+	fn single_row_scrolls_add_up_to_one_larger_scroll() {
+		let lines = ["aa", "bb", "cc", "dd", "ee", "ff"];
+		for (top, bottom) in [(0, 5), (1, 4), (2, 3), (0, 2), (3, 5)] {
+			for count in 1..=bottom + 1 - top {
+				let (mut stepped, mut at_once) = (grid(&lines), grid(&lines));
+				let (mut evicted_stepped, mut evicted_at_once) = (Vec::new(), Vec::new());
+				for _ in 0..count {
+					stepped.scroll_up(top, bottom, 1, cell('.'), |row| {
+						evicted_stepped.push(row[0].ch);
+						row.len()
+					});
+				}
+				at_once.scroll_up(top, bottom, count, cell('.'), |row| {
+					evicted_at_once.push(row[0].ch);
+					row.len()
+				});
+				let case = (top, bottom, count);
+				assert_eq!(text(&stepped), text(&at_once), "{case:?}");
+				assert_eq!(evicted_stepped, evicted_at_once, "{case:?}");
+			}
+		}
 	}
 
 	#[test]
