@@ -31,6 +31,25 @@ pub(crate) fn hostname() -> &'static str {
 	})
 }
 
+/// Whether host names `a` and `b` name one machine: equal, ignoring case,
+/// before the first dot (`zeta` is `zeta.example.com`).
+pub(crate) fn same_host(a: &str, b: &str) -> bool {
+	fn short(name: &str) -> &str {
+		name.split('.').next().unwrap_or_default()
+	}
+	short(a).eq_ignore_ascii_case(short(b))
+}
+
+/// Whether `host` is this machine, named `local`; so are no name and `localhost`.
+pub(crate) fn is_local(host: &str, local: &str) -> bool {
+	host.is_empty() || host.eq_ignore_ascii_case("localhost") || same_host(host, local)
+}
+
+/// The host of `user@host`, or all of it without a user.
+pub(crate) fn host_of(remote: &str) -> &str {
+	remote.rsplit_once('@').map_or(remote, |(_, host)| host)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Attention {
 	/// Until the user looks (`yes`).
@@ -85,16 +104,7 @@ impl Iterm {
 	/// without case and by their first label when one is unqualified.
 	pub(crate) fn remote_label(&self, local: &str) -> Option<&str> {
 		let remote = self.remote_host.as_deref()?;
-		let host = remote.rsplit_once('@').map_or(remote, |(_, host)| host);
-		let short = |name: &str| {
-			name
-				.split('.')
-				.next()
-				.unwrap_or_default()
-				.to_ascii_lowercase()
-		};
-		let same = host.eq_ignore_ascii_case(local) || short(host) == short(local);
-		(!same).then_some(remote)
+		(!is_local(host_of(remote), local)).then_some(remote)
 	}
 
 	/// Adds shown text to a capture in progress.

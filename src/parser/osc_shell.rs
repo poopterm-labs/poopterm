@@ -1,16 +1,41 @@
 //! Shell integration beyond OSC 133: the working directory (OSC 7), ConEmu's
 //! OSC 9 commands, and VS Code's OSC 633 markers, command lines and
 //! properties.
-use crate::{shell_integration::decode_uri_path, term::Term};
+use crate::{
+	shell_integration::decode_uri_path,
+	term::{
+		Term,
+		iterm::{host_of, hostname, is_local, same_host},
+	},
+};
 
 impl Term {
-	/// Sets the working directory from a `file://` URI.
+	/// Sets the working directory from a `file://` URI. A directory on
+	/// another host is not one here: it only names the remote host.
 	pub(super) fn osc_cwd_uri(&mut self, uri: &[u8]) {
-		if let Ok(uri) = std::str::from_utf8(uri)
-			&& let Some(path) = uri.strip_prefix("file://")
-			&& let Some(path) = path
-				.find('/')
-				.and_then(|index| decode_uri_path(&path[index..]))
+		let Some((host, path)) = std::str::from_utf8(uri)
+			.ok()
+			.and_then(|uri| uri.strip_prefix("file://"))
+			.and_then(|rest| rest.find('/').map(|at| rest.split_at(at)))
+		else {
+			return;
+		};
+		if host.len() > 255 || host.chars().any(char::is_control) {
+			return;
+		}
+		let local = hostname();
+		if !is_local(host, local) {
+			// RemoteHost may have named the user too; keep it.
+			let known = self.iterm.remote_host.as_deref();
+			if !known.is_some_and(|known| same_host(host_of(known), host)) {
+				self.iterm.remote_host = Some(host.to_owned());
+			}
+			return;
+		}
+		if self.iterm.remote_label(local).is_some() {
+			self.iterm.remote_host = None;
+		}
+		if let Some(path) = decode_uri_path(path)
 			&& self.cwd != path
 		{
 			self.cwd = path;

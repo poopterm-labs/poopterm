@@ -322,7 +322,8 @@ shell and tracks OSC 7/133 markers emitted by other integrations.
 New tabs inherit the active shell's directory. macOS and Linux discover the
 shell directory when opening a tab or closing the window. Shells can also report
 it using OSC 7. On BSD, install the optional shell hooks above to report
-directory changes.
+directory changes. A directory reported from another host, such as a shell over
+ssh, is not used for new tabs; the status bar names that host instead.
 Close the window to save its tabs; reopening starts fresh login shells in the
 saved directories. Running programs and terminal output are not restored.
 Closing a tab removes it from the saved list, including the last tab.

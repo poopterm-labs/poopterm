@@ -26,7 +26,8 @@ _poopterm_precmd() {
 	# Clicks in the input line may move the cursor with arrow keys.
 	print -rn -- $'\e]133;A;cl=line\a'
 	_poopterm_url_encode "$PWD"
-	print -rn -- $'\e]7;file://'"$REPLY"$'\a'
+	# Naming the host keeps ssh sessions' directories apart from local ones.
+	print -rn -- $'\e]7;file://'"$HOST$REPLY"$'\a'
 }
 
 _poopterm_preexec() {

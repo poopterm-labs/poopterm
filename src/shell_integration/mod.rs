@@ -1,6 +1,8 @@
 //! Shell integration: prompt/command markers (OSC 133), working-directory
 //! reports (OSC 7), and the optional shell hooks that emit them.
 pub(crate) mod command_line;
+#[cfg(test)]
+mod host_tests;
 pub(crate) mod inject;
 mod markers;
 #[cfg(test)]

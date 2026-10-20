@@ -10,6 +10,8 @@ mod conemu_tests;
 #[cfg(test)]
 mod context_tests;
 pub(crate) mod contexts;
+#[cfg(test)]
+mod cwd_host_tests;
 pub(crate) mod dcs;
 #[cfg(test)]
 mod dcs_tests;

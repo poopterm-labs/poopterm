@@ -9,7 +9,8 @@ function __poopterm_prompt --on-event fish_prompt
 	# Clicks in the input line may move the cursor with arrow keys.
 	printf '\033]133;D;%s\007\033]133;A;cl=line\007' $status_code
 	set -l encoded (string escape --style=url -- $PWD | string replace -a '%2F' '/')
-	printf '\033]7;file://%s\007' $encoded
+	# Naming the host keeps ssh sessions' directories apart from local ones.
+	printf '\033]7;file://%s%s\007' $hostname $encoded
 end
 
 function __poopterm_preexec --on-event fish_preexec
