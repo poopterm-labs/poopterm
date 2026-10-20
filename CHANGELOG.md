@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.45 "Giga Fly" — 2026-10-20
+
+### Added
+
+- Add HP memory lock and advertise meml, memu and TS (#60) (parser).
+
 ## 26.10.44 "Giga Fly" — 2026-10-20
 
 ### Added
