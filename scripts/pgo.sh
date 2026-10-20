@@ -58,13 +58,12 @@ profdata() {
 }
 
 # Builds for the host target explicitly, so the flags reach poopterm and
-# its dependencies but not build scripts. Existing RUSTFLAGS are kept;
-# `strip` overrides the release profile's stripping when set.
+# its dependencies but not build scripts. Existing RUSTFLAGS are kept.
 cargo_build() {
 	target_dir=$1
 	shift
-	CARGO_PROFILE_RELEASE_STRIP=${strip:-} RUSTFLAGS="${RUSTFLAGS:-} $*" cargo build --release \
-		--locked --target "$host" --target-dir "$target_dir"
+	RUSTFLAGS="${RUSTFLAGS:-} $*" cargo build --release --locked --target "$host" \
+		--target-dir "$target_dir"
 }
 
 instrument() {
@@ -135,7 +134,7 @@ build() {
 	if linux; then
 		# BOLT needs the relocations to move code, and the symbols; `bolt`
 		# and `dist` strip what they ship.
-		strip=false
+		export CARGO_PROFILE_RELEASE_STRIP=false
 		cargo_build "$pgo/optimized" -Clink-arg=-Wl,--emit-relocs "-Cprofile-use=$merged"
 	else
 		cargo_build "$pgo/optimized" "-Cprofile-use=$merged"

@@ -13,7 +13,9 @@ HOST = 'x86_64-unknown-test'
 # profile, optimized ones name the profile they used, plain ones say so.
 CARGO = '''#!/bin/sh
 echo "cargo $*" >> "$FAKE/log"
-echo "env strip=${CARGO_PROFILE_RELEASE_STRIP:-} $RUSTFLAGS" >> "$FAKE/log"
+echo "env strip=${CARGO_PROFILE_RELEASE_STRIP-unset} $RUSTFLAGS" >> "$FAKE/log"
+# Like cargo, refuse an empty profile override.
+[ "${CARGO_PROFILE_RELEASE_STRIP-unset}" = '' ] && exit 1
 [ -e "$FAKE/fail-build" ] && exit 1
 dir=target/release
 while [ $# -gt 0 ]; do
@@ -177,7 +179,7 @@ class Pgo(unittest.TestCase):
     def test_other_systems_build_pgo_as_a_plain_release_does(self):
         self.assertEqual(self.pgo('all', FAKE_OS='Darwin').returncode, 0)
         [flags] = self.optimized_flags()
-        self.assertTrue(flags.startswith('env strip= '), flags)
+        self.assertTrue(flags.startswith('env strip=unset '), flags)
         self.assertNotIn('emit-relocs', flags)
 
     def test_bolt_profiles_the_pgo_build_and_lays_it_out_again(self):
