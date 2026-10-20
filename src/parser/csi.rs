@@ -114,6 +114,7 @@ impl Term {
 						self.wrap_pending = false;
 					}
 					7 => self.auto_wrap = enabled,
+					45 => self.reverse_wrap = enabled,
 					25 => self.cursor_visible = enabled,
 					80 => self.sixel_scrolling = enabled,
 					1048 => {
@@ -352,6 +353,7 @@ impl Term {
 			66 => self.application_keypad,
 			6 => self.origin_mode,
 			7 => self.auto_wrap,
+			45 => self.reverse_wrap,
 			25 => self.cursor_visible,
 			47 | 1047 | 1049 => self.primary_screen.is_some(),
 			80 => self.sixel_scrolling,

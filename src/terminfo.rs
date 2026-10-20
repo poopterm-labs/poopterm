@@ -408,4 +408,33 @@ mod tests {
 		parser.advance(&mut term, &title);
 		assert_eq!(term.title, "hello");
 	}
+
+	#[test]
+	fn cub1_in_the_first_column_wraps_as_bw_says() {
+		if !have("tic") || !have("tput") {
+			return;
+		}
+		use crate::{
+			parser::Parser,
+			term::Term,
+			theme::{Theme, ThemeKind},
+		};
+		let dir = TempDir::new("bw");
+		assert!(compile_into(&dir.0));
+		let tput = |cap: &str| {
+			Command::new("tput")
+				.env("TERMINFO", &dir.0)
+				.arg("-T")
+				.arg(NAME)
+				.arg(cap)
+				.output()
+				.unwrap()
+		};
+		assert!(tput("bw").status.success(), "bw is advertised");
+		let mut term = Term::new(10, 4, Theme::from_kind(ThemeKind::Poop), "/".into());
+		let mut parser = Parser::new();
+		parser.advance(&mut term, b"\x1b[3H");
+		parser.advance(&mut term, &tput("cub1").stdout);
+		assert_eq!((term.cx, term.cy), (9, 1));
+	}
 }
