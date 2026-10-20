@@ -1,5 +1,15 @@
 # Changelog
 
+## 26.10.44 "Giga Fly" — 2026-10-20
+
+### Added
+
+- Advertise cursor color, overline and single insert (#59) (terminfo).
+
+### Maintenance
+
+- Align the docs with the parser, scrollback, sixel and inflate work (#58).
+
 ## 26.10.43 "Giga Fly" — 2026-10-20
 
 ### Performance
