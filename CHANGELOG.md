@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.62 "Giga Fly" — 2026-10-20
+
+### Maintenance
+
+- Add an accessibility statement and a pull request template (#86).
+
 ## 26.10.61 "Giga Fly" — 2026-10-20
 
 ### Added
