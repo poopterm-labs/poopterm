@@ -52,6 +52,12 @@ deadlock, so debug builds track held locks and panic instead.
   line feed moves them up by one in a single `ptr::copy`) and copies the row
   leaving the screen into the scrollback, so a line feed costs O(columns),
   not O(screen). Only the written prefix of that row is blanked again.
+- Each grid row also records how far it is used: every cell after that is
+  the padding cell (default colors, blank). Rows entering the history are
+  only scanned for trailing padding up to there, and an erase to the end
+  of a line in default colors stops there and shortens the row. Printing
+  marks the cells it writes; any other `IndexMut` access counts the whole
+  row as used, so code that does not know about extents stays correct.
 - `term::scrollback::Scrollback` is one ring buffer of cells holding rows
   without their trailing default blanks, so typical output takes a fraction
   of a full row; a row never wraps around the ring's end. On x86-64 rows are

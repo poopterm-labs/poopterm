@@ -248,5 +248,11 @@ impl Term {
 		}
 		self.default_fg = fg;
 		self.default_bg = bg;
+		// Rows are measured against the padding, which just changed.
+		let pad = self.padding();
+		self.grid.sync_pad(pad);
+		if let Some((grid, ..)) = &mut self.primary_screen {
+			grid.sync_pad(pad);
+		}
 	}
 }

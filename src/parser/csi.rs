@@ -314,7 +314,7 @@ impl Term {
 				} else {
 					self
 						.grid
-						.scroll_up(self.cy, bottom, count, blank, |row| row.len());
+						.scroll_up(self.cy, bottom, count, blank, |row, _| row.len());
 				}
 			}
 			'm' => self.sgr(params),

@@ -3,6 +3,10 @@
 //! Each row is its own `Vec<Cell>`, so scrolling rotates row headers instead
 //! of moving every cell, and rows entering the screen are blanked in place,
 //! in memory that is already in cache.
+//!
+//! Each row also records how far it is used: every cell from there on is
+//! the padding cell, so moving a row to the scrollback and erasing to its
+//! end skip the unused tail instead of scanning or rewriting it.
 use std::ops::{Index, IndexMut};
 
 use super::Cell;
@@ -12,13 +16,21 @@ pub(crate) type Row = Vec<Cell>;
 #[derive(Clone)]
 pub(crate) struct Grid {
 	rows: Vec<Row>,
+	/// Per row: every cell at or after it equals `pad`.
+	used: Vec<usize>,
+	/// The padding cell `used` is measured against.
+	pad: Cell,
 	cols: usize,
 }
 
 impl Grid {
+	/// A grid of `blank` cells, which also become the padding until
+	/// [`Grid::sync_pad`] says otherwise.
 	pub(crate) fn new(cols: usize, rows: usize, blank: Cell) -> Self {
 		Self {
 			rows: (0..rows).map(|_| vec![blank; cols]).collect(),
+			used: vec![0; rows],
+			pad: blank,
 			cols,
 		}
 	}
@@ -29,24 +41,81 @@ impl Grid {
 	}
 
 	pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut Row> {
+		self.used.fill(self.cols);
 		self.rows.iter_mut()
 	}
 
+	/// How far row `y` is used: the cells after it are all padding.
+	#[inline]
+	pub(crate) fn used(&self, y: usize) -> usize {
+		self.used[y]
+	}
+
+	/// Measures `used` against `pad` from now on. A different padding cell
+	/// makes every row count as fully used.
+	#[inline]
+	pub(crate) fn sync_pad(&mut self, pad: Cell) {
+		if pad != self.pad {
+			self.pad = pad;
+			self.used.fill(self.cols);
+		}
+	}
+
+	/// Counts row `y` as used at least up to `end`.
+	#[inline(always)]
+	pub(crate) fn mark_used(&mut self, y: usize, end: usize) {
+		let used = &mut self.used[y];
+		*used = (*used).max(end.min(self.cols));
+	}
+
+	/// Row `y` without marking it: the caller marks what it wrote with
+	/// [`Grid::mark_used`] before anything else reads the grid.
+	#[inline(always)]
+	pub(crate) fn row_unmarked(&mut self, y: usize) -> &mut Row {
+		&mut self.rows[y]
+	}
+
+	/// Row `y`, for writing cells before `end` only.
+	#[inline(always)]
+	pub(crate) fn row_upto(&mut self, y: usize, end: usize) -> &mut Row {
+		self.mark_used(y, end);
+		&mut self.rows[y]
+	}
+
+	/// Sets cells `start..stop` of row `y` to `cell`. Padding written up to
+	/// the used end shortens the row instead of being written past it.
+	#[inline]
+	pub(crate) fn fill(&mut self, y: usize, start: usize, stop: usize, cell: Cell) {
+		let used = &mut self.used[y];
+		if cell == self.pad && stop >= *used {
+			if start < *used {
+				Cell::fill(&mut self.rows[y][start..*used], cell);
+				*used = start;
+			}
+		} else {
+			Cell::fill(&mut self.rows[y][start..stop], cell);
+			*used = (*used).max(stop);
+		}
+	}
+
 	/// Scrolls rows `top..=bottom` up by `count`. Rows leaving the region are
-	/// passed to `evict` (oldest first), which returns how many leading cells
-	/// to blank; the caller vouches that the rest already equal `blank`.
+	/// passed to `evict` (oldest first) with how far they are used; it
+	/// returns how many leading cells to blank, and the caller vouches that
+	/// the rest already equal `blank`.
 	pub(crate) fn scroll_up(
 		&mut self,
 		top: usize,
 		bottom: usize,
 		count: usize,
 		blank: Cell,
-		mut evict: impl FnMut(&[Cell]) -> usize,
+		mut evict: impl FnMut(&[Cell], usize) -> usize,
 	) {
 		let count = count.min(bottom + 1 - top);
 		let region = &mut self.rows[top..=bottom];
-		for row in &mut region[..count] {
-			let dirty = evict(row);
+		let used = &mut self.used[top..=bottom];
+		let emptied = if blank == self.pad { 0 } else { self.cols };
+		for (row, &used) in region[..count].iter_mut().zip(&used[..count]) {
+			let dirty = evict(row, used);
 			Cell::fill(&mut row[..dirty], blank);
 		}
 		if count == 1 {
@@ -54,6 +123,10 @@ impl Grid {
 		} else {
 			region.rotate_left(count);
 		}
+		// The rows that wrapped around are all blank: one move, unlike a rotation.
+		let kept = used.len() - count;
+		used.copy_within(count.., 0);
+		used[kept..].fill(emptied);
 	}
 
 	/// Scrolls rows `top..=bottom` down by `count`, blanking the rows at the top.
@@ -64,6 +137,9 @@ impl Grid {
 		for row in &mut region[..count] {
 			Cell::fill(row, blank);
 		}
+		let used = &mut self.used[top..=bottom];
+		used.rotate_right(count);
+		used[..count].fill(if blank == self.pad { 0 } else { self.cols });
 	}
 
 	/// Resizes to `cols` × `rows`, keeping the top-left content.
@@ -74,6 +150,17 @@ impl Grid {
 		}
 		self.rows.resize_with(rows, || vec![blank; cols]);
 		self.cols = cols;
+		self.used = vec![cols; rows];
+	}
+
+	/// Checks that cells after each row's used end are padding.
+	#[cfg(test)]
+	pub(crate) fn assert_extents(&self) {
+		for (y, (row, &used)) in self.rows.iter().zip(&self.used).enumerate() {
+			assert!(used <= self.cols, "row {y} used {used}");
+			let stray = row[used..].iter().position(|cell| *cell != self.pad);
+			assert_eq!(stray, None, "row {y} used {used}");
+		}
 	}
 }
 
@@ -103,8 +190,11 @@ impl Index<usize> for Grid {
 }
 
 impl IndexMut<usize> for Grid {
+	/// Counts the whole row as used; writers that know better use
+	/// [`Grid::row_upto`] or [`Grid::fill`].
 	#[inline(always)]
 	fn index_mut(&mut self, row: usize) -> &mut Row {
+		self.used[row] = self.cols;
 		&mut self.rows[row]
 	}
 }
@@ -141,7 +231,7 @@ mod tests {
 	fn scrolling_up_hands_leaving_rows_out_before_blanking_them() {
 		let mut g = grid(&["aa", "bb", "cc", "dd"]);
 		let mut evicted = Vec::new();
-		g.scroll_up(0, 2, 2, cell('.'), |row| {
+		g.scroll_up(0, 2, 2, cell('.'), |row, _| {
 			evicted.push(row.iter().map(|c| c.ch).collect::<String>());
 			row.len()
 		});
@@ -153,7 +243,7 @@ mod tests {
 	fn scrolling_up_by_more_than_the_region_evicts_and_blanks_it_all() {
 		let mut g = grid(&["aa", "bb", "cc", "dd"]);
 		let mut evicted = Vec::new();
-		g.scroll_up(1, 2, 9, cell('.'), |row| {
+		g.scroll_up(1, 2, 9, cell('.'), |row, _| {
 			evicted.push(row.iter().map(|c| c.ch).collect::<String>());
 			row.len()
 		});
@@ -165,7 +255,7 @@ mod tests {
 	fn scrolling_up_by_one_moves_rows_without_copying_them() {
 		let mut g = grid(&["aa", "bb", "cc", "dd"]);
 		let buffers: Vec<_> = g.iter().map(|row| row.as_ptr()).collect();
-		g.scroll_up(0, 3, 1, cell('.'), <[Cell]>::len);
+		g.scroll_up(0, 3, 1, cell('.'), |row, _| row.len());
 		assert_eq!(text(&g), ["bb", "cc", "dd", ".."]);
 		let moved: Vec<_> = g.iter().map(|row| row.as_ptr()).collect();
 		assert_eq!(moved, [buffers[1], buffers[2], buffers[3], buffers[0]]);
@@ -175,7 +265,7 @@ mod tests {
 	fn scrolling_a_region_up_by_one_leaves_the_rows_around_it_in_place() {
 		let mut g = grid(&["aa", "bb", "cc", "dd", "ee"]);
 		let buffers: Vec<_> = g.iter().map(|row| row.as_ptr()).collect();
-		g.scroll_up(1, 3, 1, cell('.'), <[Cell]>::len);
+		g.scroll_up(1, 3, 1, cell('.'), |row, _| row.len());
 		assert_eq!(text(&g), ["aa", "cc", "dd", "..", "ee"]);
 		let moved: Vec<_> = g.iter().map(|row| row.as_ptr()).collect();
 		let expected = [buffers[0], buffers[2], buffers[3], buffers[1], buffers[4]];
@@ -190,7 +280,7 @@ mod tests {
 			(2, ["aa", "bb", ".."]),
 		] {
 			let mut g = grid(&["aa", "bb", "cc"]);
-			g.scroll_up(top, top, 1, cell('.'), <[Cell]>::len);
+			g.scroll_up(top, top, 1, cell('.'), |row, _| row.len());
 			assert_eq!(text(&g), expected, "row {top}");
 		}
 	}
@@ -203,12 +293,12 @@ mod tests {
 				let (mut stepped, mut at_once) = (grid(&lines), grid(&lines));
 				let (mut evicted_stepped, mut evicted_at_once) = (Vec::new(), Vec::new());
 				for _ in 0..count {
-					stepped.scroll_up(top, bottom, 1, cell('.'), |row| {
+					stepped.scroll_up(top, bottom, 1, cell('.'), |row, _| {
 						evicted_stepped.push(row[0].ch);
 						row.len()
 					});
 				}
-				at_once.scroll_up(top, bottom, count, cell('.'), |row| {
+				at_once.scroll_up(top, bottom, count, cell('.'), |row, _| {
 					evicted_at_once.push(row[0].ch);
 					row.len()
 				});
@@ -222,7 +312,7 @@ mod tests {
 	#[test]
 	fn scrolling_up_by_zero_changes_nothing() {
 		let mut g = grid(&["aa", "bb"]);
-		g.scroll_up(0, 1, 0, cell('.'), |_| panic!("no row leaves"));
+		g.scroll_up(0, 1, 0, cell('.'), |_, _| panic!("no row leaves"));
 		assert_eq!(text(&g), ["aa", "bb"]);
 	}
 
@@ -241,7 +331,7 @@ mod tests {
 			attrs: 2,
 			..cell(' ')
 		};
-		g.scroll_up(0, 1, 1, blank, <[Cell]>::len);
+		g.scroll_up(0, 1, 1, blank, |row, _| row.len());
 		assert!(g[1].iter().all(|c| *c == blank));
 		assert_eq!(g[0][1].ch, 'd');
 	}
@@ -250,7 +340,7 @@ mod tests {
 	fn only_the_prefix_evict_names_is_blanked() {
 		let mut g = grid(&["abc", "def", "ghi"]);
 		let mut dirty = [1, 0].into_iter();
-		g.scroll_up(0, 2, 2, cell('.'), |_| dirty.next().unwrap());
+		g.scroll_up(0, 2, 2, cell('.'), |_, _| dirty.next().unwrap());
 		assert_eq!(text(&g), ["ghi", ".bc", "def"]);
 	}
 

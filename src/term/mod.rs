@@ -25,6 +25,8 @@ mod fill_tests;
 mod frame;
 mod grid;
 #[cfg(test)]
+mod grid_extent_tests;
+#[cfg(test)]
 mod history_tests;
 mod images;
 pub(crate) mod iterm;

@@ -732,6 +732,19 @@ fn batched_printing_matches_per_character_printing() {
 		b"[0m",
 		b"\x1b7\x1b8",
 		b"\x00\x05",
+		// Erases and shifts in a background other than the padding's.
+		b"\x1b[44m",
+		b"\x1b[1K",
+		b"\x1b[2K",
+		b"\x1b[J",
+		b"\x1b[2@",
+		b"\x1b[P",
+		b"\x1b[3X",
+		b"\x1b[S\x1b[T",
+		b"\x1b[L\x1b[M",
+		b"\x1b]11;#102030\x1b\\",
+		b"\x1b[?1049h",
+		b"\x1b[?1049l",
 	];
 	let mut seed = 0x9e37_79b9_u32;
 	for _ in 0..200 {
@@ -748,8 +761,10 @@ fn batched_printing_matches_per_character_printing() {
 		let mut parser = Parser::new();
 		for chunk in stream.chunks(7) {
 			parser.advance(&mut batched, chunk);
+			batched.grid.assert_extents();
 		}
 		vte::Parser::new().advance(&mut PerCharacter(&mut reference), &stream);
+		reference.grid.assert_extents();
 		assert_eq!(
 			(batched.cx, batched.cy, batched.wrap_pending),
 			(reference.cx, reference.cy, reference.wrap_pending),

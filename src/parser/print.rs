@@ -55,7 +55,9 @@ impl Term {
 		}
 		self.erase_images(i, i + width);
 		let blank = self.blank();
-		let row = &mut self.grid[y];
+		// Other halves of wide characters are never padding, so only the new
+		// cells can extend the row.
+		let row = self.grid.row_upto(y, x + width);
 		// Remove both halves when overwriting a wide character.
 		if row[x].width == 0 && x > 0 {
 			row[x - 1] = blank;
@@ -66,7 +68,6 @@ impl Term {
 		if width == 2 && x + 2 < cols && row[x + 1].width == 2 {
 			row[x + 2] = blank;
 		}
-		let row = &mut self.grid[y];
 		row[x] = Cell {
 			ch: c,
 			width: width as u8,
@@ -111,7 +112,9 @@ impl Term {
 			// marks and margin handling return to the general path above.
 			let cols = self.cols;
 			let mut x = self.cx;
-			let row = &mut self.grid[self.cy][..cols];
+			let y = self.cy;
+			// Marked as used once the segment's end is known.
+			let row = &mut self.grid.row_unmarked(y)[..cols];
 			// Cells inside the segment are all rewritten; only wide characters
 			// cut by its edges need repair.
 			if row[x].width == 0 && x > 0 {
@@ -172,6 +175,7 @@ impl Term {
 			if x < cols && row[x].width == 0 {
 				row[x] = blank;
 			}
+			self.grid.mark_used(y, x);
 			self.last_printed = Some(c);
 			self.wrap_pending = x >= cols;
 			self.cx = x.min(cols - 1);
@@ -213,7 +217,8 @@ impl Term {
 				self.erase_images(i, i + count);
 			}
 			let blank = self.blank();
-			let row = &mut self.grid[y];
+			// The other halves are never padding: only the run extends the row.
+			let row = self.grid.row_upto(y, x + count);
 			// Remove the other half of wide characters cut by the run's edges.
 			if row[x].width == 0 && x > 0 {
 				row[x - 1] = blank;
@@ -292,15 +297,23 @@ impl Term {
 		if width != 0 && (extra == NO_EXTRA || self.extras.marks(extra).last() != Some(&'\u{200d}')) {
 			return false;
 		}
+		self.join_mark(x, extra, c);
+		true
+	}
+
+	/// Adds `c` to the marks of cell `x` in the cursor row, which hold `extra`.
+	/// Kept out of line so the checks above stay small enough to inline.
+	#[cold]
+	#[inline(never)]
+	fn join_mark(&mut self, x: usize, extra: u16, c: char) {
 		// Repeated marks are cached; only a miss needs the table unique.
 		let id = match self.extras.remembered_mark(extra, c) {
 			None => Arc::make_mut(&mut self.extras).with_mark(extra, c),
 			hit => hit,
 		};
 		if let Some(id) = id {
-			self.grid[self.cy][x].extra = id;
+			self.grid.row_upto(self.cy, x + 1)[x].extra = id;
 		}
-		true
 	}
 
 	#[inline]

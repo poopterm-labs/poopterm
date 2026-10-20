@@ -262,6 +262,7 @@ the `main` it was based on; gains are for the workloads it targeted.
 | Marks joined to clusters without ending the print segment (#55) | emoji +12%, tui +6% | `parser/cluster.rs` |
 | Sixel decoded into one flat buffer with alpha resolved up front (#56) | sixel +90% | `src/sixel.rs` |
 | Our own inflate for kitty `o=z` (#57) | kitty-zlib +5% | `src/inflate` |
+| Each grid row records its used extent: history pushes scan only that far, erases to the end stop there (#73) | emoji +13%, cjk +10%, log +10%, ls +10%, compiler +9%, unicode +9%, shell +7%, cursor +5%; truecolor −5% | `term/grid.rs` |
 
 Measured and rejected along the way:
 
