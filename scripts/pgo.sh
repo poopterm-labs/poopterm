@@ -1,6 +1,7 @@
 #!/bin/sh
 # Profile-guided optimization: builds poopterm instrumented, trains it, and
-# rebuilds it optimized for what the training ran.
+# rebuilds it optimized for what the training ran. On Linux, BOLT then lays
+# that build out again from a profile of its own.
 #
 #   scripts/pgo.sh                 # instrument, train on the benchmark, build
 #   scripts/pgo.sh instrument      # instrumented build only
@@ -9,16 +10,22 @@
 #   scripts/pgo.sh use             # open the instrumented terminal and use it;
 #                                  # closing it saves what you did as training
 #   scripts/pgo.sh build           # merge every profile and build optimized
-#   scripts/pgo.sh compare [MIB]   # benchmark the release and PGO builds
+#   scripts/pgo.sh bolt [MIB]      # Linux: instrument the PGO build with
+#                                  # llvm-bolt, train it, and lay it out again
+#   scripts/pgo.sh compare [MIB]   # benchmark the release, PGO and BOLT builds
 #   scripts/pgo.sh path            # print the optimized binary's path
-#   scripts/pgo.sh dist [MIB]      # instrument, train and build, then put the
-#                                  # result at target/release/poopterm; if any
-#                                  # step fails, a plain release build instead
+#   scripts/pgo.sh dist [MIB]      # instrument, train and build, BOLT where it
+#                                  # can, then put the result at
+#                                  # target/release/poopterm; if PGO fails, a
+#                                  # plain release build, if BOLT fails, PGO's
 #   scripts/pgo.sh clean           # forget all profiles
 #
 # Profiles add up: train on the benchmark, add sessions with `use`, then
 # `build` again. Old profiles still apply after code changes (functions that
 # changed are left unoptimized), but retrain after large ones.
+#
+# LLVM_BOLT and MERGE_FDATA name the BOLT tools when they carry a version
+# suffix, as Debian's llvm-bolt-18 does.
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -31,6 +38,14 @@ merged=$pgo/merged.profdata
 # not rebuild each other, nor the plain release build.
 instrumented=$pgo/instrumented/$host/release/poopterm
 optimized=$pgo/optimized/$host/release/poopterm
+bolt_dir=$pgo/bolt
+bolted=$bolt_dir/poopterm
+llvm_bolt=${LLVM_BOLT:-llvm-bolt}
+merge_fdata=${MERGE_FDATA:-merge-fdata}
+# BOLT rewrites Linux ELF binaries only.
+linux() {
+	[ "$(uname -s)" = Linux ]
+}
 
 # llvm-profdata must match rustc's LLVM, so use the toolchain's own.
 profdata() {
@@ -43,12 +58,13 @@ profdata() {
 }
 
 # Builds for the host target explicitly, so the flags reach poopterm and
-# its dependencies but not build scripts. Existing RUSTFLAGS are kept.
+# its dependencies but not build scripts. Existing RUSTFLAGS are kept;
+# `strip` overrides the release profile's stripping when set.
 cargo_build() {
 	target_dir=$1
 	shift
-	RUSTFLAGS="${RUSTFLAGS:-} $*" cargo build --release --locked --target "$host" \
-		--target-dir "$target_dir"
+	CARGO_PROFILE_RELEASE_STRIP=${strip:-} RUSTFLAGS="${RUSTFLAGS:-} $*" cargo build --release \
+		--locked --target "$host" --target-dir "$target_dir"
 }
 
 instrument() {
@@ -60,25 +76,47 @@ need_instrumented() {
 	[ -x "$instrumented" ] || instrument
 }
 
-train() {
-	need_instrumented
-	"$instrumented" --benchmark --mib "${1:-8}"
+# Runs the training corpus on the instrumented binary $1.
+run_training() {
+	"$1" --benchmark --mib "${2:-8}"
 	# Interactive programs write a few bytes at a time (key echo, prompts)
 	# and get a frame for most writes; keep their paths in the profile too.
-	"$instrumented" --benchmark --kib 64 --read 16 --frame-every 64
+	"$1" --benchmark --kib 64 --read 16 --frame-every 64
+}
+
+train() {
+	need_instrumented
+	run_training "$instrumented" "$@"
 }
 
 # The binary releases ship, at the path packaging expects. Training runs
 # in its own process, so a failure anywhere in it falls back.
 dist() {
 	release=$root/target/release/poopterm
-	if sh "$root/scripts/pgo.sh" all "$@"; then
-		mkdir -p "$(dirname "$release")"
-		cp "$optimized" "$release"
-		echo "pgo.sh: shipping the PGO build"
-	else
+	if ! sh "$root/scripts/pgo.sh" all "$@"; then
 		echo "::warning::pgo.sh: PGO failed; shipping a plain release build" >&2
 		cargo build --release --locked
+		return
+	fi
+	mkdir -p "$(dirname "$release")"
+	if ! linux; then
+		cp "$optimized" "$release"
+		echo "pgo.sh: shipping the PGO build"
+		return
+	fi
+	for tool in "$llvm_bolt" "$merge_fdata"; do
+		if ! command -v "$tool" >/dev/null; then
+			echo "::notice::pgo.sh: no $tool; shipping the PGO build" >&2
+			strip -o "$release" "$optimized"
+			return
+		fi
+	done
+	if sh "$root/scripts/pgo.sh" bolt "$@"; then
+		cp "$bolted" "$release"
+		echo "pgo.sh: shipping the PGO+BOLT build"
+	else
+		echo "::warning::pgo.sh: BOLT failed; shipping the PGO build" >&2
+		strip -o "$release" "$optimized"
 	fi
 }
 
@@ -94,8 +132,34 @@ build() {
 		exit 1
 	fi
 	"$(profdata)" merge -o "$merged" "$profiles"/*.profraw
-	cargo_build "$pgo/optimized" "-Cprofile-use=$merged"
+	if linux; then
+		# BOLT needs the relocations to move code, and the symbols; `bolt`
+		# and `dist` strip what they ship.
+		strip=false
+		cargo_build "$pgo/optimized" -Clink-arg=-Wl,--emit-relocs "-Cprofile-use=$merged"
+	else
+		cargo_build "$pgo/optimized" "-Cprofile-use=$merged"
+	fi
 	echo "Optimized build: $optimized"
+}
+
+# Lays the PGO build out again for the code its training runs: hot blocks
+# and functions together, cold ones split off. Each run starts afresh.
+bolt() {
+	[ -x "$optimized" ] || build
+	rm -rf "$bolt_dir"
+	mkdir -p "$bolt_dir"
+	"$llvm_bolt" "$optimized" -o "$bolt_dir/instrumented" -instrument \
+		-instrumentation-file="$bolt_dir/profile" -instrumentation-file-append-pid
+	run_training "$bolt_dir/instrumented" "$@"
+	"$merge_fdata" "$bolt_dir"/profile.*.fdata >"$bolt_dir/merged.fdata"
+	# Without huge-page alignment the new code fits the old text, so the
+	# binary keeps its size.
+	"$llvm_bolt" "$optimized" -o "$bolted" -data="$bolt_dir/merged.fdata" \
+		-reorder-blocks=ext-tsp -reorder-functions=cdsort -split-functions -split-all-cold \
+		-split-eh -icf -use-gnu-stack -no-huge-pages -use-old-text
+	strip "$bolted"
+	echo "Bolted build: $bolted"
 }
 
 compare() {
@@ -104,7 +168,8 @@ compare() {
 		exit 1
 	}
 	cargo build --release --locked
-	for binary in "$root/target/release/poopterm" "$optimized"; do
+	for binary in "$root/target/release/poopterm" "$optimized" "$bolted"; do
+		[ -x "$binary" ] || continue
 		echo "== $binary"
 		"$binary" --benchmark --mib "${1:-16}"
 	done
@@ -122,11 +187,12 @@ instrument) instrument ;;
 train) train "$@" ;;
 use) use_terminal ;;
 build) build ;;
+bolt) bolt "$@" ;;
 compare) compare "$@" ;;
 path) echo "$optimized" ;;
 dist) dist "$@" ;;
-clean) rm -rf "$profiles" "$merged" ;;
--h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
+clean) rm -rf "$profiles" "$merged" "$bolt_dir" ;;
+-h | --help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//' ;;
 *)
 	echo "pgo.sh: unknown command: $command (try --help)" >&2
 	exit 2

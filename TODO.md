@@ -52,8 +52,6 @@ release artifact** (deb, rpm, AppImage, macOS and whatever comes next). The
 packaging side of that is vgs499p's area.
 
 - **Profile-guided and post-link optimization**
-  - BOLT post-link layout on Linux, from perf LBR samples or
-    instrumentation ([#33](https://github.com/poopterm-labs/poopterm/issues/33)).
   - A staged PGO + BOLT pipeline producing the binary in every release
     artifact ([#34](https://github.com/poopterm-labs/poopterm/issues/34)).
   - Sample-based PGO (AutoFDO) from perf profiles of real use, with nightly

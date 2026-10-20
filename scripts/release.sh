@@ -63,7 +63,8 @@ fi
 if [[ $attached == no ]]; then
   # Package the release commit itself, so the .deb and the binary in it carry
   # the new version; a failed build stops before the GitHub release exists.
-  # Releases ship the PGO build, or a plain one if training fails.
+  # Releases ship the PGO build, bolted on Linux when llvm-bolt is
+  # installed, or a plain one if training fails.
   bash scripts/pgo.sh dist
   bash scripts/package-deb.sh
   shopt -s nullglob

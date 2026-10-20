@@ -97,8 +97,9 @@ rebuilds with them. No other tools are needed.
 make pgo             # instrument, train on the benchmark corpus, build optimized
 make pgo-use         # dogfood the instrumented terminal; closing it adds a profile
 make pgo-build       # rebuild from every profile collected so far
-make pgo-compare     # release vs PGO, same benchmark
-make pgo-install     # install the optimized binary system-wide
+make bolt            # Linux: profile the PGO build and lay it out with BOLT
+make pgo-compare     # release vs PGO vs BOLT, same benchmark
+make pgo-install     # build what releases ship and install it system-wide
 make pgo-clean       # forget the profiles
 ```
 
@@ -114,11 +115,33 @@ after large code changes, clean and retrain.
 Released Debian packages ship the PGO build: the release job runs
 `scripts/pgo.sh dist`, which instruments, trains and rebuilds, then puts the
 result at `target/release/poopterm`. If any step fails, it builds a plain
-release binary instead and logs a warning. On an i3-N305 (headless, medians
+release binary instead and logs a warning. `make pgo-install` builds and
+installs the same binary. On an i3-N305 (headless, medians
 of three alternating runs) the trained build is 5% faster overall: cursor
 +14%, editor +14%, shell +12%, source +10%, tui +10%, compiler +9%, and
 emoji −2.5%. Fed interactively (`--read 16 --frame-every 64`) it is 13%
 faster.
+
+### BOLT
+
+On Linux, `make bolt` (and `dist`, when `llvm-bolt` and `merge-fdata` are
+installed: Fedora `llvm-bolt`, Debian and Ubuntu `bolt-<version>`, named
+through `LLVM_BOLT` and `MERGE_FDATA` when they carry the version) lays the
+PGO build out again. The PGO build links with `--emit-relocs` and keeps its
+symbols so BOLT can move code; `bolt` instruments it, runs the same training,
+merges the profiles and rewrites it: basic blocks by ext-TSP, functions by
+cache-directed sort, cold code split off, identical functions folded. The new
+code goes into the old text section without huge-page alignment, so the
+binary keeps the PGO build's size (5.2 MB); `target/pgo/optimized` keeps the
+unbolted build for comparison, and `make pgo-compare` runs all three. If BOLT
+fails, `dist` ships the PGO build with a warning; without the tools it says
+so and does the same.
+
+Instrumentation works everywhere, CI VMs included, which have no LBR. On the
+i3-N305 (medians of three alternating runs, PGO against PGO + BOLT) BOLT adds
+2.9% overall and 2.3% fed interactively: shell +9.6%, compiler +7.0%, sixel
++6.5%, truecolor +5.0%, cjk +3.8%, cursor +3.1%; kitty-png −0.9% is within
+noise.
 
 ## Results
 
@@ -235,7 +258,8 @@ ranged 89–97 MB/s over the day).
 - **Titles** set by prompts on every line were filtered character by
   character; short printable-ASCII titles are now copied whole (shell +7%).
 - **Profile-guided optimization** (`make pgo`, and every release) adds
-  about 5% overall on top of all this, 13% when fed interactively.
+  about 5% overall on top of all this, 13% when fed interactively; BOLT
+  (`make bolt`) about 3% more.
 
 ## Follow-up work (26.10)
 
