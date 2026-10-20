@@ -2,7 +2,7 @@
 use super::*;
 use super::{
 	canvas::{DrawKey, Plan},
-	repaint::{keeps_contents, present},
+	repaint::keeps_contents,
 };
 use crate::{
 	render::{
@@ -75,7 +75,7 @@ impl App {
 		self.pacer.drawn(std::time::Instant::now());
 		self.refresh_search_if_dirty();
 		self.fonts.trim();
-		let Some(mut surface) = self.surface.take() else {
+		let Some(mut renderer) = self.renderer.take() else {
 			return;
 		};
 		let size = (self.width as usize, self.height as usize);
@@ -92,26 +92,29 @@ impl App {
 		};
 		let mut pixels = std::mem::take(&mut self.canvas.pixels);
 		let mut painter = Painter::new(&mut pixels, size.0, size.1);
-		let bands = match plan {
+		let bands = match &plan {
 			Plan::Full => {
 				self.compose(&mut painter);
 				None
 			}
-			Plan::Partial(damage) => Some(self.compose_damaged(&mut painter, &damage)),
+			Plan::Partial(damage) => Some(self.compose_damaged(&mut painter, damage)),
 		};
 		self.canvas.pixels = pixels;
+		let damage = match &plan {
+			Plan::Full => None,
+			Plan::Partial(damage) => Some(damage),
+		};
+		let damage_only = self.window.as_deref().is_some_and(keeps_contents);
+		renderer.present(
+			&self.frame,
+			damage,
+			&self.canvas.pixels,
+			size.0,
+			bands.as_deref(),
+			damage_only,
+		);
 		self.canvas.remember(&mut self.frame, key);
-		if let Ok(buffer) = surface.buffer_mut() {
-			let damage_only = self.window.as_deref().is_some_and(keeps_contents);
-			present(
-				buffer,
-				&self.canvas.pixels,
-				size.0,
-				bands.as_deref(),
-				damage_only,
-			);
-		}
-		self.surface = Some(surface);
+		self.renderer = Some(renderer);
 	}
 
 	/// Inputs besides the grid's content that change how it is drawn.

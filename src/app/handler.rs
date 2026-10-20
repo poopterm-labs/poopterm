@@ -65,10 +65,10 @@ impl ApplicationHandler<UserEvent> for App {
 			let term = self.active_term();
 			(term.cols, term.rows)
 		};
-		let context = softbuffer::Context::new(window.clone()).expect("softbuffer context");
-		let surface = softbuffer::Surface::new(&context, window.clone()).expect("softbuffer surface");
-		self.surface = Some(surface);
-		self._context = Some(context);
+		self.renderer = Some(
+			renderer::Renderer::new(window.clone(), self.preferences.renderer)
+				.expect("failed to create renderer"),
+		);
 		self.window = Some(window);
 		self.update_chrome_layout(self.scale());
 		let size = PhysicalSize::new(

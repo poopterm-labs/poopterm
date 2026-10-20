@@ -194,6 +194,7 @@ show_new_tab_button = true
 show_settings_button = true
 show_bottom_bar = true
 padding = 0             # Space around the grid in logical pixels, 0–32
+renderer = "auto"       # "auto", "software", or "gpu" (falls back to software)
 wallpaper = "/Users/you/Pictures/terminal.webp" # optional PNG, JPEG, or WebP
 wallpaper_strength = 35 # 0–100; 0 hides the image, 100 shows it at full strength
 shortcut_new_tab = "super+t"
@@ -202,6 +203,10 @@ shortcut_cycle_theme = "ctrl+shift+t"
 shortcut_search = "super+f"
 shortcut_close_tab = "super+w"
 ```
+
+`renderer = "auto"` prefers a supported GPU backend. Both `auto` and an
+explicit `gpu` request fall back to software rendering when GPU startup fails;
+`software` skips GPU probing.
 
 `theme` accepts `darkmode`, `light-mode`, `catppuccin-latte`,
 `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `bark`,
