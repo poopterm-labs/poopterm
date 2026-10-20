@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.36 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Answer repeated marks without making the extras table unique (#50) (term).
+
 ## 26.10.35 "Giga Fly" — 2026-10-20
 
 ### Performance
