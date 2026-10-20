@@ -77,13 +77,11 @@ impl Grid {
 	}
 }
 
-/// `rows.rotate_left(1)` with one move of the row headers; the slice method
+/// `rows.rotate_left(1)`, for a non-empty `rows`, with one move of the row headers; the slice method
 /// copies through a buffer, in three calls, on every line feed.
 #[inline]
 fn rotate_left_one(rows: &mut [Row]) {
-	let Some(last) = rows.len().checked_sub(1) else {
-		return;
-	};
+	let last = rows.len() - 1;
 	let rows = rows.as_mut_ptr();
 	// SAFETY: the first row is read out, the others shift down by one inside
 	// the slice, and the first is written to the slot that frees up, so every
@@ -171,6 +169,17 @@ mod tests {
 		assert_eq!(text(&g), ["bb", "cc", "dd", ".."]);
 		let moved: Vec<_> = g.iter().map(|row| row.as_ptr()).collect();
 		assert_eq!(moved, [buffers[1], buffers[2], buffers[3], buffers[0]]);
+	}
+
+	#[test]
+	fn scrolling_a_region_up_by_one_leaves_the_rows_around_it_in_place() {
+		let mut g = grid(&["aa", "bb", "cc", "dd", "ee"]);
+		let buffers: Vec<_> = g.iter().map(|row| row.as_ptr()).collect();
+		g.scroll_up(1, 3, 1, cell('.'), <[Cell]>::len);
+		assert_eq!(text(&g), ["aa", "cc", "dd", "..", "ee"]);
+		let moved: Vec<_> = g.iter().map(|row| row.as_ptr()).collect();
+		let expected = [buffers[0], buffers[2], buffers[3], buffers[1], buffers[4]];
+		assert_eq!(moved, expected);
 	}
 
 	#[test]
