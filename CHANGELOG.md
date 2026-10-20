@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.49 "Giga Fly" — 2026-10-20
+
+### Fixed
+
+- Leave prompt marks to fish 4 and mark fish 3 command input (#70) (shell).
+
 ## 26.10.48 "Giga Fly" — 2026-10-20
 
 ### Added
