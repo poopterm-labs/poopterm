@@ -5,8 +5,10 @@ from the Unicode Character Database of one release:
     python3 scripts/width_table.py UCD_DIR [OUT]
 
 UCD_DIR holds UnicodeData.txt, EastAsianWidth.txt, DerivedCoreProperties.txt,
-PropList.txt, HangulSyllableType.txt, emoji/emoji-data.txt and
-auxiliary/GraphemeBreakProperty.txt from https://www.unicode.org/Public/.
+HangulSyllableType.txt and auxiliary/GraphemeBreakProperty.txt from
+https://www.unicode.org/Public/. Emoji presentation needs no file of its own:
+every emoji with it is East Asian Wide, except the regional indicators, which
+stay narrow.
 
 Stage 1 of the table gives each block of 128 code points a one-byte block
 number; stage 2 holds each distinct block as 128 two-bit widths, four per
@@ -29,12 +31,11 @@ EXCEPTIONS = {
 }
 
 
-def spans(path, missing=False):
-    """Yields (first, last, value) for each data line of a UCD file, and with
-    `missing`, for its `@missing` default lines too, in file order."""
+def spans(path):
+    """Yields (first, last, value) for each data line of a UCD file. Defaults
+    in `@missing` comments are left out: EastAsianWidth.txt lists every wide
+    range, unassigned ones included."""
     for line in path.read_text(encoding='utf-8').splitlines():
-        if missing:
-            line = line.removeprefix('# @missing:')
         data = line.split('#')[0].strip()
         if data:
             span, value = [field.strip() for field in data.split(';')[:2]]
@@ -43,10 +44,9 @@ def spans(path, missing=False):
 
 
 def values(path):
-    """Each code point's value of the one property a UCD file lists, or None.
-    Data lines come after the defaults they override."""
+    """Each code point's value of the one property a UCD file lists, or None."""
     found = [None] * CODE_POINTS
-    for first, last, value in spans(path, missing=True):
+    for first, last, value in spans(path):
         found[first:last + 1] = [value] * (last + 1 - first)
     return found
 
@@ -61,9 +61,7 @@ def widths(ucd):
     ucd = Path(ucd)
     east_asian = values(ucd / 'EastAsianWidth.txt')
     hangul = values(ucd / 'HangulSyllableType.txt')
-    emoji = having(ucd / 'emoji/emoji-data.txt', 'Emoji_Presentation')
     invisible = having(ucd / 'DerivedCoreProperties.txt', 'Grapheme_Extend', 'Default_Ignorable_Code_Point')
-    regional = having(ucd / 'PropList.txt', 'Regional_Indicator')
     grapheme = values(ucd / 'auxiliary/GraphemeBreakProperty.txt')
     # UnicodeData.txt: the name is the first field, the category the second.
     category = [None] * CODE_POINTS
@@ -79,9 +77,7 @@ def widths(ucd):
         # Hangul leading consonants, even the default-ignorable filler, are wide.
         if c in invisible and hangul[c] != 'L':
             return 0
-        if c in regional:
-            return 1
-        return 2 if east_asian[c] in ('W', 'F') or c in emoji else 1
+        return 2 if east_asian[c] in ('W', 'F') else 1
 
     return [width(c) for c in range(CODE_POINTS)]
 

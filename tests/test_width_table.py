@@ -20,9 +20,7 @@ FILES = {
     'UnicodeData.txt': '',
     'EastAsianWidth.txt': '',
     'DerivedCoreProperties.txt': '',
-    'PropList.txt': '',
     'HangulSyllableType.txt': '',
-    'emoji/emoji-data.txt': '',
     'auxiliary/GraphemeBreakProperty.txt': '',
 }
 
@@ -30,25 +28,22 @@ FILES = {
 UCD = {
     'UnicodeData.txt': '0007;<control>;Cc;0;BN;;;;;N;BELL;;;;\n'
                        '0041;LATIN CAPITAL LETTER A;Lu;0;L;;;;;N;;;;0061;\n',
-    'EastAsianWidth.txt': '# @missing: 0000..10FFFF; N\n'
-                          '# @missing: 3400..4DBF; W\n'
+    'EastAsianWidth.txt': '# @missing: 3400..4DBF; W\n'
                           '1100..115F;W  # Hangul leading consonants\n'
                           '1F1E6..1F1FF;N\n'
+                          '1F600;W\n'
                           'FF01;F\n'
                           '3000;F\n'
                           'A8FA;W\n'
                           '0600;N\n'
-                          '3400;N # overrides the default before\n',
+                          '3402..3404;W\n'
+                          '3403;N # overrides the line before\n',
     'DerivedCoreProperties.txt': '0300..036F    ; Grapheme_Extend # Mn\n'
                                  '0300..036F    ; XID_Continue\n'
                                  '00AD          ; Default_Ignorable_Code_Point\n'
                                  '115F          ; Default_Ignorable_Code_Point\n'
                                  '3000          ; Default_Ignorable_Code_Point\n',
-    'PropList.txt': '1F1E6..1F1FF ; Regional_Indicator\n0041 ; ASCII_Hex_Digit\n',
     'HangulSyllableType.txt': '1100..115F ; L\n1160..11A7 ; V\n11A8..11FF ; T\n',
-    'emoji/emoji-data.txt': '1F1E6..1F1FF ; Emoji_Presentation\n'
-                            '1F600 ; Emoji_Presentation\n'
-                            '2764 ; Emoji\n',
     'auxiliary/GraphemeBreakProperty.txt': '0600..0605 ; Prepend\n0D4E ; Prepend\n',
 }
 
@@ -74,18 +69,17 @@ class Parsing(unittest.TestCase):
             spans = list(table.spans(Path(directory) / 'PropList.txt'))
         self.assertEqual(spans, [(0x41, 0x41, 'Dash'), (0x300, 0x302, 'Other')])
 
-    def test_missing_lines_are_spans_only_when_asked_for(self):
+    def test_missing_defaults_are_comments_like_any_other(self):
         with ucd({'EastAsianWidth.txt': '# @missing: 0000..10FFFF; N\n0041;Na\n'}) as directory:
             path = Path(directory) / 'EastAsianWidth.txt'
             self.assertEqual(list(table.spans(path)), [(0x41, 0x41, 'Na')])
-            self.assertEqual(list(table.spans(path, missing=True))[0], (0, 0x10FFFF, 'N'))
 
-    def test_values_let_later_lines_override_defaults(self):
+    def test_values_let_later_lines_override_earlier_ones(self):
         with ucd(UCD) as directory:
             east_asian = table.values(Path(directory) / 'EastAsianWidth.txt')
         self.assertEqual(
-            [east_asian[c] for c in (0x41, 0x3401, 0x3400, 0x1100, 0xFF01, 0x10FFFF)],
-            ['N', 'W', 'N', 'W', 'F', 'N'],
+            [east_asian[c] for c in (0x41, 0x3401, 0x3402, 0x3403, 0x3404, 0x1100, 0xFF01)],
+            [None, None, 'W', 'N', 'W', 'W', 'F'],
         )
 
     def test_values_leave_unlisted_points_unset(self):
@@ -116,7 +110,7 @@ class Rules(unittest.TestCase):
         self.assertLessEqual(set(self.widths), {0, 1, 2, 3})
 
     def test_unlisted_and_ordinary_points_are_narrow(self):
-        self.assertWidths({0x41: 1, 0x2764: 1, 0x10FFFF: 1, 0x0: 1})
+        self.assertWidths({0x41: 1, 0x10FFFF: 1, 0x0: 1, 0x1F1E6: 1, 0x1F1FF: 1})
 
     def test_controls_and_joining_marks_take_no_cells(self):
         self.assertWidths({0x7: 0, 0x300: 0, 0x36F: 0, 0xAD: 0, 0x0D4E: 0})
@@ -130,14 +124,11 @@ class Rules(unittest.TestCase):
     def test_default_ignorable_beats_east_asian_width(self):
         self.assertWidths({0x3000: 0})
 
-    def test_wide_fullwidth_and_emoji_presentation_take_two_cells(self):
-        self.assertWidths({0xFF01: 2, 0x1F600: 2, 0x3401: 2, 0x4DBF: 2})
+    def test_wide_and_fullwidth_points_take_two_cells(self):
+        self.assertWidths({0xFF01: 2, 0x1F600: 2, 0x3402: 2, 0x3404: 2, 0x3403: 1})
 
-    def test_listed_east_asian_width_overrides_the_default_range(self):
-        self.assertWidths({0x3400: 1, 0x33FF: 1, 0x4DC0: 1})
-
-    def test_regional_indicators_are_narrow_despite_emoji_presentation(self):
-        self.assertWidths({0x1F1E6: 1, 0x1F1FF: 1})
+    def test_missing_defaults_do_not_widen_anything(self):
+        self.assertWidths({0x3400: 1, 0x3401: 1, 0x4DBF: 1})
 
     def test_exceptions_beat_every_property(self):
         self.assertWidths({0x600: 1, 0x605: 0, 0xA8FA: 0, 0x17D8: 3, 0x17A4: 2, 0x2D7F: 1})
