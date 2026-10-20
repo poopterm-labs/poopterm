@@ -104,6 +104,41 @@ one issue per piece (#20–#29); claim one there.
 
 ## Resource management and memory
 
+- **Memory footprint.** Reported at about 400 MB on macOS, staying near
+  140 MB afterwards. Measured on Linux (26.10.55, one tab, 20,000 lines of
+  scrollback): 58 MB idle, 130–230 MB after a flood that fills the history,
+  depending on window width. Repeated floods and clears do not raise it
+  further, so no leak has been found; the memory is retained, not lost.
+  Where it goes, worst first:
+  - *Fonts are read whole onto the heap.* Up to eight symbol fallback fonts
+    of up to 64 MB each (`fonts::load`) plus the main font are copied with
+    `fs::read`. macOS system fonts are large (PingFang, Hiragino, Apple
+    Color Emoji), which likely explains most of the macOS figure. Map font
+    files read-only (`mmap`; `Font` already takes a `Cow<[u8]>`) so they
+    cost shared, evictable page cache instead of private memory, and load
+    fallbacks only when a missing glyph needs them.
+  - *The scrollback ring grows by doubling and copying* (`Scrollback::grow`):
+    during each step the old and new rings are both live, and the capacity
+    is kept after `ESC [3J` or a lower line limit. Grow in fixed-size
+    segments without copying (fits #40), and release the capacity on clear
+    and when the limit shrinks. It costs about 16 bytes per cell of history,
+    per tab; shrinking `Cell` (#41) cuts all of it.
+  - *mimalloc keeps freed pages committed.* With `MIMALLOC_PURGE_DELAY=0`
+    the same flood ends at 83 MB instead of 134 MB. Set purge options at
+    startup, or allocate the few huge buffers (scrollback, frame buffer,
+    image bitmaps) with `mmap` directly so freeing returns them at once.
+    Measure throughput, because eager purging costs page faults.
+  - *Idle baseline.* 35 MB of heap before any output: audit it (fonts, font
+    database, glyph caches, per-tab buffers sized for the largest window).
+  - General Rust techniques to apply where profiles point: `shrink_to_fit`
+    or dropping buffers after spikes (PTY queue, OSC/DCS payloads, kitty
+    transfers), `Box<[T]>` over `Vec<T>` for fixed data, smaller
+    enums and indices (`u32`/`u16` over `usize`), interning repeated
+    strings (hyperlinks, titles), and lazy initialization of rarely used
+    state (`Option<Box<…>>`, `OnceCell`).
+  - Track it: report peak and settled RSS in the benchmark, and test that
+    clearing history releases its memory. Check on macOS (`footprint`,
+    `vmmap`) and Linux (`/proc/<pid>/smaps_rollup`).
 - **cgroups v2 per tab, fully automatic (Linux).** Like Ghostty, put
   each shell in its own cgroup, so a runaway program in one tab cannot
   starve the terminal or the other tabs. The terminal process keeps its
