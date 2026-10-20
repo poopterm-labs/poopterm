@@ -5,11 +5,6 @@
 /// the detection, so this is a load and a test per call.
 #[inline(always)]
 pub(crate) fn has_v3() -> bool {
-	#[cfg(target_arch = "x86_64")]
-	{
-		use std::arch::is_x86_feature_detected as has;
-		has!("avx2") && has!("bmi1") && has!("bmi2") && has!("lzcnt") && has!("fma") && has!("popcnt")
-	}
-	#[cfg(not(target_arch = "x86_64"))]
-	false
+	use std::arch::is_x86_feature_detected as has;
+	has!("avx2") && has!("bmi1") && has!("bmi2") && has!("lzcnt") && has!("fma") && has!("popcnt")
 }
