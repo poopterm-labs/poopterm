@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.46 "Giga Fly" — 2026-10-20
+
+### Added
+
+- Add reverse wraparound and advertise bw (#61) (parser).
+
 ## 26.10.45 "Giga Fly" — 2026-10-20
 
 ### Added
