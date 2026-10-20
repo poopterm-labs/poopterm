@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.52 "Giga Fly" — 2026-10-20
+
+### Added
+
+- Mark continuation prompts with osc 133 k=s (#66) (shell).
+
 ## 26.10.51 "Giga Fly" — 2026-10-20
 
 ### Added
