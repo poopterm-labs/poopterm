@@ -147,3 +147,17 @@ fn marks_leave_cells_unchanged_once_the_extras_table_is_full() {
 		assert_eq!(batched.grid[0][x].extra, link, "column {x}");
 	}
 }
+
+#[test]
+fn line_drawing_covers_the_whole_dec_special_graphics_set() {
+	// The VT100's DEC Special Graphics: 0x5F to 0x7E replace ASCII, the
+	// letters b to e, h and i with symbols for format effectors.
+	let ascii = "_`abcdefghijklmnopqrstuvwxyz{|}~";
+	let drawn = " ◆▒␉␌␍␊°±␤␋┘┐┌└┼⎺⎻─⎼⎽├┤┴┬│≤≥π≠£·";
+	assert_eq!(
+		ascii.chars().map(super::dec_graphic).collect::<String>(),
+		drawn
+	);
+	// The rest of ASCII is unchanged.
+	assert!(('!'..='^').all(|c| super::dec_graphic(c) == c));
+}
