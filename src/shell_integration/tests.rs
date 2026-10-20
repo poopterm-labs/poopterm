@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 /// A shell command in its own session, without a controlling terminal: an
 /// interactive shell (`-i`) opens `/dev/tty` and, from a background process
 /// group, stops on SIGTTIN and hangs the test, as on CI's FreeBSD VM.
-fn shell_command(shell: &str) -> Command {
+pub(super) fn shell_command(shell: &str) -> Command {
 	use std::os::unix::process::CommandExt;
 	unsafe extern "C" {
 		safe fn setsid() -> i32;
@@ -296,12 +296,12 @@ fn bash_injection_loads_profiles_and_hooks_once_and_respects_off() {
 }
 
 /// The command line a hook reported with OSC 133 C, decoded.
-fn reported_command(stdout: &str) -> Option<String> {
+pub(super) fn reported_command(stdout: &str) -> Option<String> {
 	let value = stdout.split("\x1b]133;C;cmdline_url=").nth(1)?;
 	super::command_line::percent_decode(value.split('\x07').next()?)
 }
 
-const COMMAND: &str = "echo 'a;b' \u{e9}\x1b]2;x\x07";
+pub(super) const COMMAND: &str = "echo 'a;b' \u{e9}\x1b]2;x\x07";
 
 #[test]
 fn zsh_reports_command_lines_and_click_to_move() {

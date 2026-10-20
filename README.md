@@ -418,7 +418,9 @@ bundled font keeps its own license, above.
   retains the latest 256 markers and shows the running command or exit status
   in the status bar. Optional hooks are available for zsh, Bash, and fish;
   install them explicitly with the instructions below. The hooks also emit
-  OSC 7 so BSD shells can report their working directory.
+  OSC 7 so BSD shells can report their working directory. Bash 4.4 or later
+  reports the running command from its history, so commands history skips
+  (`ignorespace`, `ignoredups`) show none.
 - **VS Code shell integration:** OSC 633 `A` to `D` mark commands like OSC 133,
   `E` reports the command line, and `P;Cwd=` the working directory. Other
   properties and the nonce are ignored.
