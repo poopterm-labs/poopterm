@@ -5,7 +5,6 @@ use crate::{
 	graphics::kitty::PLACEHOLDER,
 	term::{Cell, NO_EXTRA, Term, attr},
 };
-use unicode_width::UnicodeWidthChar;
 
 impl Term {
 	#[inline(always)]
@@ -15,7 +14,7 @@ impl Term {
 		} else {
 			c
 		};
-		let width = c.width().unwrap_or(0).min(self.cols);
+		let width = crate::width::width(c).min(self.cols);
 		let mut template = self.styled_cell();
 		if c == PLACEHOLDER {
 			// Kitty Unicode placeholders keep the image id as the client set it.
@@ -95,7 +94,7 @@ impl Term {
 		let mut chars = text.chars();
 		while let Some(c) = chars.next() {
 			debug_assert!(c >= ' ' && !('\u{80}'..='\u{9f}').contains(&c));
-			let width = super::utf8::width(c).min(self.cols);
+			let width = crate::width::width(c).min(self.cols);
 			if general || c == PLACEHOLDER {
 				self.apply_print(c);
 				continue;
@@ -136,7 +135,7 @@ impl Term {
 				let Some(next) = chars.next() else {
 					break;
 				};
-				let next_width = super::utf8::width(next).min(cols);
+				let next_width = crate::width::width(next).min(cols);
 				if next_width == 0 || x + next_width > cols || next == PLACEHOLDER {
 					chars = before;
 					break;

@@ -70,6 +70,8 @@ mod tab_style_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod width_tests;
+#[cfg(test)]
 mod window_ops_tests;
 
 use crate::theme::Theme;
