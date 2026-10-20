@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.32 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Validate utf-8 with simd table lookups (#45) (vt).
+
 ## 26.10.31 "Giga Fly" — 2026-10-20
 
 ### Performance
