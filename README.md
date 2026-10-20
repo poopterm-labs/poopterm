@@ -79,6 +79,20 @@ package includes the desktop launcher, application icons, and terminfo entry;
 APT installs required system libraries automatically. The current package is
 built for `amd64` and requires Debian 12 or newer.
 
+### Fedora
+
+Each [release](https://github.com/poopterm-labs/poopterm/releases) also
+carries an RPM package for 64-bit Fedora and related distributions. Download
+it and install it with DNF, which pulls in the display libraries it needs:
+
+```sh
+sudo dnf install ./poopterm-26.10.60-1.x86_64.rpm
+```
+
+It ships the same profile-guided build, desktop launcher, icons and terminfo
+entry as the Debian package. There is no DNF repository yet, so updates are
+installed the same way.
+
 Each package attached to a [release](https://github.com/poopterm-labs/poopterm/releases)
 carries a signed build provenance attestation, which proves that the release
 workflow built it from the tagged commit. Check a downloaded package with the
@@ -537,7 +551,7 @@ Releases are numbered `YY.M.PATCH`. After all checks pass on `main`, CI
 increments the patch, or starts a new month at `YY.M.0` with a new random
 codename. It updates `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md` and the
 Homebrew formula in one commit, pushes it with its tag in a single atomic
-push, then attaches the Debian package to a draft release and publishes it,
+push, then attaches the Debian and RPM packages to a draft release and publishes it,
 so published releases never change. If `main` moved in the meantime, the run
 skips and the newer commit's run releases instead.
 Published tags never move. These commits are pushed with a deploy key, the

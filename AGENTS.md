@@ -26,7 +26,7 @@ cargo test --release -- --ignored --nocapture parser_throughput   # parser bench
 - Linux build deps: `pkg-config libx11-dev libxkbcommon-dev libwayland-dev`.
 - CI (`.github/workflows/ci.yml`) runs fmt, test and clippy (including
   clippy for FreeBSD) on Linux and macOS, a release build on macOS and in the
-  Debian package job, and the tests and a debug build in a FreeBSD VM. All
+  Debian and Fedora package jobs, and the tests and a debug build in a FreeBSD VM. All
   must pass.
 - **Platform-gated code** (`#[cfg(target_os = ...)]`) is not compiled on your
   host. Before committing such changes, check the other targets too:
@@ -205,7 +205,7 @@ a merge.
   atomically pushes the commit and tag only if `main` still matches the
   checked revision: one push per release, so merges cannot race it. If `main`
   moved, the run skips and the newer commit's run releases. Then it builds
-  the Debian package from the tag, attaches it to a draft release and only
+  the Debian and RPM packages from the tag, attaches them to a draft release and only
   then publishes it, so releases can be immutable; a rerun resumes without
   pushing again. The changelog entry is built from
   the Conventional Commits since the last tag (`feat` → Added, `fix` → Fixed,

@@ -112,7 +112,7 @@ paths only a window exercises: input, tabs, the UI and real programs.
 Profiles accumulate under `target/pgo/profiles` until `make pgo-clean`;
 after large code changes, clean and retrain.
 
-Released Debian packages ship the PGO build: the release job runs
+Released Debian and RPM packages ship the PGO build: the release job runs
 `scripts/pgo.sh dist`, which instruments, trains and rebuilds, then puts the
 result at `target/release/poopterm`. If any step fails, it builds a plain
 release binary instead and logs a warning. `make pgo-install` builds and
