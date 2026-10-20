@@ -237,7 +237,10 @@ fn vscode_properties_report_the_directory() {
 	let mut t = terminal();
 	send(&mut t, "\x1b]633;P;Cwd=/usr/lib\x07");
 	assert_eq!(t.cwd, std::path::Path::new("/usr/lib"));
-	send(&mut t, "\x1b]633;P;Cwd=file://host/srv/a%20b\x07");
+	send(&mut t, "\x1b]633;P;Cwd=file://localhost/srv/a%20b\x07");
+	assert_eq!(t.cwd, std::path::Path::new("/srv/a b"));
+	// Another machine's directory is not one here.
+	send(&mut t, "\x1b]633;P;Cwd=file://elsewhere.invalid/opt\x07");
 	assert_eq!(t.cwd, std::path::Path::new("/srv/a b"));
 	// Relative paths, unknown properties and malformed pairs change nothing.
 	for property in ["Cwd=tmp", "IsWindows=True", "Cwd", "Other=/x"] {

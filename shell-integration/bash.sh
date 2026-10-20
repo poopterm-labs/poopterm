@@ -30,7 +30,8 @@ __poopterm_prompt_command() {
 		eval "$__poopterm_original_prompt_command"
 	fi
 	# Clicks in the input line may move the cursor with arrow keys.
-	printf '\033]133;A;cl=line\007\033]7;file://%s\007' "$( __poopterm_escape_path )"
+	# Naming the host keeps ssh sessions' directories apart from local ones.
+	printf '\033]133;A;cl=line\007\033]7;file://%s%s\007' "$HOSTNAME" "$( __poopterm_escape_path )"
 }
 
 # Remote hosts rarely have poopterm's terminfo entry; connect with a common

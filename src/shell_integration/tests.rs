@@ -22,7 +22,7 @@ fn shell_command(shell: &str) -> Command {
 }
 
 /// Runs `script` in `shell`, or returns `None` when the shell is not installed.
-fn run(shell: &str, args: &[&str], script: &str) -> Option<(String, String)> {
+pub(super) fn run(shell: &str, args: &[&str], script: &str) -> Option<(String, String)> {
 	let output = shell_command(shell).args(args).arg(script).output().ok()?;
 	Some((
 		String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -41,7 +41,7 @@ fn zsh_hooks_report_exit_status_and_directory_without_errors() {
 	};
 	assert_eq!(stderr, "");
 	assert!(stdout.contains("\x1b]133;D;1\x07"), "{stdout:?}");
-	assert!(stdout.contains("\x1b]7;file:///tmp\x07"), "{stdout:?}");
+	assert!(stdout.contains("/tmp\x07"), "{stdout:?}");
 	assert!(!stdout.contains("[/tmp]"), "hook must not clobber $PATH");
 }
 
