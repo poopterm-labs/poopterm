@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.51 "Giga Fly" — 2026-10-20
+
+### Added
+
+- Store and draw the SGR 58 underline color (#64) (render).
+
 ## 26.10.50 "Giga Fly" — 2026-10-20
 
 ### Fixed
