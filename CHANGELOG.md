@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.37 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Rotate the screen rows by one in a single move on line feed (#51) (term).
+
 ## 26.10.36 "Giga Fly" — 2026-10-20
 
 ### Performance
