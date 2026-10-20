@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.59 "Giga Fly" — 2026-10-20
+
+### Fixed
+
+- Link musl builds dynamically so winit can load wayland (#79) (build).
+
 ## 26.10.58 "Giga Fly" — 2026-10-20
 
 ### Fixed
