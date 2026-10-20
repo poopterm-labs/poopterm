@@ -21,22 +21,14 @@ impl Term {
 
 	#[inline(always)]
 	fn apply_sgr(&mut self, params: &(impl ParamList + ?Sized)) {
-		// vte stores at most 32 parameters/subparameters in its parser state.
-		// Keep group slices on the stack instead of allocating nested Vecs for
-		// every SGR sequence (which is common in full-screen terminal apps).
-		let mut groups = [None; 32];
-		let mut group_count = 0;
-		for group in params.iter() {
-			groups[group_count] = Some(group);
-			group_count += 1;
-		}
+		let group_count = params.group_count();
 		if group_count == 0 {
 			self.reset_style();
 			return;
 		}
 		let mut i = 0;
 		while i < group_count {
-			let group = groups[i].unwrap_or_default();
+			let group = params.get(i).unwrap_or_default();
 			let Some(&code) = group.first() else {
 				self.reset_style();
 				i += 1;
@@ -59,35 +51,23 @@ impl Term {
 						}
 						_ => (0, None, 0),
 					}
-				} else if let Some(mode_group) = groups.get(i + 1).and_then(|group| *group) {
+				} else if let Some(mode_group) = params.get(i + 1) {
 					let mode = mode_group.first().copied().unwrap_or(0);
 					match mode {
 						5 => (
 							5,
-							groups
+							params
 								.get(i + 2)
-								.and_then(|group| *group)
 								.and_then(|g| g.first())
 								.map(|v| u32::from((*v).min(255))),
 							2,
 						),
 						2 => {
-							let color = groups
+							let color = params
 								.get(i + 2)
-								.and_then(|group| *group)
 								.and_then(|r| r.first())
-								.zip(
-									groups
-										.get(i + 3)
-										.and_then(|group| *group)
-										.and_then(|g| g.first()),
-								)
-								.zip(
-									groups
-										.get(i + 4)
-										.and_then(|group| *group)
-										.and_then(|b| b.first()),
-								)
+								.zip(params.get(i + 3).and_then(|g| g.first()))
+								.zip(params.get(i + 4).and_then(|b| b.first()))
 								.map(|((r, g), b)| rgb_color(*r, *g, *b));
 							(2, color, 4)
 						}

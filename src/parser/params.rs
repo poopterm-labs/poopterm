@@ -8,6 +8,11 @@ pub(crate) trait ParamList {
 		self.iter().nth(index)
 	}
 
+	/// The number of groups.
+	fn group_count(&self) -> usize {
+		self.iter().count()
+	}
+
 	/// Whether the list is empty or a lone 0, which the tokenizer cannot
 	/// tell apart.
 	fn is_default(&self) -> bool {
@@ -24,6 +29,11 @@ impl ParamList for crate::vt::Params {
 	#[inline]
 	fn get(&self, index: usize) -> Option<&[u16]> {
 		self.get(index)
+	}
+
+	#[inline]
+	fn group_count(&self) -> usize {
+		self.group_count()
 	}
 }
 
