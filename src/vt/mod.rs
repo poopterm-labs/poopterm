@@ -12,6 +12,9 @@ mod simd;
 mod strings;
 #[cfg(test)]
 mod tests;
+mod utf8;
+#[cfg(test)]
+mod utf8_tests;
 
 pub(crate) use params::Params;
 
@@ -176,6 +179,10 @@ impl Parser {
 	/// read (`at_end`) is kept for the next one; before a control it is
 	/// malformed.
 	fn text<H: Handler>(&mut self, handler: &mut H, mut run: &[u8], at_end: bool, c1: bool) {
+		if utf8::is_valid(run) {
+			// SAFETY: just validated.
+			return print_valid(handler, unsafe { std::str::from_utf8_unchecked(run) }, c1);
+		}
 		loop {
 			match std::str::from_utf8(run) {
 				Ok(text) => return print_valid(handler, text, c1),

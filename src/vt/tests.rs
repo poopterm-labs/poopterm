@@ -348,6 +348,113 @@ fn matches_vte_on_long_runs_across_vector_boundaries() {
 	check(&stream, &[1, 33, 100, 500]);
 }
 
+/// Long Unicode runs take the SIMD validation path; a defect anywhere in
+/// them must fall back to the same events as vte.
+#[test]
+fn matches_vte_with_defects_anywhere_in_long_unicode_runs() {
+	let run = "Größe ελληνικά кириллица 日本語 😀 ".repeat(3);
+	let defects: [&[u8]; 9] = [
+		b"\xc2\x85",
+		b"\xc2\x9b",
+		b"\xed\xa0\x80",
+		b"\xc0\xaf",
+		b"\xf4\x90\x80\x80",
+		b"\xe2\x94",
+		b"\xff",
+		b"\x80",
+		b"\x1b[31m",
+	];
+	for defect in defects {
+		for at in (0..=run.len()).filter(|&at| run.is_char_boundary(at)) {
+			let mut stream = run.as_bytes()[..at].to_vec();
+			stream.extend_from_slice(defect);
+			stream.extend_from_slice(&run.as_bytes()[at..]);
+			check(&stream, &[]);
+			check(&stream, &[at, at + 1]);
+			// A read ending inside the defect, then everything else.
+			check(&stream, &[at + defect.len() / 2]);
+		}
+	}
+}
+
+#[test]
+fn a_character_cut_by_a_read_inside_a_long_run_prints_once() {
+	let run = "αβγδ€😀".repeat(12);
+	for split in 0..=run.len() {
+		let recorder = ours(run.as_bytes(), &[split]);
+		check(run.as_bytes(), &[split]);
+		let printed: String = recorder
+			.events
+			.iter()
+			.filter_map(|event| match event {
+				Event::Print(text) => Some(text.as_str()),
+				_ => None,
+			})
+			.collect();
+		assert_eq!(printed, run, "split at {split}");
+	}
+}
+
+/// Text and controls in the order the parser reported them.
+fn printed_and_executed(recorder: &Recorder) -> (String, Vec<u8>) {
+	let (mut text, mut controls) = (String::new(), Vec::new());
+	for event in &recorder.events {
+		match event {
+			Event::Print(printed) => text.push_str(printed),
+			Event::Execute(byte) => controls.push(*byte),
+			other => panic!("unexpected {other:?}"),
+		}
+	}
+	(text, controls)
+}
+
+#[test]
+fn every_encoded_c1_control_executes_at_every_block_edge() {
+	let run = "日本語 ελληνικά ".repeat(6);
+	let edges = (0..=run.len()).filter(|&at| run.is_char_boundary(at) && at % 32 < 4);
+	for at in edges {
+		for control in 0x80..=0x9fu32 {
+			let encoded = char::from_u32(control).unwrap().to_string();
+			let stream = [&run[..at], &encoded, &run[at..]].concat();
+			check(stream.as_bytes(), &[]);
+			let (text, controls) = printed_and_executed(&ours(stream.as_bytes(), &[]));
+			assert_eq!(text, run, "U+{control:04X} at {at}");
+			assert_eq!(controls, [control as u8]);
+		}
+	}
+}
+
+#[test]
+fn every_printable_scalar_survives_reads_of_any_size() {
+	let text: String = (0x20..=0x10ffff)
+		.filter_map(char::from_u32)
+		.filter(|ch| !('\u{7f}'..='\u{9f}').contains(ch))
+		.collect();
+	for read in [4093, 65_536] {
+		let splits: Vec<_> = (read..text.len()).step_by(read).collect();
+		let (printed, controls) = printed_and_executed(&ours(text.as_bytes(), &splits));
+		assert!(printed == text, "reads of {read}");
+		assert!(controls.is_empty());
+	}
+}
+
+#[test]
+fn a_defect_after_a_long_valid_prefix_prints_one_replacement() {
+	let prefix = "日本語".repeat(20);
+	for (defect, expected) in [
+		(&b"\xff"[..], "\u{fffd}"),
+		(b"\xed\xa0\xa0", "\u{fffd}\u{fffd}\u{fffd}"),
+		(b"\xe6\x97", "\u{fffd}"),
+		(b"\xf0\x9f\x98", "\u{fffd}"),
+	] {
+		let stream = [prefix.as_bytes(), defect, b"a"].concat();
+		check(&stream, &[]);
+		let (text, controls) = printed_and_executed(&ours(&stream, &[]));
+		assert_eq!(text, format!("{prefix}{expected}a"), "{defect:x?}");
+		assert!(controls.is_empty());
+	}
+}
+
 #[test]
 fn delivers_apc_strings_in_pieces() {
 	let stream = b"a\x1b_Gi=1;AAAA\x1b\\b\x1b_x\x18c";
