@@ -85,6 +85,29 @@ jobs:
             cargo build --locked
             ./target/debug/poopterm --version
 
+  # musl and rustup's static default: the binary must stay dynamically
+  # linked, or winit cannot load the Wayland and X11 libraries.
+  alpine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: alpine:latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install libraries and nightly Rust
+        # No zsh yet: its hooks mis-encode non-ASCII bytes on musl.
+        run: |
+          apk add --no-cache build-base pkgconf libx11-dev libxkbcommon-dev wayland-dev curl bash fish python3 binutils
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+          sh /tmp/rustup.sh -y --default-toolchain nightly --profile minimal
+      - name: Run tests
+        run: . "$HOME/.cargo/env" && cargo test --locked
+      - name: Build and check the binary is dynamically linked
+        run: |
+          . "$HOME/.cargo/env"
+          cargo build --locked
+          readelf -l target/debug/poopterm | grep -q INTERP
+          ./target/debug/poopterm --version
+
   debian-package:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -114,7 +137,7 @@ jobs:
           retention-days: 7
 
   release:
-    needs: [check, freebsd, debian-package]
+    needs: [check, freebsd, alpine, debian-package]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     # Builds the Debian package after the version bump, on the same old
     # glibc as the debian-package job.
