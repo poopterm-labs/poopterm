@@ -38,6 +38,7 @@ mod theme;
 mod ui;
 mod vt;
 mod wallpaper;
+mod width;
 
 use std::{env, error::Error};
 

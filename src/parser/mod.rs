@@ -21,7 +21,6 @@ mod osc_text_size;
 mod params;
 mod print;
 mod sgr;
-mod utf8;
 mod window_ops;
 
 use crate::{

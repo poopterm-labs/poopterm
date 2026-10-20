@@ -1,6 +1,5 @@
 //! Draws scaled text (kitty's OSC 66) over its block of cells, one row of
 //! the block at a time, so rows redraw alone.
-use unicode_width::UnicodeWidthChar;
 
 use super::{glyphs::FontSet, grid::GridView, painter::Painter};
 use crate::term::multicell::Multicell;
@@ -23,7 +22,7 @@ pub(super) fn text_box(part: &Multicell, (cw, ch): (usize, usize)) -> TextBox {
 	let size = part.size;
 	let scale = f32::from(size.scale) * size.fraction();
 	let (cell_w, cell_h) = (cw as f32 * scale, ch as f32 * scale);
-	let text_cells: usize = part.text.chars().map(|c| c.width().unwrap_or(0)).sum();
+	let text_cells: usize = part.text.chars().map(crate::width::width).sum();
 	let free_x = (usize::from(part.columns) * cw) as f32 - text_cells as f32 * cell_w;
 	let free_y = (usize::from(size.scale) * ch) as f32 - cell_h;
 	// The alignment keys place fractionally scaled text only.
@@ -69,7 +68,7 @@ pub(super) fn draw_multicell(
 	// The span of the last character, which marks are centered over.
 	let mut last = (pen, layout.cell_w);
 	for c in part.text.chars() {
-		let width = c.width().unwrap_or(0);
+		let width = crate::width::width(c);
 		if width == 0 && matches!(c, '\u{200d}' | '\u{fe0f}') {
 			continue;
 		}

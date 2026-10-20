@@ -1,6 +1,5 @@
 //! OSC 66, kitty's text sizing protocol: text drawn scaled over blocks of
 //! cells.
-use unicode_width::UnicodeWidthChar;
 
 use crate::term::{
 	Term,
@@ -43,7 +42,7 @@ fn clusters(text: &str) -> Vec<(&str, usize)> {
 	let mut joined = false;
 	for (start, c) in text.char_indices() {
 		let end = start + c.len_utf8();
-		let width = c.width().unwrap_or(0);
+		let width = crate::width::width(c);
 		match clusters.last_mut() {
 			Some(last) if width == 0 || joined => {
 				last.1 = end;

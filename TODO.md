@@ -143,10 +143,12 @@ least as fast.
   It gives us control of read sizes and polling, and drops
   Windows-oriented abstractions we do not use. Must pass CI on Linux, macOS
   and FreeBSD.
-- **`unicode-width` → generated width tables:** a build-time generator from
-  the Unicode data files, emitting a two-level lookup table, combined with
-  the fast ranges in `parser/utf8.rs`. An exhaustive test checks every
-  code point against the crate. Regenerate it for each Unicode release.
+- **`unicode-width` → generated width tables:** done. `scripts/width_table.py`
+  turns the Unicode data files into a two-level table (`src/width.bin`,
+  13.5 KiB) that `src/width.rs` looks up; an exhaustive test checks every
+  code point against the crate, now only a dev-dependency. Regenerate the
+  table for each Unicode release (the script's docstring says how) and bump
+  the oracle with it.
 - **`miniz_oxide` → our own inflate (RFC 1950/1951)** for kitty `o=z` and
   PNG. **Safety and security come first:** this parses untrusted input, so
   no `unsafe` unless it is proven necessary and justified,

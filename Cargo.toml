@@ -12,7 +12,6 @@ codename = "Giga Fly"
 winit = "^0.30"
 softbuffer = "^0.4"
 portable-pty = "^0.9"
-unicode-width = "^0.2"
 miniz_oxide = "^0.9"
 # shm_open/mmap and O_NONBLOCK opens for kitty graphics media.
 libc = "^0.2"
@@ -51,6 +50,8 @@ debug = "full"
 strip = "none"
 
 [dev-dependencies]
+# Oracle for the generated width table (src/width.rs).
+unicode-width = "^0.2"
 # The reference that `vt` and the terminal are tested against.
 vte = "^0.15"
 # The reference that the font engine (`fonts::font`) is tested against.

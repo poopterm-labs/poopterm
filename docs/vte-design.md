@@ -245,11 +245,11 @@ Width choice and dispatch:
   `&str`, removing the per-scalar `utf8::decode` call. On the first invalid
   byte, fall back to the scalar decoder, which emits U+FFFD exactly as
   vte does, then resume vectorized.
-- **Width lookup**: `utf8.rs` already caches common widths; move to a
-  two-level table (`[u8; 0x110000 >> 8]` page index to 256-entry pages of
-  2-bit widths, ~20 KiB) generated from `unicode-width` at build time, so
-  Term no longer calls `UnicodeWidthChar` per scalar. CJK and emoji runs
-  benefit most. Width rules must stay identical to the current ones.
+- **Width lookup**: done. `src/width.rs` reads a two-level table
+  (`[u8; 0x110000 >> 7]` block numbers to 128-entry blocks of 2-bit widths,
+  13.5 KiB) that `scripts/width_table.py` generates from the Unicode data
+  files, so Term no longer calls `UnicodeWidthChar` per scalar. CJK and
+  emoji runs gained about 15%.
 
 ### Chunk boundaries and resumable state
 
@@ -384,8 +384,8 @@ cost does not regress echo.
 - **Where the time really goes**: once parsing is faster, `Term` mutation
   (row writes, scrolling, line feeds on ASCII) may dominate; 200 MB/s may
   need Term work that is out of scope here.
-- **Width table drift**: a generated table must follow the pinned
-  `unicode-width` version; add a test comparing every scalar.
+- **Width table drift**: the generated table must follow the pinned
+  `unicode-width` version; `width::tests` compares every scalar.
 - **Kitty graphics scope**: transmission modes (direct, file, shared
   memory), chunking (`m=1`) and placement are a separate design; the
   parser only promises streaming APC.
