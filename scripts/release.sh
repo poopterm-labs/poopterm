@@ -42,35 +42,35 @@ else
 fi
 # Look the release up first, drafts included (the tag endpoint omits them);
 # API failures must stop publication. State is none, draft or published,
-# then whether this version's package is attached.
+# then whether this version's Debian and RPM packages are attached.
 gh api "repos/${GH_REPO}/releases?per_page=100" > /tmp/poopterm-releases.json
-read -r state attached < <(python3 - "v${version}" "poopterm_${version}-1_" <<'PY'
+read -r state deb rpm < <(python3 - "v${version}" "poopterm_${version}-1_" "poopterm-${version}-1." <<'PY'
 import json, sys
-tag, package = sys.argv[1:]
+tag, *packages = sys.argv[1:]
 release = next((r for r in json.load(open('/tmp/poopterm-releases.json')) if r['tag_name'] == tag), None)
-if release is None:
-    print('none no')
-else:
-    has = any(a['name'].startswith(package) for a in release['assets'])
-    print('draft' if release['draft'] else 'published', 'yes' if has else 'no')
+names = [a['name'] for a in release['assets']] if release else []
+state = 'none' if release is None else 'draft' if release['draft'] else 'published'
+print(state, *('yes' if any(n.startswith(p) for n in names) else 'no' for p in packages))
 PY
 )
 # A rerun of a finished release has nothing left to do.
-if [[ $state == published && $attached == yes ]]; then
+if [[ $state == published && $deb == yes && $rpm == yes ]]; then
   echo "v${version} is already published."
   exit 0
 fi
-if [[ $attached == no ]]; then
-  # Package the release commit itself, so the .deb and the binary in it carry
+if [[ $deb == no || $rpm == no ]]; then
+  # Package the release commit itself, so the packages and the binary in them carry
   # the new version; a failed build stops before the GitHub release exists.
   # Releases ship the PGO build, bolted on Linux when llvm-bolt is
   # installed, or a plain one if training fails.
   bash scripts/pgo.sh dist
   bash scripts/package-deb.sh
+  bash scripts/package-rpm.sh
   shopt -s nullglob
-  packages=(dist/poopterm_"${version}"-1_*.deb)
-  if ((${#packages[@]} != 1)); then
-    echo "expected exactly one Debian package of ${version} in dist/, found ${#packages[@]}" >&2
+  debs=(dist/poopterm_"${version}"-1_*.deb)
+  rpms=(dist/poopterm-"${version}"-1.*.rpm)
+  if ((${#debs[@]} != 1 || ${#rpms[@]} != 1)); then
+    echo "expected exactly one Debian and one RPM package of ${version} in dist/, found ${#debs[@]} and ${#rpms[@]}" >&2
     exit 1
   fi
 fi
@@ -81,8 +81,11 @@ if [[ $state == none ]]; then
   gh release create "v${version}" --draft --verify-tag --title "Poopterm ${version} \"${codename}\"" --notes-file /tmp/poopterm-release-notes.md
 fi
 # The APT feed polls this release asset and republishes it from GitHub Pages.
-if [[ $attached == no ]]; then
-  gh release upload "v${version}" "${packages[0]}" --clobber
+if [[ $deb == no ]]; then
+  gh release upload "v${version}" "${debs[0]}" --clobber
+fi
+if [[ $rpm == no ]]; then
+  gh release upload "v${version}" "${rpms[0]}" --clobber
 fi
 if [[ $state != published ]]; then
   gh release edit "v${version}" --draft=false

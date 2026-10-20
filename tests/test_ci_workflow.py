@@ -106,7 +106,7 @@ class Provenance(unittest.TestCase):
         # built a downloaded package.
         attest = step('Attest the released package')
         self.assertIn('uses: actions/attest-build-provenance@v4', attest)
-        self.assertRegex(attest, r'subject-path: dist/poopterm_\*\.deb\n')
+        self.assertRegex(attest, r'subject-path: \|\n +dist/poopterm_\*\.deb\n +dist/poopterm-\*\.rpm\n')
 
     def test_provenance_is_attested_after_the_release_built_the_package(self):
         release = job('release')
@@ -127,6 +127,38 @@ class Provenance(unittest.TestCase):
         self.assertIn('contents: read', top)
         self.assertNotIn('id-token', top)
         self.assertEqual(WORKFLOW.count('id-token: write'), 1)
+
+
+class FedoraPackage(unittest.TestCase):
+    def test_the_rpm_is_built_installed_and_run_on_fedora(self):
+        fedora = job('fedora-package')
+        self.assertIn('container: registry.fedoraproject.org/fedora:latest', fedora)
+        self.assertIn('cargo build --release --locked', fedora)
+        install = step('Install the RPM package and run it')
+        self.assertLess(fedora.index('bash scripts/package-rpm.sh'), fedora.index('dnf install -y dist/*.rpm'))
+        for check in ['rpm -V poopterm', 'poopterm --version', 'infocmp xterm-poopterm']:
+            self.assertIn(check, install)
+
+    def test_the_packaging_script_tests_run_where_rpmbuild_exists(self):
+        # They skip on the Ubuntu and macOS runners, which lack rpmbuild.
+        setup = step('Install Fedora packaging libraries and nightly Rust')
+        for package in ['rpm-build', 'ncurses', 'cpio', 'python3']:
+            self.assertIn(f' {package} ', setup)
+        self.assertIn('python3 -m unittest tests.test_package_rpm', step('Test the RPM packaging script'))
+
+    def test_the_package_uploads_as_the_rpm_itself_not_a_zip(self):
+        upload = step('Upload RPM package')
+        self.assertRegex(upload, r'archive: false\n')
+        self.assertRegex(upload, r'path: dist/\*\.rpm\n')
+        self.assertRegex(upload, r'if-no-files-found: error\n')
+
+    def test_releases_wait_for_the_fedora_package(self):
+        self.assertIn('needs: [check, freebsd, alpine, debian-package, fedora-package]', job('release'))
+
+    def test_the_release_job_can_build_rpms_on_ubuntu(self):
+        # release.sh packages the RPM from the same PGO binary as the .deb.
+        self.assertRegex(step('Install Linux, Debian and RPM packaging libraries'), r' rpm\n')
+        self.assertIn('bash scripts/package-rpm.sh', (Path(__file__).parents[1] / 'scripts/release.sh').read_text())
 
 
 class FreeBSD(unittest.TestCase):

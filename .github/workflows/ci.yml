@@ -136,11 +136,51 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Builds and installs the RPM on current Fedora. Releases package the
+  # Ubuntu-built PGO binary instead, whose older glibc Fedora also runs.
+  fedora-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: registry.fedoraproject.org/fedora:latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Fedora packaging libraries and nightly Rust
+        run: |
+          dnf install -y gcc pkgconf-pkg-config libX11-devel libxkbcommon-devel wayland-devel rpm-build ncurses cpio python3 curl
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh
+          sh /tmp/rustup.sh -y --default-toolchain nightly --profile minimal
+
+      - name: Build release binary
+        run: . "$HOME/.cargo/env" && cargo build --release --locked
+
+      - name: Test the RPM packaging script
+        run: python3 -m unittest tests.test_package_rpm
+
+      - name: Build RPM package
+        run: bash scripts/package-rpm.sh
+
+      - name: Install the RPM package and run it
+        run: |
+          dnf install -y dist/*.rpm
+          rpm -V poopterm
+          poopterm --version
+          infocmp xterm-poopterm >/dev/null
+
+      # For trying out a pull request's package; releases build their own.
+      - name: Upload RPM package
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: dist/*.rpm
+          if-no-files-found: error
+          retention-days: 7
+
   release:
-    needs: [check, freebsd, alpine, debian-package]
+    needs: [check, freebsd, alpine, debian-package, fedora-package]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    # Builds the Debian package after the version bump, on the same old
-    # glibc as the debian-package job.
+    # Builds the Debian and RPM packages after the version bump, on the same
+    # old glibc as the debian-package job.
     runs-on: ubuntu-22.04
     # The PGO build compiles three times and trains in between.
     timeout-minutes: 60
@@ -159,8 +199,8 @@ jobs:
           # main is protected; this write deploy key is the ruleset's only
           # bypass, so the release commits can land there.
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
-      - name: Install Linux and Debian packaging libraries
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev dpkg-dev ncurses-bin
+      - name: Install Linux, Debian and RPM packaging libraries
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev dpkg-dev ncurses-bin rpm
       - name: Install nightly Rust
         # llvm-tools holds the llvm-profdata that matches rustc's LLVM.
         run: rustup toolchain install nightly --profile minimal --component llvm-tools
@@ -174,10 +214,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: bash scripts/release.sh
-      # Signs which run and commit built the package; verify a download with
-      # `gh attestation verify <file>.deb --repo poopterm-labs/poopterm`.
+      # Signs which run and commit built the packages; verify a download with
+      # `gh attestation verify <file> --repo poopterm-labs/poopterm`.
       - name: Attest the released package
         if: hashFiles('dist/poopterm_*.deb') != ''
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/poopterm_*.deb
+          subject-path: |
+            dist/poopterm_*.deb
+            dist/poopterm-*.rpm

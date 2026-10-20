@@ -52,6 +52,15 @@ echo "package $version" >> "$FAKE_GH_ROOT/build.log"
 echo built > "dist/poopterm_${version}-1_amd64.deb"
 ''')
         package.chmod(0o755)
+        rpm = self.repo / 'scripts/package-rpm.sh'
+        rpm.write_text('''#!/usr/bin/env bash
+set -euo pipefail
+version=${FAKE_RPM_VERSION:-$(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)}
+rm -f dist/poopterm-*.rpm
+echo "rpm $version" >> "$FAKE_GH_ROOT/build.log"
+echo built > "dist/poopterm-${version}-1.x86_64.rpm"
+''')
+        rpm.chmod(0o755)
         self.git('add', '.')
         self.git('commit', '-m', 'Initial checked revision')
         self.sha = self.git('rev-parse', 'HEAD').strip()
@@ -123,8 +132,8 @@ echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_
         self.assertEqual(rerun.returncode, 0)
         self.assertIn('already published', rerun.stdout)
         self.assertEqual((self.root / 'api.log').read_text().count('release create'), 1)
-        self.assertEqual((self.root / 'api.log').read_text().count('release upload'), 1)
-        self.assertEqual(len((self.root / 'build.log').read_text().splitlines()), 2)
+        self.assertEqual((self.root / 'api.log').read_text().count('release upload'), 2)
+        self.assertEqual(len((self.root / 'build.log').read_text().splitlines()), 3)
 
     def test_a_release_without_its_package_gets_it_on_a_rerun(self):
         # Published without its package, as before releases started as
@@ -134,7 +143,7 @@ echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         log = (self.root / 'api.log').read_text()
         self.assertEqual(log.count('release create'), 0)
-        self.assertEqual(log.count('release upload'), 1)
+        self.assertEqual(log.count('release upload'), 2)
 
     def test_release_commits_do_not_start_another_ci_run(self):
         # The deploy key's pushes trigger workflows, unlike GITHUB_TOKEN's;
@@ -188,7 +197,7 @@ echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_
         (self.root / 'immutable').touch()
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.calls(), ['release create', 'release upload', 'release edit'])
+        self.assertEqual(self.calls(), ['release create', 'release upload', 'release upload', 'release edit'])
         log = (self.root / 'api.log').read_text()
         self.assertIn(f'release create v{self.next_version()} --draft', log)
         self.assertIn(f'release edit v{self.next_version()} --draft=false', log)
@@ -204,8 +213,8 @@ echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_
         (self.root / 'api.log').unlink()
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.calls(), ['release upload', 'release edit'])
-        self.assertEqual(self.uploads(), [f'dist/poopterm_{self.next_version()}-1_amd64.deb'])
+        self.assertEqual(self.calls(), ['release upload', 'release upload', 'release edit'])
+        self.assertEqual(self.uploads(), self.packages(self.next_version()))
         self.assertFalse((self.root / 'draft').exists())
 
     def test_a_draft_holding_its_package_is_only_published(self):
@@ -223,7 +232,7 @@ echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn('v0.1.0', (self.root / 'api.log').read_text().split('\n', 1)[1])
-        self.assertEqual(self.calls(), ['release create', 'release upload', 'release edit'])
+        self.assertEqual(self.calls(), ['release create', 'release upload', 'release upload', 'release edit'])
 
     def uploads(self):
         log = (self.root / 'api.log').read_text().splitlines()
@@ -233,9 +242,54 @@ echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         version = self.version.rsplit('.', 1)[0] + '.1'
-        self.assertEqual(self.uploads(), [f'dist/poopterm_{version}-1_amd64.deb'])
+        self.assertEqual(self.uploads(), self.packages(version))
         build = (self.root / 'build.log').read_text().splitlines()
-        self.assertEqual(build, [f'pgo dist {version}', f'package {version}'])
+        self.assertEqual(build, [f'pgo dist {version}', f'package {version}', f'rpm {version}'])
+
+    def packages(self, version):
+        return [f'dist/poopterm_{version}-1_amd64.deb', f'dist/poopterm-{version}-1.x86_64.rpm']
+
+    def test_a_release_holding_only_its_debian_package_gets_the_rpm(self):
+        # Releases before RPMs, or a run that failed between the two uploads.
+        (self.root / 'released').write_text(f'v{self.next_version()}')
+        (self.root / 'draft').touch()
+        (self.root / 'assets').write_text(f'poopterm_{self.next_version()}-1_amd64.deb\n')
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.uploads(), [f'dist/poopterm-{self.next_version()}-1.x86_64.rpm'])
+        self.assertEqual(self.calls(), ['release upload', 'release edit'])
+
+    def test_a_release_holding_only_its_rpm_gets_the_debian_package(self):
+        (self.root / 'released').write_text(f'v{self.next_version()}')
+        (self.root / 'assets').write_text(f'poopterm-{self.next_version()}-1.x86_64.rpm\n')
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('already published', result.stdout)
+        self.assertEqual(self.uploads(), [f'dist/poopterm_{self.next_version()}-1_amd64.deb'])
+
+    def test_a_published_release_needs_both_packages_to_count_as_finished(self):
+        (self.root / 'released').write_text(f'v{self.next_version()}')
+        (self.root / 'assets').write_text(f'poopterm_{self.next_version()}-1_amd64.deb\n'
+                                          f'poopterm-{self.next_version()}-1.x86_64.rpm\n')
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('already published', result.stdout)
+        self.assertEqual(self.uploads(), [])
+        self.assertFalse((self.root / 'build.log').exists())
+
+    def test_another_versions_rpm_is_never_uploaded(self):
+        self.env['FAKE_RPM_VERSION'] = self.version
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('one RPM package', result.stderr)
+        self.assertEqual(self.uploads(), [])
+        self.assertNotIn('release create', (self.root / 'api.log').read_text())
+
+    def test_a_failed_rpm_build_stops_before_the_github_release(self):
+        (self.repo / 'scripts/package-rpm.sh').write_text('#!/bin/sh\nexit 1\n')
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('release create', (self.root / 'api.log').read_text())
 
     def test_a_package_of_another_version_is_never_uploaded(self):
         self.env['FAKE_DEB_VERSION'] = self.version
@@ -252,7 +306,7 @@ echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         version = self.version.rsplit('.', 1)[0] + '.1'
-        self.assertEqual(self.uploads(), [f'dist/poopterm_{version}-1_amd64.deb'])
+        self.assertEqual(self.uploads(), self.packages(version))
         self.assertEqual(len(self.git('tag').splitlines()), 1)
 
     def test_moved_main_skips_every_release_mutation(self):
@@ -276,9 +330,9 @@ echo "pgo $* $(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml)" >> "$FAKE_GH_
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(self.git('tag').splitlines()), 1)
         self.assertEqual((self.root / 'api.log').read_text().count('release create'), 1)
-        self.assertEqual((self.root / 'api.log').read_text().count('release upload'), 1)
+        self.assertEqual((self.root / 'api.log').read_text().count('release upload'), 2)
         version = self.version.rsplit('.', 1)[0] + '.1'
-        self.assertEqual(self.uploads(), [f'dist/poopterm_{version}-1_amd64.deb'])
+        self.assertEqual(self.uploads(), self.packages(version))
 
     def test_a_push_race_cannot_publish_a_tag_or_overwrite_main(self):
         racer = self.root / 'racer'
