@@ -371,4 +371,41 @@ mod tests {
 		let row: String = term.grid[0].iter().map(|c| c.ch).collect();
 		assert_eq!(&row[..4], " abc", "ich1 inserts one blank");
 	}
+
+	#[test]
+	fn memory_lock_and_title_capabilities_take_effect() {
+		if !have("tic") || !have("tput") {
+			return;
+		}
+		use crate::{
+			parser::Parser,
+			term::Term,
+			theme::{Theme, ThemeKind},
+		};
+		let dir = TempDir::new("memory");
+		assert!(compile_into(&dir.0));
+		let tput = |args: &[&str]| {
+			let output = Command::new("tput")
+				.env("TERMINFO", &dir.0)
+				.arg("-T")
+				.arg(NAME)
+				.args(args)
+				.output()
+				.unwrap();
+			assert!(output.status.success(), "{args:?} is advertised");
+			output.stdout
+		};
+		let mut term = Term::new(10, 4, Theme::from_kind(ThemeKind::Poop), "/".into());
+		let mut parser = Parser::new();
+		parser.advance(&mut term, b"\x1b[3H");
+		parser.advance(&mut term, &tput(&["meml"]));
+		assert_eq!(term.scroll_top, 2, "meml locks the lines above the cursor");
+		parser.advance(&mut term, &tput(&["memu"]));
+		assert_eq!(term.scroll_top, 0, "memu unlocks them");
+		assert_eq!(tput(&["TS"]), tput(&["tsl"]), "TS starts a title like tsl");
+		let mut title = tput(&["TS"]);
+		title.extend_from_slice(b"hello\x07");
+		parser.advance(&mut term, &title);
+		assert_eq!(term.title, "hello");
+	}
 }
