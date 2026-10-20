@@ -3,6 +3,7 @@ use super::params::ParamList;
 use crate::term::{CursorShape, Term};
 
 impl Term {
+	#[inline(always)]
 	pub(super) fn apply_csi_dispatch(
 		&mut self,
 		params: &(impl ParamList + ?Sized),

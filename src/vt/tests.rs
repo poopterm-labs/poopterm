@@ -487,3 +487,35 @@ fn oversized_osc_strings_are_dropped() {
 		[Event::Osc(vec![b"0".to_vec(), b"ok".to_vec()], true)]
 	);
 }
+
+/// The x86-64-v3 variant must report exactly the baseline's events,
+/// APC strings included, however the stream is split.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn the_v3_variant_reports_the_same_events_as_the_baseline() {
+	if !crate::cpu::has_v3() {
+		return;
+	}
+	let mut rng = Rng::new(0x3);
+	for _ in 0..5_000 {
+		let mut stream = Vec::new();
+		for _ in 0..1 + rng.below(24) {
+			fragment(&mut rng, &mut stream);
+		}
+		let mut cuts: Vec<usize> = (0..rng.below(4))
+			.map(|_| rng.below(stream.len() + 1))
+			.collect();
+		cuts.sort_unstable();
+		cuts.push(stream.len());
+		let (mut baseline, mut v3) = (Recorder::default(), Recorder::default());
+		let (mut baseline_parser, mut v3_parser) = (Parser::default(), Parser::default());
+		let mut start = 0;
+		for &end in &cuts {
+			baseline_parser.advance_with(&mut baseline, &stream[start..end]);
+			// SAFETY: checked above.
+			unsafe { v3_parser.advance_v3(&mut v3, &stream[start..end]) };
+			start = end;
+		}
+		assert_eq!(v3.events, baseline.events, "cut at {cuts:?}: {stream:?}");
+	}
+}

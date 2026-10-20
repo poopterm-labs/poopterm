@@ -5,6 +5,7 @@ use super::{Handler, MAX_INTERMEDIATES, Parser, State};
 impl Parser {
 	/// Runs the sequence states until a sequence ends or a string starts;
 	/// returns the bytes used.
+	#[inline(always)]
 	pub(super) fn sequence<H: Handler>(&mut self, handler: &mut H, bytes: &[u8]) -> usize {
 		let mut index = 0;
 		while index < bytes.len() {
@@ -238,6 +239,7 @@ impl Parser {
 	}
 
 	/// Ends a CSI sequence, or a DCS header (the payload follows).
+	#[inline(always)]
 	fn final_byte<H: Handler>(&mut self, handler: &mut H, action: u8, dcs: bool) {
 		if self.params.is_full() {
 			self.ignore = true;

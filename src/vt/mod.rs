@@ -116,8 +116,30 @@ impl Parser {
 		}
 	}
 
-	/// Feeds one read of the stream.
-	pub(crate) fn advance<H: Handler>(&mut self, handler: &mut H, mut bytes: &[u8]) {
+	/// Feeds one read of the stream, through the x86-64-v3 variant when the
+	/// CPU has it. The whole state machine and the handler's sequence path
+	/// are inlined into each variant, so they share one dispatch per read.
+	pub(crate) fn advance<H: Handler>(&mut self, handler: &mut H, bytes: &[u8]) {
+		#[cfg(target_arch = "x86_64")]
+		if crate::cpu::has_v3() {
+			// SAFETY: the CPU supports the features.
+			return unsafe { self.advance_v3(handler, bytes) };
+		}
+		self.advance_with(handler, bytes);
+	}
+
+	/// # Safety
+	///
+	/// The CPU must have the features [`crate::cpu::has_v3`] checks.
+	#[cfg(target_arch = "x86_64")]
+	#[target_feature(enable = "avx2,bmi1,bmi2,lzcnt,popcnt,fma")]
+	pub(crate) unsafe fn advance_v3<H: Handler>(&mut self, handler: &mut H, bytes: &[u8]) {
+		self.advance_with(handler, bytes);
+	}
+
+	/// The body of [`Parser::advance`], compiled into each variant.
+	#[inline(always)]
+	pub(crate) fn advance_with<H: Handler>(&mut self, handler: &mut H, mut bytes: &[u8]) {
 		if self.partial_len > 0 {
 			bytes = self.finish_partial(handler, bytes);
 		}
@@ -134,7 +156,7 @@ impl Parser {
 	}
 
 	/// Ground state: text runs and C0 controls, until ESC or the end.
-	#[inline]
+	#[inline(always)]
 	fn ground<H: Handler>(&mut self, handler: &mut H, bytes: &[u8]) -> usize {
 		let mut used = 0;
 		while used < bytes.len() {
@@ -178,6 +200,7 @@ impl Parser {
 	/// executes as a C1 control. An incomplete character at the end of the
 	/// read (`at_end`) is kept for the next one; before a control it is
 	/// malformed.
+	#[inline(always)]
 	fn text<H: Handler>(&mut self, handler: &mut H, mut run: &[u8], at_end: bool, c1: bool) {
 		if utf8::is_valid(run) {
 			// SAFETY: just validated.
@@ -263,7 +286,7 @@ fn utf8_len(lead: u8) -> usize {
 
 /// Prints valid text, executing the C1 controls U+0080..=U+009F in it
 /// unless `c1` says there are none.
-#[inline]
+#[inline(always)]
 fn print_valid<H: Handler>(handler: &mut H, mut text: &str, c1: bool) {
 	while let Some(at) = c1.then(|| c1_position(text.as_bytes())).flatten() {
 		if at > 0 {
