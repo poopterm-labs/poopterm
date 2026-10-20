@@ -333,13 +333,31 @@ impl Term {
 				self.linefeed();
 			}
 			b'\r' => self.cx = 0,
-			0x08 => self.cx = self.cx.saturating_sub(1),
+			0x08 => self.backspace(),
 			b'\t' => {
 				self.cx = (self.cx + 1..self.cols)
 					.find(|&col| self.tab_stops[col])
 					.unwrap_or(self.cols - 1)
 			}
 			_ => {}
+		}
+	}
+}
+
+impl Term {
+	/// BS; with reverse wraparound the first column leads to the end of the
+	/// line above, stopping at the top margin as cursor up does.
+	fn backspace(&mut self) {
+		let top = if self.cy >= self.scroll_top {
+			self.scroll_top
+		} else {
+			0
+		};
+		if self.cx == 0 && self.reverse_wrap && self.auto_wrap && self.cy > top {
+			self.cy -= 1;
+			self.cx = self.cols - 1;
+		} else {
+			self.cx = self.cx.saturating_sub(1);
 		}
 	}
 }
