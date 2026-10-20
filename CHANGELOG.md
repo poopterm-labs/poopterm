@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.56 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Bolt the pgo build on linux (#75) (release).
+
 ## 26.10.55 "Giga Fly" — 2026-10-20
 
 ### Performance
