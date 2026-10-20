@@ -2,8 +2,11 @@
 
 Status: **implemented** in `src/vt` (phases 0–3: tokenizer, differential
 tests, switch-over; vte is now a dev-dependency only). APC delivery for the
-kitty graphics protocol is in place. The text below is the original plan,
-kept for its reasoning; `docs/architecture.md` describes what was built.
+kitty graphics protocol is in place, and so are the later fast paths this
+plan proposed: SIMD UTF-8 validation (`vt/utf8.rs`), the generated width
+table (`src/width.rs`) and narrow multibyte runs printed sixteen bytes at a
+time (`parser/narrow.rs`). The text below is the original plan, kept for
+its reasoning; `docs/architecture.md` describes what was built.
 This document describes how Poopterm will replace the `vte` crate (currently `vte = "^0.15"`) with
 its own batch-oriented, SIMD-accelerated parser, and how to get there in
 small steps that each ship on `main`.
@@ -239,12 +242,11 @@ Width choice and dispatch:
 
 - **ASCII**: unchanged in spirit: `print_ascii(run)` on whatever
   `printable_prefix` returns. Execute C0, continue.
-- **UTF-8**: validate whole runs with a SIMD validator (the
-  lookup-table approach of simdutf / Keiser-Lemire, about 3 shuffles per
-  16 bytes), and stop at controls. Valid runs go to `Term::print_utf8` as
-  `&str`, removing the per-scalar `utf8::decode` call. On the first invalid
-  byte, fall back to the scalar decoder, which emits U+FFFD exactly as
-  vte does, then resume vectorized.
+- **UTF-8**: done. Whole runs are validated with a SIMD validator (the
+  lookup-table approach of Keiser–Lemire, about 3 shuffles per 16 bytes,
+  AVX2 chosen at runtime), stopping at controls; unicode gained about 30%.
+  Valid runs go to `print(&str)`; an invalid run falls back to the scalar
+  path, which emits U+FFFD exactly as vte does.
 - **Width lookup**: done. `src/width.rs` reads a two-level table
   (`[u8; 0x110000 >> 7]` block numbers to 128-entry blocks of 2-bit widths,
   13.5 KiB) that `scripts/width_table.py` generates from the Unicode data
@@ -379,8 +381,10 @@ cost does not regress echo.
   compares against vte fed whole characters (current behavior) or raw
   splits; the former is the plan.
 - **AVX-512 value**: may not pay off for terminal-sized runs; keep only
-  with measurements. Runtime dispatch adds an indirect call per scan, which
-  must be cheaper than the work it saves.
+  with measurements. Runtime dispatch adds a check or an indirect call per
+  scan, which must be cheaper than the work it saves. The UTF-8 validator
+  and cell fills already choose AVX2 at runtime this way; issue #36 tracks
+  doing it for the remaining kernels.
 - **Where the time really goes**: once parsing is faster, `Term` mutation
   (row writes, scrolling, line feeds on ASCII) may dominate; 200 MB/s may
   need Term work that is out of scope here.

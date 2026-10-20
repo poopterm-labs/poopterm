@@ -15,6 +15,19 @@ cargo test -- --nocapture name   # one test with its output
 cargo test --release -- --ignored --nocapture parser_throughput   # benchmark
 ```
 
+Benchmarks are ignored tests, run in release mode with `--ignored
+--nocapture` and their name:
+
+| Benchmark | Measures |
+|-----------|----------|
+| `parser_throughput` (`src/bench`) | Parser and terminal on the benchmark corpus. |
+| `inflate_throughput` (`src/inflate/throughput_bench.rs`) | Our inflate against `miniz_oxide` on image-like and synthetic streams. |
+| `font_engine_speed`, `font_engine_stages` (`src/fonts/font_bench.rs`) | Our rasterizer against fontdue, whole and per stage. |
+| `highlight_rendering_throughput` (`src/app/canvas_pixels.rs`) | Full against partial redraws. |
+
+`installed_fonts_match_fontdue` is ignored too: it compares every font
+installed on the machine, which is slow and differs between machines.
+
 Tests that need an external program (the shell-integration tests run `zsh`
 and `bash`, the D-Bus tests `dbus-daemon`) return early when it is missing, so they pass on minimal CI
 images and run fully on developer machines.
@@ -22,7 +35,9 @@ images and run fully on developer machines.
 ## Where tests go
 
 Unit tests sit at the bottom of the file they test, in a `#[cfg(test)] mod
-tests`. The exceptions are larger suites:
+tests`. Once they outgrow that (files stay under about 400 lines), they move
+to a sibling `name_tests.rs`, or several split by topic, declared at the end
+of the module as `#[cfg(test)] mod name_tests;`. The larger suites:
 
 | Suite | What it covers |
 |-------|----------------|
@@ -33,6 +48,31 @@ tests`. The exceptions are larger suites:
 | `src/app/settings.rs`, `src/ui/*` | Hit-testing and layout as pure functions. |
 | `src/pty/*` | Output queue backpressure and the non-blocking writer (real pipes and threads). |
 | `src/shell_integration.rs` | The shipped zsh/bash hooks, run in real shells. |
+| `src/vt/tests.rs`, `src/vt/utf8_tests.rs` | Tokenizer events against vte; the UTF-8 validator's tables against a scalar model and every variant against `str::from_utf8`. |
+| `src/parser/print_tests.rs`, `narrow_tests.rs`, `cluster_tests.rs` | The printing fast paths against per-character printing. |
+| `src/term/scrollback_tests.rs`, `history_tests.rs`, `fill_tests.rs`, `width_tests.rs` | The scrollback ring; how trimmed history rows are shown, searched and copied; AVX2 fills against the portable fill; widths. |
+| `src/sixel_tests.rs`, `src/sixel_reference_tests.rs` | Sixel decoding and limits, and the flat decoder against the original per-row decoder kept as its oracle. |
+| `src/inflate/*_tests.rs` | Inflate against `miniz_oxide`: round trips, every length and distance, malformed and damaged streams, limits. |
+| `src/fonts/*_tests.rs` | Font parsing and rasterizing against fontdue; malformed fonts. |
+| `src/dbus/*_tests.rs` | The D-Bus wire format and a private `dbus-daemon`. |
+
+## Oracles and mutation checks
+
+Code that replaces a crate or a slow path is tested against it: vte for the
+tokenizer, `unicode-width` for widths, `miniz_oxide` for inflate, fontdue
+for fonts, `str::from_utf8` for UTF-8 validation, the per-character printer
+for the fast printing paths, and the portable code for every SIMD or
+CPU-specific kernel. Random inputs (from the seeded `bench::corpus::Rng`, so
+failures reproduce) find the cases nobody thought of; handwritten cases pin
+the edges (vector widths, buffer ends, limits).
+
+A test that passes the first time proves nothing until it has been seen to
+fail. For code whose tests were written after it (characterization, or a
+test added to meet the 3:1 rule), break the code on purpose (flip a
+comparison, drop a check, shift a bound by one) and run the tests: each
+such mutant must make one fail. A mutant no test catches is either a
+missing test or code that does nothing observable (often a performance-only
+guard), which is worth a comment in the code.
 
 ## Writing emulation tests
 

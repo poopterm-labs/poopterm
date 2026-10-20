@@ -12,9 +12,10 @@ correct. The numbers below are minimums, not finish lines.
 CSI-heavy, cursor movement). 200 MB/s is the floor, not the ceiling: go
 higher wherever that stays safe (bounded memory, no skipped state, output
 identical to the slower path). Measured with `scripts/bench-throughput.py` in a real
-window. Latest i3-N305 numbers are 63–248 MB/s depending on the workload
-(108 overall); emoji, compiler output, Unicode, ls and plain logs are
-furthest below the floor. See [`docs/performance.md`](docs/performance.md).
+window. Headless on the i3-N305 (26.10.42) the workloads run at 113–1023
+MB/s (175 overall); emoji, Unicode, source, shell prompts, cursor motion,
+sixel, kitty PNG, compiler output, CJK and ls are still below the floor
+there, and end to end everything is lower. See [`docs/performance.md`](docs/performance.md).
 
 **Images: as fast as possible** for Sixel and the kitty graphics protocol,
 from first byte to pixels on screen. There is no target to stop at; at least
@@ -23,13 +24,14 @@ match text throughput, within the explicit size limits on untrusted input.
 - **Image benchmark.** Sixel and kitty payloads (raw RGBA, PNG, zlib) are
   in the corpus, so `--benchmark` and `bench-throughput.py` cover them. Still
   missing: full-screen frames and animation, reported in frames per second.
-- **Sixel decoding.** Profile `src/sixel.rs` against that benchmark; candidates
-  are SIMD band decoding, decoding straight into the placement bitmap, and
-  streaming decode instead of buffering the whole DCS.
-- **Kitty image decoding.** Raw RGBA parses at ~1.1 GB/s; PNG at ~115 MB/s
-  spends ~60% inflating and ~20% unfiltering inside the PNG crate. Our own
-  inflate (below) plus a SIMD PNG unfilter are the next steps; the RGBA path
-  could decode base64 straight into pixels instead of through a byte buffer.
+- **Sixel decoding.** Now decoded straight into one flat buffer of final
+  pixels (~150 MB/s headless); remaining candidates are SIMD band decoding
+  and streaming decode instead of buffering the whole DCS.
+- **Kitty image decoding.** Raw RGBA parses at ~1 GB/s and zlib through our
+  own inflate at ~246 MB/s; PNG at ~113 MB/s spends ~60% inflating and ~20%
+  unfiltering inside the PNG crate. Our own PNG decoder (our inflate plus a
+  SIMD unfilter) is the next step; the RGBA path could decode base64
+  straight into pixels instead of through a byte buffer.
 - **Rendering during floods:** frames still write unchanged background pixels,
   competing with parsing for memory bandwidth. Evaluate skipping those pixels
   or lowering internal resolution, retaining a change only with repeatable
