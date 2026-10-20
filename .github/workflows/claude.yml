@@ -1,50 +1,75 @@
 name: Claude Code
 
+# Runs Claude when a maintainer mentions @claude in an issue, a pull request
+# comment, a review, or a review comment on a line of code. Claude reads
+# AGENTS.md (through CLAUDE.md) and works like any contributor: tests first,
+# the 3:1 ratio, Conventional Commits, and pull requests into main.
 on:
   issue_comment:
     types: [created]
   pull_request_review_comment:
     types: [created]
-  issues:
-    types: [opened, assigned]
   pull_request_review:
     types: [submitted]
+  issues:
+    types: [opened, assigned]
+
+permissions:
+  contents: read
+
+# One run per issue or pull request at a time; a later mention waits for it.
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   claude:
+    # Owners, members and collaborators only: anyone can comment on a public
+    # repository, and every run spends the maintainers' Claude usage.
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.review.author_association)) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association))
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       pull-requests: read
       issues: read
+      # Exchanged for the Claude GitHub app's token, which comments and pushes.
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      # Lets Claude read CI results on pull requests.
+      actions: read
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      # Full history: scripts/pr_check.py compares against origin/main.
+      - uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+
+      # The same toolchain as CI, so Claude can run the checks before pushing.
+      - name: Install Linux libraries
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev zsh fish
+
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal --component rustfmt --component clippy
 
       - name: Run Claude Code
-        id: claude
-        uses: anthropics/claude-code-action@v1
+        # Third-party: pinned to a commit; Dependabot updates the pin.
+        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1.0.254
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
-          # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
-
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
-
+          # The checks AGENTS.md asks for, and read-only Git and GitHub.
+          claude_args: >-
+            --allowed-tools
+            "Bash(cargo test *)" "Bash(cargo +nightly test *)" "Bash(cargo clippy *)" "Bash(cargo +nightly clippy *)"
+            "Bash(cargo fmt *)" "Bash(cargo +nightly fmt *)" "Bash(cargo build *)" "Bash(cargo +nightly build *)"
+            "Bash(python3 -m unittest *)" "Bash(python3 scripts/pr_check.py *)"
+            "Bash(git status *)" "Bash(git diff *)" "Bash(git log *)" "Bash(git show *)"
+            "Bash(gh pr view *)" "Bash(gh pr diff *)" "Bash(gh pr checks *)" "Bash(gh run view *)" "Bash(gh issue view *)"
