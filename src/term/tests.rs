@@ -646,6 +646,37 @@ fn cell_bits_compare_like_cells() {
 	}
 }
 
+#[test]
+fn one_segment_of_mixed_widths_stores_each_width_in_the_style() {
+	let mut t = terminal(12, 2);
+	feed(&mut t, "\x1b[1;4;31ma猫b🙂é日".as_bytes());
+	let style = t.grid[0][0];
+	let expected = [
+		('a', 1),
+		('猫', 2),
+		('猫', 0),
+		('b', 1),
+		('🙂', 2),
+		('🙂', 0),
+		('é', 1),
+		('日', 2),
+		('日', 0),
+	];
+	for (x, (ch, width)) in expected.into_iter().enumerate() {
+		let cell = t.grid[0][x];
+		// Right halves of wide characters are spacers without a character.
+		let ch = if width == 0 { Cell::default().ch } else { ch };
+		assert_eq!(cell, Cell { ch, width, ..style }, "column {x}");
+	}
+	assert_ne!(style.fg, terminal(12, 2).grid[0][0].fg, "styled");
+	assert_eq!(
+		t.grid[0][9],
+		terminal(12, 2).grid[0][9],
+		"nothing past the text"
+	);
+	assert_eq!((t.cx, t.last_printed), (9, Some('日')));
+}
+
 /// Feeds the same random streams through the batched `Parser` and through
 /// vte driving `Term` directly (one `print` per character), and requires
 /// identical terminal state. Guards every print fast path.

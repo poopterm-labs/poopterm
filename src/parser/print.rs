@@ -129,10 +129,11 @@ impl Term {
 			}
 			.words();
 			let base = Cell::without_char(spacer);
-			let narrow = Cell::with_width(base, 1);
+			// Built once, so the lane holding the width is not rebuilt per character.
+			let (narrow, wide) = (Cell::with_width(base, 1), Cell::with_width(base, 2));
 			let cells = Cell::words_mut(row);
 			loop {
-				cells[x] = Cell::with_char(Cell::with_width(base, width), c as u32);
+				cells[x] = Cell::with_char(if width == 2 { wide } else { narrow }, c as u32);
 				if width == 2 {
 					cells[x + 1] = spacer;
 				}
