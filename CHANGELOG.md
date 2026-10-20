@@ -1,5 +1,20 @@
 # Changelog
 
+## 26.10.61 "Giga Fly" — 2026-10-20
+
+### Added
+
+- Add an arch linux pkgbuild built and installed in ci (#82) (release).
+
+### Fixed
+
+- Match the pkgbuild to the 26.10.60 release (#84) (release).
+
+### Maintenance
+
+- Add claude code mention and review workflows (#83) (claude).
+- Run opus 5.5 for organization members only (#85) (claude).
+
 ## 26.10.60 "Giga Fly" — 2026-10-20
 
 ### Added
