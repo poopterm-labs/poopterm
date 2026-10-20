@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.31 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Store scrollback as trimmed rows in one ring buffer (#44) (term).
+
 ## 26.10.30 "Giga Fly" — 2026-10-19
 
 ### Maintenance
