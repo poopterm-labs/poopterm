@@ -17,16 +17,37 @@ fn continued_input_start(rendered: &str) -> usize {
 	term.shell.input_start(1)
 }
 
+/// Expands the prompt escapes the bash hooks use: `\e`, `\a`, and the
+/// `\[`/`\]` brackets around non-printing text, which bash drops.
+fn expand_bash_prompt(prompt: &str) -> String {
+	prompt
+		.replace("\\[", "")
+		.replace("\\]", "")
+		.replace("\\e", "\x1b")
+		.replace("\\a", "\x07")
+}
+
+#[test]
+fn bash_prompt_escapes_expand_like_bash() {
+	assert_eq!(
+		expand_bash_prompt("\\[\\e]133;B\\a\\]> "),
+		"\x1b]133;B\x07> "
+	);
+	assert_eq!(expand_bash_prompt("$ "), "$ ");
+}
+
 #[test]
 fn bash_marks_its_continuation_prompt() {
+	// Prints the prompts unexpanded: macOS's bash 3.2 has no ${PS1@P}.
 	let script = concat!(
 		"PS1='$ '; PS2='> '; source shell-integration/bash.sh; ",
-		"p=${PS1@P}; s=${PS2@P}; printf '%s|%s' \"$p\" \"$s\" | tr -d '\\001\\002'"
+		"printf '%s|%s' \"$PS1\" \"$PS2\""
 	);
-	let Some((stdout, stderr)) = run("bash", &["--norc", "-c"], script) else {
+	let Some((raw, stderr)) = run("bash", &["--norc", "-c"], script) else {
 		return;
 	};
 	assert_eq!(stderr, "");
+	let stdout = expand_bash_prompt(&raw);
 	assert!(
 		stdout.contains("\x1b]133;A;k=s\x07> \x1b]133;B\x07"),
 		"{stdout:?}"
