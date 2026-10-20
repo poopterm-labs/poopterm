@@ -204,7 +204,8 @@ impl App {
 	}
 
 	/// A plain click in the line being edited moves the shell's cursor there
-	/// when its prompt asked for that (OSC 133 `cl=`).
+	/// when its prompt asked for that (OSC 133 `cl=`), or reaches the shell
+	/// as a mouse report (`click_events`).
 	fn move_cursor_to_click(&mut self, x: f64, y: f64) {
 		let dragged = self
 			.selection

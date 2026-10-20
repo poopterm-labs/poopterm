@@ -1,4 +1,6 @@
 //! Terminal grid, scrollback, cursor and screen state.
+#[cfg(test)]
+mod click_events_tests;
 pub(crate) mod clipboard;
 #[cfg(test)]
 mod clipboard_tests;

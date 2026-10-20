@@ -17,6 +17,9 @@ impl Term {
 	/// line being edited. Clicks in the prompt go to the input's start,
 	/// clicks past its end just after it.
 	pub(crate) fn prompt_click(&self, row: usize, col: usize) -> Option<Vec<u8>> {
+		if self.shell.click_events != 0 {
+			return self.prompt_click_event(row, col);
+		}
 		if !self.shell.click_move
 			|| self.shell.phase != Phase::Command
 			|| row != self.cy
@@ -46,6 +49,27 @@ impl Term {
 			target,
 			self.application_cursor,
 		))
+	}
+
+	/// The left button's press and release at screen `row`, `col` in SGR
+	/// encoding, for a shell that asked for click events and is showing
+	/// its prompt or reading a command.
+	fn prompt_click_event(&self, row: usize, col: usize) -> Option<Vec<u8>> {
+		if !matches!(self.shell.phase, Phase::Prompt | Phase::Command)
+			|| self.scroll_offset != 0
+			|| self.primary_screen.is_some()
+		{
+			return None;
+		}
+		let absolute = self.history_base + self.scrollback.len() + row;
+		let line = self.shell.prompt_line(absolute)?;
+		let y = if self.shell.click_events == 2 {
+			absolute - line + 1
+		} else {
+			row + 1
+		};
+		let x = col + 1;
+		Some(format!("\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m").into_bytes())
 	}
 
 	/// Text of the most recent finished command's output (from its OSC 133 C
