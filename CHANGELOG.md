@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.53 "Giga Fly" — 2026-10-20
+
+### Performance
+
+- Read sgr groups in place (#72) (parser).
+
 ## 26.10.52 "Giga Fly" — 2026-10-20
 
 ### Added
