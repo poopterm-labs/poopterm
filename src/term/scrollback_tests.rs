@@ -19,6 +19,11 @@ fn row(text: &str, cols: usize) -> Vec<Cell> {
 	cells
 }
 
+/// Pushes a row without a known used end.
+fn push(s: &mut Scrollback, row: &[Cell], pad: Cell, limit: usize) -> (usize, usize) {
+	s.push(row, row.len(), pad, limit)
+}
+
 fn text(cells: &[Cell]) -> String {
 	cells.iter().map(|cell| cell.ch).collect()
 }
@@ -57,10 +62,21 @@ fn trimming_matches_a_scalar_scan_for_every_length_and_position() {
 #[test]
 fn rows_are_stored_without_trailing_padding() {
 	let mut s = Scrollback::default();
-	assert_eq!(s.push(&row("ab", 8), PAD, 10), (0, 2));
-	assert_eq!(s.push(&row("", 8), PAD, 10), (0, 0));
+	assert_eq!(push(&mut s, &row("ab", 8), PAD, 10), (0, 2));
+	assert_eq!(push(&mut s, &row("", 8), PAD, 10), (0, 0));
 	assert_eq!(lines(&s), ["ab", ""]);
 	assert_eq!((s.len(), s.is_empty()), (2, false));
+}
+
+#[test]
+fn only_the_used_cells_are_scanned_and_stored() {
+	let mut s = Scrollback::default();
+	// The caller vouches that cells from `used` on are padding; they are
+	// neither scanned nor stored, even when that is not true.
+	assert_eq!(s.push(&row("abcd", 8), 2, PAD, 10), (0, 2));
+	assert_eq!(s.push(&row("ab", 8), 6, PAD, 10), (0, 2));
+	assert_eq!(s.push(&row("abc", 3), 0, PAD, 10), (0, 0));
+	assert_eq!(lines(&s), ["ab", "ab", ""]);
 }
 
 #[test]
@@ -68,7 +84,7 @@ fn styled_trailing_blanks_are_kept() {
 	let mut s = Scrollback::default();
 	let mut cells = row("a", 4);
 	cells[2].bg = 3;
-	assert_eq!(s.push(&cells, PAD, 10), (0, 3));
+	assert_eq!(push(&mut s, &cells, PAD, 10), (0, 3));
 	assert_eq!(s[0][2].bg, 3);
 	assert_eq!(s[0][1], PAD);
 }
@@ -78,7 +94,7 @@ fn the_line_limit_evicts_the_oldest_rows() {
 	let mut s = Scrollback::default();
 	let evicted: usize = ["a", "b", "c", "d"]
 		.iter()
-		.map(|line| s.push(&row(line, 4), PAD, 2).0)
+		.map(|line| push(&mut s, &row(line, 4), PAD, 2).0)
 		.sum();
 	assert_eq!(evicted, 2);
 	assert_eq!(lines(&s), ["c", "d"]);
@@ -92,7 +108,7 @@ fn the_ring_wraps_without_splitting_rows_and_keeps_every_line_within_the_limit()
 		let line: String = (0..i % 7)
 			.map(|k| char::from(b'a' + ((i + k) % 26) as u8))
 			.collect();
-		s.push(&row(&line, 6), PAD, 9);
+		push(&mut s, &row(&line, 6), PAD, 9);
 		expected.push_back(line.chars().take(6).collect::<String>());
 		if expected.len() > 9 {
 			expected.pop_front();
@@ -105,7 +121,7 @@ fn the_ring_wraps_without_splitting_rows_and_keeps_every_line_within_the_limit()
 fn full_width_rows_fill_the_limit_after_wrapping() {
 	let mut s = Scrollback::default();
 	for i in 0..100 {
-		s.push(&row(&format!("{:05}", i), 5), PAD, 7);
+		push(&mut s, &row(&format!("{:05}", i), 5), PAD, 7);
 	}
 	assert_eq!(s.len(), 7);
 	assert_eq!(s.get(0).map(text).as_deref(), Some("00093"));
@@ -117,16 +133,16 @@ fn full_width_rows_fill_the_limit_after_wrapping() {
 fn draining_the_front_and_clearing_keep_later_pushes_intact() {
 	let mut s = Scrollback::default();
 	for line in ["a", "bb", "ccc"] {
-		s.push(&row(line, 4), PAD, 10);
+		push(&mut s, &row(line, 4), PAD, 10);
 	}
 	s.drain_front(2);
 	assert_eq!(lines(&s), ["ccc"]);
 	s.drain_front(5);
 	assert!(s.is_empty());
-	s.push(&row("d", 4), PAD, 10);
+	push(&mut s, &row("d", 4), PAD, 10);
 	s.clear();
 	assert!(s.is_empty());
-	s.push(&row("e", 4), PAD, 10);
+	push(&mut s, &row("e", 4), PAD, 10);
 	assert_eq!(lines(&s), ["e"]);
 }
 
@@ -134,13 +150,13 @@ fn draining_the_front_and_clearing_keep_later_pushes_intact() {
 fn truncating_columns_shortens_only_longer_rows() {
 	let mut s = Scrollback::default();
 	for line in ["abcdef", "ab"] {
-		s.push(&row(line, 6), PAD, 10);
+		push(&mut s, &row(line, 6), PAD, 10);
 	}
 	s.truncate_cols(3);
 	assert_eq!(lines(&s), ["abc", "ab"]);
 	// Wider rows pushed after a resize still fit in the ring.
 	for _ in 0..30 {
-		s.push(&row("0123456789", 10), PAD, 10);
+		push(&mut s, &row("0123456789", 10), PAD, 10);
 	}
 	assert_eq!(s.len(), 10);
 	assert_eq!(s[9].len(), 10);
@@ -151,7 +167,7 @@ fn recoloring_reaches_every_stored_cell() {
 	let mut s = Scrollback::default();
 	let mut cells = row("ab", 4);
 	cells[3].fg = 9;
-	s.push(&cells, PAD, 10);
+	push(&mut s, &cells, PAD, 10);
 	for cell in s.cells_mut() {
 		cell.fg = 1;
 	}
@@ -161,9 +177,9 @@ fn recoloring_reaches_every_stored_cell() {
 #[test]
 fn clones_are_independent() {
 	let mut s = Scrollback::default();
-	s.push(&row("a", 2), PAD, 4);
+	push(&mut s, &row("a", 2), PAD, 4);
 	let copy = s.clone();
-	s.push(&row("b", 2), PAD, 4);
+	push(&mut s, &row("b", 2), PAD, 4);
 	assert_eq!(lines(&copy), ["a"]);
 	assert_eq!(lines(&s), ["a", "b"]);
 	assert_eq!(s.iter().count(), 2);
@@ -239,7 +255,7 @@ fn random_pushes_resizes_and_drains_match_the_naive_model() {
 							};
 						}
 					}
-					assert_eq!(s.push(&row, PAD, limit), model.push(&row, limit));
+					assert_eq!(push(&mut s, &row, PAD, limit), model.push(&row, limit));
 				}
 			}
 			assert_eq!(s.len(), model.rows.len(), "seed {seed}, step {step}");
@@ -256,11 +272,15 @@ fn growth_keeps_every_row_until_the_line_limit() {
 	let mut s = Scrollback::default();
 	for i in 0..1000 {
 		let line = "x".repeat(i % 50);
-		assert_eq!(s.push(&row(&line, 50), PAD, 1000), (0, i % 50), "row {i}");
+		assert_eq!(
+			push(&mut s, &row(&line, 50), PAD, 1000),
+			(0, i % 50),
+			"row {i}"
+		);
 	}
 	assert_eq!(s.len(), 1000);
 	assert!(s.iter().enumerate().all(|(i, cells)| cells.len() == i % 50));
-	assert_eq!(s.push(&row("last", 50), PAD, 1000), (1, 4));
+	assert_eq!(push(&mut s, &row("last", 50), PAD, 1000), (1, 4));
 	assert_eq!(s[999].len(), 4);
 	assert_eq!(s[0].len(), 1);
 }
@@ -268,17 +288,17 @@ fn growth_keeps_every_row_until_the_line_limit() {
 #[test]
 fn a_limit_of_zero_still_keeps_the_newest_row() {
 	let mut s = Scrollback::default();
-	s.push(&row("a", 3), PAD, 0);
-	assert_eq!(s.push(&row("b", 3), PAD, 0), (1, 1));
+	push(&mut s, &row("a", 3), PAD, 0);
+	assert_eq!(push(&mut s, &row("b", 3), PAD, 0), (1, 1));
 	assert_eq!(lines(&s), ["b"]);
 }
 
 #[test]
 fn blank_rows_take_no_ring_space() {
 	let mut s = Scrollback::default();
-	s.push(&row("keep", 4), PAD, 1000);
+	push(&mut s, &row("keep", 4), PAD, 1000);
 	for _ in 0..500 {
-		s.push(&row("", 4), PAD, 1000);
+		push(&mut s, &row("", 4), PAD, 1000);
 	}
 	assert_eq!(s.len(), 501);
 	assert_eq!(s.get(0).map(text).as_deref(), Some("keep"));
@@ -289,7 +309,7 @@ fn blank_rows_take_no_ring_space() {
 #[should_panic(expected = "scrollback row out of range")]
 fn indexing_past_the_newest_row_panics() {
 	let mut s = Scrollback::default();
-	s.push(&row("a", 2), PAD, 4);
+	push(&mut s, &row("a", 2), PAD, 4);
 	let _ = &s[1];
 }
 
@@ -341,7 +361,7 @@ fn pushed_rows_keep_every_field_through_wraps() {
 			.collect();
 		let mut padded = styled.clone();
 		padded.resize(12, PAD);
-		s.push(&padded, PAD, 40);
+		push(&mut s, &padded, PAD, 40);
 		assert_eq!(&s[s.len() - 1], &styled[..len.min(12)], "row {n}");
 	}
 	assert_eq!(s.len(), 40);

@@ -41,11 +41,14 @@ impl Term {
 	/// after an erase or shift split a character from its spacer.
 	pub(crate) fn repair_wide_rows(&mut self, top: usize, bottom: usize) {
 		for y in top..bottom.min(self.rows) {
-			let row = &mut self.grid[y];
-			for col in 0..row.len() {
-				if (row[col].width == 0 && (col == 0 || row[col - 1].width != 2))
-					|| (row[col].width == 2 && (col + 1 == row.len() || row[col + 1].width != 0))
-				{
+			// Only the used cells can be broken halves: padding is narrow.
+			let used = self.grid.used(y);
+			let Some(first) = (0..used).find(|&col| broken_half(&self.grid[y], col)) else {
+				continue;
+			};
+			let row = self.grid.row_upto(y, used);
+			for col in first..used {
+				if broken_half(row, col) {
 					row[col].ch = ' ';
 					row[col].width = 1;
 				}
@@ -80,9 +83,10 @@ impl Term {
 			self.scroll_bottom = self.rows - 1;
 			self.origin_mode = false;
 			self.wrap_pending = false;
-			let blank = self.blank();
+			let mut alternate = Grid::new(self.cols, self.rows, self.blank());
+			alternate.sync_pad(self.padding());
 			self.primary_screen = Some((
-				std::mem::replace(&mut self.grid, Grid::new(self.cols, self.rows, blank)),
+				std::mem::replace(&mut self.grid, alternate),
 				self.cx,
 				self.cy,
 				self.fg,
@@ -137,7 +141,7 @@ impl Term {
 		if top != 0 || bottom + 1 != self.rows || self.primary_screen.is_some() {
 			self
 				.grid
-				.scroll_up(top, bottom, count, blank, <[Cell]>::len);
+				.scroll_up(top, bottom, count, blank, |row, _| row.len());
 			return;
 		}
 		let pad = self.padding();
@@ -148,13 +152,13 @@ impl Term {
 			history_base,
 			..
 		} = self;
-		grid.scroll_up(top, bottom, count, blank, |row| {
+		grid.scroll_up(top, bottom, count, blank, |row, used| {
 			if *scrollback_limit == 0 {
 				*history_base = history_base.saturating_add(scrollback.len() + 1);
 				scrollback.clear();
 				return row.len();
 			}
-			let (evicted, len) = scrollback.push(row, pad, *scrollback_limit);
+			let (evicted, len) = scrollback.push(row, used, pad, *scrollback_limit);
 			*history_base = history_base.saturating_add(evicted);
 			// Cells after the stored ones are padding, already blank when it is.
 			if pad == blank { len } else { row.len() }
@@ -202,7 +206,13 @@ impl Term {
 			} else {
 				cols
 			};
-			Cell::fill(&mut self.grid[y][start..stop], blank);
+			self.grid.fill(y, start, stop, blank);
 		}
 	}
+}
+
+/// Whether `row[col]` is half of a wide character whose other half is gone.
+fn broken_half(row: &[Cell], col: usize) -> bool {
+	(row[col].width == 0 && (col == 0 || row[col - 1].width != 2))
+		|| (row[col].width == 2 && (col + 1 == row.len() || row[col + 1].width != 0))
 }

@@ -73,10 +73,17 @@ impl Scrollback {
 	}
 
 	/// Appends `row` without its trailing `pad` cells, keeping at most
-	/// `limit` (at least 1) rows. Returns how many old rows were dropped,
-	/// and how many cells were stored.
-	pub(crate) fn push(&mut self, row: &[Cell], pad: Cell, limit: usize) -> (usize, usize) {
-		let len = trimmed_len(row, pad);
+	/// `limit` (at least 1) rows. The caller vouches that the cells from
+	/// `used` on are all `pad`, so they are not scanned. Returns how many
+	/// old rows were dropped, and how many cells were stored.
+	pub(crate) fn push(
+		&mut self,
+		row: &[Cell],
+		used: usize,
+		pad: Cell,
+		limit: usize,
+	) -> (usize, usize) {
+		let len = trimmed_len(&row[..used], pad);
 		let limit = limit.max(1);
 		let evicted = self.lines.len().saturating_sub(limit - 1);
 		self.lines.drain(..evicted);
