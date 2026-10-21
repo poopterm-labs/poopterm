@@ -1,18 +1,11 @@
 {
-  "fill" : "system-light",
+  "fill" : "system-dark",
   "groups" : [
     {
       "layers" : [
         {
-          "image-name" : "icon 2.png",
-          "name" : "icon 2",
-          "position" : {
-            "scale" : 1,
-            "translation-in-points" : [
-              0,
-              0
-            ]
-          }
+          "image-name" : "newpooptermlogo.png",
+          "name" : "newpooptermlogo"
         }
       ],
       "shadow" : {
@@ -26,6 +19,9 @@
     }
   ],
   "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
     "squares" : "shared"
   }
 }
