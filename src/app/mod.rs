@@ -10,6 +10,7 @@ mod mouse;
 mod mouse_tabs;
 mod notifications;
 mod output;
+mod renderer;
 mod repaint;
 mod search;
 mod settings;
@@ -84,8 +85,7 @@ pub(crate) struct App {
 
 	window: Option<Arc<Window>>,
 	reported_title: String,
-	_context: Option<softbuffer::Context<Arc<Window>>>,
-	surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
+	renderer: Option<renderer::Renderer>,
 	settings_window: Option<Arc<Window>>,
 	_settings_context: Option<softbuffer::Context<Arc<Window>>>,
 	settings_surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
@@ -253,10 +253,8 @@ impl App {
 			}
 		}
 
-		if let Some(s) = self.surface.as_mut()
-			&& let (Some(nw), Some(nh)) = (NonZeroU32::new(self.width), NonZeroU32::new(self.height))
-		{
-			let _ = s.resize(nw, nh);
+		if let Some(renderer) = self.renderer.as_mut() {
+			renderer.resize(self.width, self.height);
 		}
 		if let Some(win) = &self.window {
 			win.request_redraw();
@@ -327,8 +325,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
 		proxy,
 		window: None,
 		reported_title: String::new(),
-		_context: None,
-		surface: None,
+		renderer: None,
 		settings_window: None,
 		_settings_context: None,
 		settings_surface: None,

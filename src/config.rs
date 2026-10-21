@@ -8,6 +8,24 @@ use std::{
 
 use crate::theme::ThemeKind;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum RendererPreference {
+	#[default]
+	Auto,
+	Software,
+	Gpu,
+}
+
+impl RendererPreference {
+	fn parse(value: Option<String>) -> Self {
+		match value.as_deref() {
+			Some("software") => Self::Software,
+			Some("gpu") => Self::Gpu,
+			_ => Self::Auto,
+		}
+	}
+}
+
 #[derive(Clone, Copy)]
 pub struct Preferences {
 	pub font_size: usize,
@@ -22,6 +40,7 @@ pub struct Preferences {
 	pub show_bottom_bar: bool,
 	/// Space between the grid and the window edge, in logical pixels.
 	pub padding: usize,
+	pub(crate) renderer: RendererPreference,
 }
 
 impl Default for Preferences {
@@ -38,6 +57,7 @@ impl Default for Preferences {
 			show_settings_button: true,
 			show_bottom_bar: true,
 			padding: 0,
+			renderer: RendererPreference::Auto,
 		}
 	}
 }
@@ -83,6 +103,7 @@ impl Preferences {
 				.and_then(|s| s.parse().ok())
 				.unwrap_or(defaults.padding)
 				.min(32),
+			renderer: RendererPreference::parse(value(text, "renderer")),
 		}
 	}
 	pub fn load() -> Self {
@@ -303,6 +324,55 @@ mod tests {
 		assert_eq!(Preferences::parse("padding = 12").padding, 12);
 		assert_eq!(Preferences::parse("padding = 400").padding, 32);
 		assert_eq!(Preferences::parse("padding = wide").padding, 0);
+	}
+	#[test]
+	fn renderer_defaults_to_auto() {
+		assert_eq!(Preferences::default().renderer, RendererPreference::Auto);
+		assert_eq!(Preferences::parse("").renderer, RendererPreference::Auto);
+		assert_eq!(
+			Preferences::parse("font_size = 20\nshow_tabs = false").renderer,
+			RendererPreference::Auto
+		);
+	}
+	#[test]
+	fn renderer_preference_accepts_all_documented_values() {
+		assert_eq!(
+			Preferences::parse("renderer = \"auto\"").renderer,
+			RendererPreference::Auto
+		);
+		assert_eq!(
+			Preferences::parse("renderer = \"software\"").renderer,
+			RendererPreference::Software
+		);
+		assert_eq!(
+			Preferences::parse("renderer = \"gpu\"").renderer,
+			RendererPreference::Gpu
+		);
+	}
+	#[test]
+	fn renderer_preference_is_compatible_with_plain_and_unknown_values() {
+		assert_eq!(
+			Preferences::parse("renderer = software # old hand-written style").renderer,
+			RendererPreference::Software
+		);
+		assert_eq!(
+			Preferences::parse("renderer = fast").renderer,
+			RendererPreference::Auto
+		);
+		assert_eq!(
+			Preferences::parse("renderer = GPU").renderer,
+			RendererPreference::Auto
+		);
+	}
+	#[test]
+	fn last_renderer_setting_wins_without_affecting_other_preferences() {
+		let preferences = Preferences::parse(
+			"renderer = \"software\"\nfont_size = 22\nrenderer = \"gpu\"\npadding = 7",
+		);
+		assert_eq!(preferences.renderer, RendererPreference::Gpu);
+		assert_eq!(preferences.font_size, 22);
+		assert_eq!(preferences.padding, 7);
+		assert!(preferences.show_tabs);
 	}
 	#[test]
 	fn xdg_variables_must_be_absolute_paths() {

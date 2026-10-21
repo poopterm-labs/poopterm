@@ -1,4 +1,5 @@
 //! Pixel-level drawing helpers shared by the terminal and settings windows.
+pub(crate) mod backend;
 pub(crate) mod blend;
 pub(crate) mod boxdraw;
 pub(crate) mod damage;
@@ -10,3 +11,6 @@ pub(crate) mod images;
 mod multicell;
 pub(crate) mod padding;
 pub(crate) mod painter;
+
+#[cfg(test)]
+mod backend_tests;
