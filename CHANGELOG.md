@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.63 "Giga Fly" — 2026-10-21
+
+### Maintenance
+
+- Add project skills and settings for claude code (#87) (claude).
+
 ## 26.10.62 "Giga Fly" — 2026-10-20
 
 ### Maintenance
