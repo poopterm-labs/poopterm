@@ -2,7 +2,11 @@
 
 Instructions for AI coding agents (any model or tool) and for humans working
 on Poopterm. This file is the single source of truth; `CLAUDE.md` and any
-other agent-specific files only point here.
+other agent-specific files only point here. The Claude Code skills in
+`.claude/skills/` turn these rules into per-task checklists (a change, an
+escape sequence, a benchmark, a crate replacement, a rendering check, a pull
+request to drive); when they disagree with this file, this file wins and the
+skill is fixed.
 
 Poopterm is a software-rendered terminal emulator written in Rust: winit for
 windows, softbuffer for pixels, portable-pty for shells, its own font engine
