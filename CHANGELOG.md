@@ -1,5 +1,16 @@
 # Changelog
 
+## 26.10.64 "Giga Fly" — 2026-10-21
+
+### Added
+
+- Use new poopterm logo (#88) (branding).
+- Add a renderer boundary (#46) (render).
+
+### Maintenance
+
+- Enforce built-in theme contrast (#89) (theme).
+
 ## 26.10.63 "Giga Fly" — 2026-10-21
 
 ### Maintenance
