@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.66 "Giga Fly" — 2026-10-21
+
+### Added
+
+- Add nord and rose pine variants (#91) (theme).
+
 ## 26.10.65 "Giga Fly" — 2026-10-21
 
 ### Maintenance
