@@ -1,0 +1,27 @@
+{
+	"$schema": "https://json.schemastore.org/claude-code-settings.json",
+	"permissions": {
+		"allow": [
+			"Bash(cargo test *)",
+			"Bash(cargo clippy *)",
+			"Bash(cargo fmt *)",
+			"Bash(cargo build *)",
+			"Bash(cargo run --release -- --benchmark *)",
+			"Bash(./target/release/poopterm --benchmark *)",
+			"Bash(./target/release/poopterm --version)",
+			"Bash(rustup target add *)",
+			"Bash(python3 -m unittest *)",
+			"Bash(python3 scripts/pr_check.py *)",
+			"Bash(git status *)",
+			"Bash(git diff *)",
+			"Bash(git log *)",
+			"Bash(git show *)"
+		],
+		"deny": [
+			"Bash(cargo add *)",
+			"Bash(git push --force *)",
+			"Bash(git push -f *)",
+			"Bash(git push origin main *)"
+		]
+	}
+}
