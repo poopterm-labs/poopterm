@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.65 "Giga Fly" — 2026-10-21
+
+### Maintenance
+
+- No need (#90).
+
 ## 26.10.64 "Giga Fly" — 2026-10-21
 
 ### Added
