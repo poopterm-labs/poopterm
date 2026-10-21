@@ -254,5 +254,3 @@ step.
   like the other shortcuts.
 - **Reduced motion.** A setting that pauses kitty animations, following the
   desktop's reduced-motion preference where the platform exposes one.
-- **Contrast check.** A test that measures each built-in theme's foreground
-  and background against WCAG AA (4.5:1), and fixes for the ones that fail.

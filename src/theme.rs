@@ -247,6 +247,58 @@ pub(crate) fn xterm_color(index: u8, palette: [u32; 8]) -> u32 {
 mod tests {
 	use super::*;
 
+	fn relative_luminance(color: u32) -> f64 {
+		let linear_channel = |shift: u32| {
+			let srgb = ((color >> shift) & 0xFF) as f64 / 255.0;
+			if srgb <= 0.04045 {
+				srgb / 12.92
+			} else {
+				((srgb + 0.055) / 1.055).powf(2.4)
+			}
+		};
+
+		0.2126 * linear_channel(16) + 0.7152 * linear_channel(8) + 0.0722 * linear_channel(0)
+	}
+
+	fn contrast_ratio(foreground: u32, background: u32) -> f64 {
+		let foreground = relative_luminance(foreground);
+		let background = relative_luminance(background);
+		(foreground.max(background) + 0.05) / (foreground.min(background) + 0.05)
+	}
+
+	#[test]
+	fn built_in_theme_foreground_background_meet_wcag_aa() {
+		let kinds = [
+			ThemeKind::MacOsDark,
+			ThemeKind::MacOsLight,
+			ThemeKind::CatppuccinLatte,
+			ThemeKind::CatppuccinFrappe,
+			ThemeKind::CatppuccinMacchiato,
+			ThemeKind::CatppuccinMocha,
+			ThemeKind::Bark,
+			ThemeKind::AmoledBlack,
+			ThemeKind::Poop,
+		];
+
+		for kind in kinds {
+			let theme = Theme::from_kind(kind);
+			let ratio = contrast_ratio(theme.fg, theme.bg);
+			assert!(
+				ratio >= 4.5,
+				"{} contrast is {ratio:.2}:1, below WCAG AA's 4.5:1",
+				theme.kind.name()
+			);
+		}
+	}
+
+	#[test]
+	fn contrast_ratio_uses_wcag_relative_luminance() {
+		assert!((contrast_ratio(0x000000, 0xFFFFFF) - 21.0).abs() < f64::EPSILON);
+		assert!(contrast_ratio(0x767676, 0xFFFFFF) >= 4.5);
+		assert!(contrast_ratio(0x777777, 0xFFFFFF) < 4.5);
+		assert!((contrast_ratio(0xFFFFFF, 0x000000) - 21.0).abs() < f64::EPSILON);
+	}
+
 	#[test]
 	fn theme_labels_and_catppuccin_palette_match_expected_values() {
 		assert_eq!(ThemeKind::MacOsDark.name(), "darkmode");
