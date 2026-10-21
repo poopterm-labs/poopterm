@@ -35,6 +35,10 @@ pub(crate) struct Theme {
 pub(crate) enum ThemeKind {
 	MacOsDark,
 	MacOsLight,
+	Nord,
+	RosePine,
+	RosePineMoon,
+	RosePineDawn,
 	CatppuccinLatte,
 	CatppuccinFrappe,
 	CatppuccinMacchiato,
@@ -50,6 +54,10 @@ impl ThemeKind {
 		match value.trim().trim_matches('"').to_ascii_lowercase().as_str() {
 			"darkmode" | "macos" | "mac" | "macos-dark" => Some(Self::MacOsDark),
 			"light-mode" | "light mode" | "macos-light" | "light" => Some(Self::MacOsLight),
+			"nord" => Some(Self::Nord),
+			"rose-pine" | "rosepine" | "rose-pine-main" => Some(Self::RosePine),
+			"rose-pine-moon" => Some(Self::RosePineMoon),
+			"rose-pine-dawn" => Some(Self::RosePineDawn),
 			"catppuccin" | "catppuccin-mocha" => Some(Self::CatppuccinMocha),
 			"catppuccin-latte" => Some(Self::CatppuccinLatte),
 			"catppuccin-frappe" => Some(Self::CatppuccinFrappe),
@@ -65,6 +73,10 @@ impl ThemeKind {
 		match self {
 			Self::MacOsDark => "darkmode",
 			Self::MacOsLight => "light-mode",
+			Self::Nord => "nord",
+			Self::RosePine => "rose-pine",
+			Self::RosePineMoon => "rose-pine-moon",
+			Self::RosePineDawn => "rose-pine-dawn",
 			Self::CatppuccinLatte => "catppuccin-latte",
 			Self::CatppuccinFrappe => "catppuccin-frappe",
 			Self::CatppuccinMacchiato => "catppuccin-macchiato",
@@ -78,7 +90,11 @@ impl ThemeKind {
 	pub(crate) fn next(self) -> Self {
 		match self {
 			Self::MacOsDark => Self::MacOsLight,
-			Self::MacOsLight => Self::CatppuccinLatte,
+			Self::MacOsLight => Self::Nord,
+			Self::Nord => Self::RosePine,
+			Self::RosePine => Self::RosePineMoon,
+			Self::RosePineMoon => Self::RosePineDawn,
+			Self::RosePineDawn => Self::CatppuccinLatte,
 			Self::CatppuccinLatte => Self::CatppuccinFrappe,
 			Self::CatppuccinFrappe => Self::CatppuccinMacchiato,
 			Self::CatppuccinMacchiato => Self::CatppuccinMocha,
@@ -110,6 +126,42 @@ impl Theme {
 				border: 0xD2D2D7,
 				palette: [
 					0x6E6E73, 0xC41E3A, 0x248A3D, 0x9A6700, 0x0066CC, 0x8944AB, 0x007A82, 0x1D1D1F,
+				],
+			},
+			ThemeKind::Nord => Self {
+				kind,
+				fg: 0xD8DEE9,
+				bg: 0x2E3440,
+				border: 0x434C5E,
+				palette: [
+					0x3B4252, 0xBF616A, 0xA3BE8C, 0xEBCB8B, 0x81A1C1, 0xB48EAD, 0x88C0D0, 0xE5E9F0,
+				],
+			},
+			ThemeKind::RosePine => Self {
+				kind,
+				fg: 0xE0DEF4,
+				bg: 0x191724,
+				border: 0x26233A,
+				palette: [
+					0x26233A, 0xEB6F92, 0x31748F, 0xF6C177, 0x9CCFD8, 0xC4A7E7, 0xEBBCBA, 0xE0DEF4,
+				],
+			},
+			ThemeKind::RosePineMoon => Self {
+				kind,
+				fg: 0xE0DEF4,
+				bg: 0x232136,
+				border: 0x393552,
+				palette: [
+					0x393552, 0xEB6F92, 0x3E8FB0, 0xF6C177, 0x9CCFD8, 0xC4A7E7, 0xEA9A97, 0xE0DEF4,
+				],
+			},
+			ThemeKind::RosePineDawn => Self {
+				kind,
+				fg: 0x464261,
+				bg: 0xFAF4ED,
+				border: 0xF2E9E1,
+				palette: [
+					0xF2E9E1, 0xB4637A, 0x286983, 0xEA9D34, 0x56949F, 0x907AA9, 0xD7827E, 0x464261,
 				],
 			},
 			ThemeKind::CatppuccinLatte => Self {
@@ -256,7 +308,6 @@ mod tests {
 				((srgb + 0.055) / 1.055).powf(2.4)
 			}
 		};
-
 		0.2126 * linear_channel(16) + 0.7152 * linear_channel(8) + 0.0722 * linear_channel(0)
 	}
 
@@ -271,6 +322,10 @@ mod tests {
 		let kinds = [
 			ThemeKind::MacOsDark,
 			ThemeKind::MacOsLight,
+			ThemeKind::Nord,
+			ThemeKind::RosePine,
+			ThemeKind::RosePineMoon,
+			ThemeKind::RosePineDawn,
 			ThemeKind::CatppuccinLatte,
 			ThemeKind::CatppuccinFrappe,
 			ThemeKind::CatppuccinMacchiato,
@@ -292,11 +347,158 @@ mod tests {
 	}
 
 	#[test]
+	fn nord_and_rose_pine_variants_match_their_palettes() {
+		let variants = [
+			(
+				ThemeKind::Nord,
+				"nord",
+				0xD8DEE9,
+				0x2E3440,
+				0x434C5E,
+				[
+					0x3B4252, 0xBF616A, 0xA3BE8C, 0xEBCB8B, 0x81A1C1, 0xB48EAD, 0x88C0D0, 0xE5E9F0,
+				],
+			),
+			(
+				ThemeKind::RosePine,
+				"rose-pine",
+				0xE0DEF4,
+				0x191724,
+				0x26233A,
+				[
+					0x26233A, 0xEB6F92, 0x31748F, 0xF6C177, 0x9CCFD8, 0xC4A7E7, 0xEBBCBA, 0xE0DEF4,
+				],
+			),
+			(
+				ThemeKind::RosePineMoon,
+				"rose-pine-moon",
+				0xE0DEF4,
+				0x232136,
+				0x393552,
+				[
+					0x393552, 0xEB6F92, 0x3E8FB0, 0xF6C177, 0x9CCFD8, 0xC4A7E7, 0xEA9A97, 0xE0DEF4,
+				],
+			),
+			(
+				ThemeKind::RosePineDawn,
+				"rose-pine-dawn",
+				0x464261,
+				0xFAF4ED,
+				0xF2E9E1,
+				[
+					0xF2E9E1, 0xB4637A, 0x286983, 0xEA9D34, 0x56949F, 0x907AA9, 0xD7827E, 0x464261,
+				],
+			),
+		];
+
+		for (kind, name, fg, bg, border, palette) in variants {
+			let theme = Theme::from_kind(kind);
+			assert_eq!(theme.kind, kind);
+			assert_eq!(kind.name(), name);
+			assert_eq!(ThemeKind::parse(name), Some(kind));
+			assert_eq!((theme.fg, theme.bg, theme.border), (fg, bg, border));
+			assert_eq!(theme.palette, palette);
+		}
+	}
+
+	#[test]
+	fn canonical_theme_config_names_round_trip() {
+		let themes = [
+			(ThemeKind::MacOsDark, "darkmode"),
+			(ThemeKind::MacOsLight, "light-mode"),
+			(ThemeKind::Nord, "nord"),
+			(ThemeKind::RosePine, "rose-pine"),
+			(ThemeKind::RosePineMoon, "rose-pine-moon"),
+			(ThemeKind::RosePineDawn, "rose-pine-dawn"),
+			(ThemeKind::CatppuccinLatte, "catppuccin-latte"),
+			(ThemeKind::CatppuccinFrappe, "catppuccin-frappe"),
+			(ThemeKind::CatppuccinMacchiato, "catppuccin-macchiato"),
+			(ThemeKind::CatppuccinMocha, "catppuccin-mocha"),
+			(ThemeKind::Bark, "bark"),
+			(ThemeKind::AmoledBlack, "amoled-black"),
+			(ThemeKind::Poop, "poop"),
+			(ThemeKind::Custom, "custom"),
+		];
+		for (kind, name) in themes {
+			assert_eq!(kind.name(), name);
+			assert_eq!(ThemeKind::parse(name), Some(kind));
+		}
+	}
+
+	#[test]
+	fn next_cycles_through_nord_and_every_rose_pine_variant() {
+		assert_eq!(ThemeKind::MacOsLight.next(), ThemeKind::Nord);
+		assert_eq!(ThemeKind::Nord.next(), ThemeKind::RosePine);
+		assert_eq!(ThemeKind::RosePine.next(), ThemeKind::RosePineMoon);
+		assert_eq!(ThemeKind::RosePineMoon.next(), ThemeKind::RosePineDawn);
+		assert_eq!(ThemeKind::RosePineDawn.next(), ThemeKind::CatppuccinLatte);
+		assert_eq!(ThemeKind::Poop.next(), ThemeKind::MacOsDark);
+		assert_eq!(ThemeKind::Custom.next(), ThemeKind::MacOsDark);
+	}
+
+	#[test]
+	fn theme_cycle_visits_every_builtin_theme_in_order_and_wraps() {
+		let themes = [
+			ThemeKind::MacOsDark,
+			ThemeKind::MacOsLight,
+			ThemeKind::Nord,
+			ThemeKind::RosePine,
+			ThemeKind::RosePineMoon,
+			ThemeKind::RosePineDawn,
+			ThemeKind::CatppuccinLatte,
+			ThemeKind::CatppuccinFrappe,
+			ThemeKind::CatppuccinMacchiato,
+			ThemeKind::CatppuccinMocha,
+			ThemeKind::Bark,
+			ThemeKind::AmoledBlack,
+			ThemeKind::Poop,
+		];
+		for (index, theme) in themes.iter().enumerate() {
+			assert_eq!(theme.next(), themes[(index + 1) % themes.len()]);
+		}
+	}
+
+	#[test]
 	fn contrast_ratio_uses_wcag_relative_luminance() {
 		assert!((contrast_ratio(0x000000, 0xFFFFFF) - 21.0).abs() < f64::EPSILON);
+		assert!((contrast_ratio(0xFFFFFF, 0x000000) - 21.0).abs() < f64::EPSILON);
+		assert!((contrast_ratio(0x000000, 0x000000) - 1.0).abs() < f64::EPSILON);
 		assert!(contrast_ratio(0x767676, 0xFFFFFF) >= 4.5);
 		assert!(contrast_ratio(0x777777, 0xFFFFFF) < 4.5);
-		assert!((contrast_ratio(0xFFFFFF, 0x000000) - 21.0).abs() < f64::EPSILON);
+	}
+
+	#[test]
+	fn rose_pine_keeps_its_legacy_config_name() {
+		assert_eq!(ThemeKind::parse("rosepine"), Some(ThemeKind::RosePine));
+		assert_eq!(ThemeKind::parse("ROSE-PINE"), Some(ThemeKind::RosePine));
+		assert_eq!(ThemeKind::parse(" \"NORD\" "), Some(ThemeKind::Nord));
+		assert_eq!(
+			ThemeKind::parse(" \"ROSE-PINE-MAIN\" "),
+			Some(ThemeKind::RosePine)
+		);
+		assert_eq!(
+			ThemeKind::parse(" \"ROSE-PINE-MOON\" "),
+			Some(ThemeKind::RosePineMoon)
+		);
+		assert_eq!(
+			ThemeKind::parse(" \"ROSE-PINE-DAWN\" "),
+			Some(ThemeKind::RosePineDawn)
+		);
+		assert_eq!(
+			ThemeKind::parse("rose-pine-moon"),
+			Some(ThemeKind::RosePineMoon)
+		);
+		assert_eq!(
+			ThemeKind::parse("rose-pine-dawn"),
+			Some(ThemeKind::RosePineDawn)
+		);
+	}
+
+	#[test]
+	fn unknown_theme_and_rose_pine_names_are_rejected() {
+		for name in ["nord-dark", "rose-pine-sunrise", "rose-pine-dusk"] {
+			assert_eq!(ThemeKind::parse(name), None);
+		}
 	}
 
 	#[test]

@@ -1,6 +1,6 @@
 # poopterm 💩
 
-Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it handles real-world text output at 63–248 MB/s end to end (108 MB/s overall, images included) on a low-power laptop CPU (see [performance](docs/performance.md)). It opens your default shell in a native window, with tabs, clipboard support, and nine built-in color themes. Terminal compatibility is growing and is not yet a complete xterm implementation.
+Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it handles real-world text output at 63–248 MB/s end to end (108 MB/s overall, images included) on a low-power laptop CPU (see [performance](docs/performance.md)). It opens your default shell in a native window, with tabs, clipboard support, and thirteen built-in color themes. Terminal compatibility is growing and is not yet a complete xterm implementation.
 
 ![Poopterm app icon](assets/icon.png)
 
@@ -25,7 +25,7 @@ Poopterm is a lightweight, high-throughput terminal emulator written in Rust: it
   and Unicode placeholders) within explicit memory limits, and tracks OSC 133
   shell markers.
 - Supports semicolon/colon TrueColor, DEC line drawing, and additional text styles.
-- Includes Dark Mode, Light Mode, all four Catppuccin flavors, Bark, AMOLED Black, signature Poop, and a configurable Custom theme.
+- Includes Dark Mode, Light Mode, Nord, all three Rosé Pine variants, all four Catppuccin flavors, Bark, AMOLED Black, signature Poop, and a configurable Custom theme.
 - Includes an **About poopterm** page in Settings.
 - Supports PNG, JPEG, and WebP terminal wallpapers with adjustable strength in Settings.
 - Lets macOS users adjust main-window opacity from Settings.
@@ -164,11 +164,12 @@ pkg install rust pkgconf xorg libX11 libxkbcommon wayland
 
 ## Themes
 
-Poopterm includes Dark Mode and Light Mode, Catppuccin Latte, Frappé, Macchiato,
-Mocha, Bark, AMOLED Black, and signature Poop themes. Rosé Pine has been removed
-for now. Choose a theme in **Settings** or press **Ctrl+Shift+T** to cycle
-through them. The selection is saved to a config file and restored on the next
-launch. AMOLED Black uses a pure black background with warm gold accents.
+Poopterm includes Dark Mode, Light Mode, the official Nord palette, all three
+Rosé Pine variants (Main, Moon, Dawn), all four Catppuccin flavors, Bark, AMOLED
+Black, and signature Poop themes. Choose a theme in **Settings** or press
+**Ctrl+Shift+T** to cycle through them. The selection is saved to a config file
+and restored on the next launch. AMOLED Black uses a pure black background with
+warm gold accents.
 
 The default config path is `~/Library/Application Support/poopterm/config.toml`
 on macOS and `~/.config/poopterm/config.toml` on Linux and FreeBSD (or
@@ -194,7 +195,6 @@ show_new_tab_button = true
 show_settings_button = true
 show_bottom_bar = true
 padding = 0             # Space around the grid in logical pixels, 0–32
-renderer = "auto"       # "auto", "software", or "gpu" (falls back to software)
 wallpaper = "/Users/you/Pictures/terminal.webp" # optional PNG, JPEG, or WebP
 wallpaper_strength = 35 # 0–100; 0 hides the image, 100 shows it at full strength
 shortcut_new_tab = "super+t"
@@ -208,7 +208,8 @@ shortcut_close_tab = "super+w"
 explicit `gpu` request fall back to software rendering when GPU startup fails;
 `software` skips GPU probing.
 
-`theme` accepts `darkmode`, `light-mode`, `catppuccin-latte`,
+`theme` accepts `darkmode`, `light-mode`, `nord`, `rose-pine` (or the legacy
+`rosepine` alias), `rose-pine-moon`, `rose-pine-dawn`, `catppuccin-latte`,
 `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `bark`,
 `amoled-black`, `poop`, or `custom`. The custom theme starts from the Poop
 palette and accepts optional six-digit RGB overrides. Color keys can also
@@ -431,9 +432,10 @@ WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
 FITNESS FOR A PARTICULAR PURPOSE. Earlier releases were published under the
 MIT License.
 
-Copyright © 2026 poopware-labs and contributors. Third-party notices (the
-Catppuccin palette) are in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES); the
-bundled font keeps its own license, above.
+Copyright © 2026 poopware-labs and contributors. Third-party palette notices
+(Catppuccin, Nord, and Rosé Pine) are in
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES); the bundled font keeps its own
+license, above.
 
 ## Modern terminal protocols
 
