@@ -1,5 +1,11 @@
 # Changelog
 
+## 26.10.67 "Giga Fly" — 2026-10-21
+
+### Maintenance
+
+- Update dependencies (#92) (deps).
+
 ## 26.10.66 "Giga Fly" — 2026-10-21
 
 ### Added
