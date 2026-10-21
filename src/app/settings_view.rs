@@ -42,9 +42,13 @@ pub(super) const MIN_SIZE: (usize, usize) = (680, 600);
 pub(super) const ROW_HEIGHT: usize = 40;
 
 /// Themes in the order the Settings picker cycles through them.
-pub(super) const THEMES: [ThemeKind; 10] = [
+pub(super) const THEMES: [ThemeKind; 14] = [
 	ThemeKind::MacOsDark,
 	ThemeKind::MacOsLight,
+	ThemeKind::Nord,
+	ThemeKind::RosePine,
+	ThemeKind::RosePineMoon,
+	ThemeKind::RosePineDawn,
 	ThemeKind::CatppuccinLatte,
 	ThemeKind::CatppuccinFrappe,
 	ThemeKind::CatppuccinMacchiato,
@@ -68,6 +72,10 @@ fn theme_label(kind: ThemeKind) -> String {
 	match kind {
 		ThemeKind::MacOsDark => "Dark Mode".to_owned(),
 		ThemeKind::MacOsLight => "Light Mode".to_owned(),
+		ThemeKind::Nord => "Nord".to_owned(),
+		ThemeKind::RosePine => "Rosé Pine".to_owned(),
+		ThemeKind::RosePineMoon => "Rosé Pine Moon".to_owned(),
+		ThemeKind::RosePineDawn => "Rosé Pine Dawn".to_owned(),
 		ThemeKind::Bark => "Bark".to_owned(),
 		ThemeKind::AmoledBlack => "AMOLED Black".to_owned(),
 		ThemeKind::Custom => "Custom".to_owned(),
@@ -337,6 +345,51 @@ fn compose_main_settings(
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn theme_picker_includes_nord_and_every_rose_pine_variant() {
+		assert_eq!(THEMES.len(), 14);
+		assert_eq!(THEMES[2], ThemeKind::Nord);
+		assert_eq!(THEMES[3], ThemeKind::RosePine);
+		assert_eq!(THEMES[4], ThemeKind::RosePineMoon);
+		assert_eq!(THEMES[5], ThemeKind::RosePineDawn);
+		assert_eq!(theme_label(ThemeKind::Nord), "Nord");
+		assert_eq!(theme_label(ThemeKind::RosePine), "Rosé Pine");
+		assert_eq!(theme_label(ThemeKind::RosePineMoon), "Rosé Pine Moon");
+		assert_eq!(theme_label(ThemeKind::RosePineDawn), "Rosé Pine Dawn");
+		assert_eq!(step_theme(ThemeKind::MacOsLight, 1), ThemeKind::Nord);
+		assert_eq!(step_theme(ThemeKind::Nord, 1), ThemeKind::RosePine);
+		assert_eq!(step_theme(ThemeKind::RosePine, 1), ThemeKind::RosePineMoon);
+		assert_eq!(
+			step_theme(ThemeKind::RosePineMoon, 1),
+			ThemeKind::RosePineDawn
+		);
+		assert_eq!(
+			step_theme(ThemeKind::RosePineDawn, 1),
+			ThemeKind::CatppuccinLatte
+		);
+	}
+
+	#[test]
+	fn theme_picker_steps_back_and_forth_through_new_variants() {
+		assert_eq!(step_theme(ThemeKind::Nord, -1), ThemeKind::MacOsLight);
+		assert_eq!(step_theme(ThemeKind::Nord, 1), ThemeKind::RosePine);
+		assert_eq!(step_theme(ThemeKind::RosePine, -1), ThemeKind::Nord);
+		assert_eq!(step_theme(ThemeKind::RosePine, 1), ThemeKind::RosePineMoon);
+		assert_eq!(step_theme(ThemeKind::RosePineMoon, -1), ThemeKind::RosePine);
+		assert_eq!(
+			step_theme(ThemeKind::RosePineMoon, 1),
+			ThemeKind::RosePineDawn
+		);
+		assert_eq!(
+			step_theme(ThemeKind::RosePineDawn, -1),
+			ThemeKind::RosePineMoon
+		);
+		assert_eq!(
+			step_theme(ThemeKind::RosePineDawn, 1),
+			ThemeKind::CatppuccinLatte
+		);
+	}
 
 	#[test]
 	fn theme_picker_wraps_in_both_directions() {
