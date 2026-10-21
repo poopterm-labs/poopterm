@@ -32,10 +32,11 @@ to fix, not a design decision.
 - **Text size.** `font_size` goes from 10 to 32 logical pixels and follows
   the display scale factor, so HiDPI and desktop scaling enlarge it further.
   Any installed font can be chosen in Settings → Fonts.
-- **Contrast and color.** Light and dark themes are built in, AMOLED Black
-  uses pure black, and the `custom` theme or color keys override any color,
-  so you can build a high-contrast palette (see [Themes](README.md#themes)).
-  Programs can also change the palette through OSC 4, 10, 11 and 12.
+- **Contrast and color.** Every built-in theme's default text foreground and
+  background meet WCAG AA contrast (4.5:1). AMOLED Black uses pure black,
+  and the `custom` theme or color keys override any color, so you can build
+  a high-contrast palette (see [Themes](README.md#themes)). Programs can also
+  change the palette through OSC 4, 10, 11 and 12.
 - **No blinking.** Blinking cursor shapes (DECSCUSR) and blinking text
   (SGR 5) are drawn steady.
 - **Input methods.** Text committed by an input method (IME) is sent to the
@@ -50,7 +51,6 @@ to fix, not a design decision.
 | Some Settings controls (toggles, font size, scrollback, wallpaper) need a mouse. | Every one is also a `config.toml` key; edit the file and restart. |
 | There is no shortcut to zoom the font in or out. | Change `font_size` in Settings or `config.toml`. |
 | Kitty graphics animations play with no way to pause them, and there is no reduced-motion setting. | They only play when a program sends them; avoid such programs or disable their images. |
-| Built-in themes have not all been measured against the contrast goal. | Use Dark Mode, Light Mode or AMOLED Black, or a `custom` palette. |
 
 ## Supported environments
 
